@@ -9,3 +9,4 @@ Roadmap:
 - Data loader and application module
 - Processor module
 - Subsequent model class modules
+- Tests
