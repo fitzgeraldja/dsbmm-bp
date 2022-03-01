@@ -4,7 +4,7 @@ Model dynamic networks with metadata using dynamic SBMs, with parameters inferre
 To implement purely in Python, with relatively high performance and parallelisation through use of [Numba](https://numba.pydata.org/).
 
 Roadmap:
-- Simulation module
+- [DONE] Simulation module
 - Base model class module
 - Data loader and application module
 - Processor module
