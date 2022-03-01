@@ -192,8 +192,10 @@ class BPBase:
             pass 
         elif mode=='partial': 
             # initialise by partly planted partition - others left random 
+            pass
         elif mode=='planted': 
             # initialise by given partition 
+            pass
              
         pass
     
