@@ -14,4 +14,4 @@ jobs:
       - name: Install Black with jupyter functionality
         run: pip install black[jupyter]
       - name: Run black --check .
-        run: black --check .
+        run: black .
