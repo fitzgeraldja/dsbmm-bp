@@ -2,6 +2,7 @@ from numba import jit, njit, prange
 import numpy as np
 from scipy.stats import norm, poisson, nbinom, bernoulli
 
+
 @njit
 def numba_ix(arr, rows, cols):
     """
@@ -16,11 +17,12 @@ def numba_ix(arr, rows, cols):
     one_d_index = np.zeros(len(rows) * len(cols), dtype=np.int32)
     for i, r in enumerate(rows):
         start = i * len(cols)
-        one_d_index[start: start + len(cols)] = cols + arr.shape[1] * r
+        one_d_index[start : start + len(cols)] = cols + arr.shape[1] * r
 
     arr_1d = arr.reshape((arr.shape[0] * arr.shape[1], 1))
     slice_1d = np.take(arr_1d, one_d_index)
     return slice_1d.reshape((len(rows), len(cols)))
+
 
 def gen_trans_mat(p_stay, Q):
     """
@@ -94,6 +96,7 @@ def gen_ppm(Z, p_in=0.4, p_out=0.1, beta_mat=None, self_loops=False):
         [np.fill_diagonal(A[t], 0) for t in range(T)]
     return A
 
+
 @njit
 def rand_choice_nb(arr, prob):
     """numba alternative to np random choice
@@ -103,12 +106,14 @@ def rand_choice_nb(arr, prob):
     """
     return arr[np.searchsorted(np.cumsum(prob), np.random.random(), side="right")]
 
+
 @njit
 def pick_category(p_dist, n_samps):
     if n_samps > 1:
         print("Not implemented")
     else:
-        return rand_choice_nb(np.arange(len(p_dist)),p_dist)
+        return rand_choice_nb(np.arange(len(p_dist)), p_dist)
+
 
 @njit
 def evolve_Z(Z_1, trans_prob, T):
@@ -160,8 +165,6 @@ def sample_dynsbm_A(
     # generate Z
     Z = evolve_Z(Z_1, trans_prob, T)
 
-    
-
     # generate networks
     # inefficient, could sample total number of edges between each pair of groups, then randomly distribute these to each pair of nodes as no degree correction, or sample blocks according to size then put back together (probably best)
     # yes - obviously best thing to do is create matrix of all edge probs (easy as can construct blockwise), sample uniform randomly full matrix, then allow edge if sample <= edge prob - fine as only binary here anyway
@@ -193,6 +196,7 @@ def sample_dynsbm_A(
 
     return A, Z
 
+
 def sample_dynsbm_meta(
     Z_1=np.zeros((10,)),
     Q=10,
@@ -206,7 +210,8 @@ def sample_dynsbm_meta(
     meta_types=["normal", "poisson", "nbinom", "indep bernoulli", "categorical"],
     meta_dims=None,
     meta_params=None,
-    meta_part=None,):
+    meta_part=None,
+):
     """Sample from the dynamic SBM with metadata as proposed in paper
 
     Args:
@@ -224,20 +229,20 @@ def sample_dynsbm_meta(
         meta_params (_type_, optional): _description_. Defaults to None.
         meta_part (_type_, optional): _description_. Defaults to None.
     """
-    A,Z = sample_dynsbm_A(
-    Z_1=Z_1,
-    Q=Q,
-    T=T,
-    trans_prob=trans_prob,
-    p_in=p_in,
-    p_out=p_out,
-    beta_mat=beta_mat,
-    ZTP_params=ZTP_params,
-    self_loops=self_loops,
+    A, Z = sample_dynsbm_A(
+        Z_1=Z_1,
+        Q=Q,
+        T=T,
+        trans_prob=trans_prob,
+        p_in=p_in,
+        p_out=p_out,
+        beta_mat=beta_mat,
+        ZTP_params=ZTP_params,
+        self_loops=self_loops,
     )
     N = len(Z_1)
     # do metadata - reliance on scipy stops using numba easily, though
-    # could reimplement - see 
+    # could reimplement - see
     # https://numba.pydata.org/numba-doc/dev/reference/pysupported.html#random
     sizes = np.array(
         [[len([i for i in Z[:, t] if i == q]) for q in range(Q)] for t in range(T)]
@@ -252,6 +257,8 @@ def sample_dynsbm_meta(
             ]
         ).T
 
+    if meta_dims is None and meta_params is not None:
+        meta_dims = [mp.shape[0] for mp in meta_params]
     # generate metadata
     Xt = {
         metatype: np.zeros((meta_dims[i], N, T))
@@ -329,21 +336,17 @@ def sample_dynsbm_meta(
             # can't raise error in numba setting
             # raise ValueError(f"Unrecognised metadata distribution: {meta_type}")
             print("Warning unknown metadata distribution used - metadata not generated")
-        idxs = {}
+        # idxs = {}
         for q in range(Q):
             if meta_part is None:
-                idxs[q] = Z == q
+                idxs = Z == q
             else:
-                idxs[q] = meta_part == q
+                idxs = meta_part == q
             for t in range(T):
                 if meta_dims[i] == 1:
-                    Xt[meta_type][0, idxs[q][:, t], t] = X[t][q]
+                    Xt[meta_type][0, idxs[:, t], t] = X[t][q]
                 else:
-                    Xt[meta_type][:, idxs[q][:, t], t] = X[t][q]
-                    
-    return {"A":A,"Z":Z,"sizes":sizes,"X":X}
-                    
-    
+                    Xt[meta_type][:, idxs[:, t], t] = X[t][q]
 
-
+    return {"A": A.transpose(1, 2, 0), "Z": Z, "sizes": sizes, "X": Xt}
 
