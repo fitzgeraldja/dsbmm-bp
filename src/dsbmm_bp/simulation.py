@@ -261,7 +261,7 @@ def sample_dynsbm_meta(
         meta_dims = [mp.shape[0] for mp in meta_params]
     # generate metadata
     Xt = {
-        metatype: np.zeros((meta_dims[i], N, T))
+        metatype: np.zeros((meta_dims[i], N, T), order="C")
         for i, metatype in enumerate(meta_types)
     }
     # params in Ds x Q x T shape - require 3d array even if Ds==1
@@ -348,5 +348,10 @@ def sample_dynsbm_meta(
                 else:
                     Xt[meta_type][:, idxs[:, t], t] = X[t][q]
 
-    return {"A": A.transpose(1, 2, 0), "Z": Z, "sizes": sizes, "X": Xt}
+    return {
+        "A": np.ascontiguousarray(A.transpose(1, 2, 0)),
+        "Z": np.ascontiguousarray(Z),
+        "sizes": np.ascontiguousarray(sizes),
+        "X": {k: np.ascontiguousarray(v) for k, v in Xt.items()},
+    }
 

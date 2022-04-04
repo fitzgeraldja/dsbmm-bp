@@ -21,7 +21,7 @@ from utils import numba_ix
 
 from dsbmm import DSBMM, DSBMMBase
 
-X_ex = List.empty_list(float64[:, :, :])
+X_ex = List.empty_list(float64[:, :, ::1])
 X_type = typeof(X_ex)
 psi_e_ex = List.empty_list(ListType(Array(float64, ndim=2, layout="C")))
 psi_e_type = typeof(psi_e_ex)
@@ -37,6 +37,11 @@ twopoint_e_type = typeof(
 # twopoint_t_ex = List.empty_list(ListType(float64[:,:])) # unnecessary for t marg, as memory size O(NTQ^2) at most O(Q^2\sum_t E_t) size of constrained formulation
 # of e marg (for sparse networks w E_t approx N for each t), and arrays generally preferable structure if significant overall savings not possible
 
+# TODO: don't hardcode these
+TOL = 1e-50  # min value permitted for msgs etc (for numerical stability)
+LARGE_DEG_THR = 20  # threshold of node degree above which log msgs calculated
+# (for numerical stability)
+
 
 @jitclass
 class BPBase:
@@ -46,30 +51,32 @@ class BPBase:
     _beta: float  # temperature
     deg_corr: bool
     model: DSBMMBase.class_type.instance_type
-    A: float64[:, :, :]
+    A: float64[:, :, ::1]
     # X: list[np.ndarray]
     X: X_type
-    c_qrt: float64[:, :, :]  # N*p_qrt
-    n_qt: float64[:, :]  # prior prob
+    # c_qrt: float64[:, :, :]  # N*p_qrt
+    # n_qt: float64[:, :]  # prior prob
     _psi_e: psi_e_type  # spatial messages
     _psi_t: Array(
-        float64, ndim=5, layout="C"
+        float64, ndim=4, layout="C"
     )  # temporal messages, assume (i,t,q,q',2) for t in 0 to T-2, where first loc of final dim is backward messages from t+1 to t
     # and second loc is forward messages from t to t+1
-    _h: float64[:, :]  # external field for each group, with shape (Q,T)
+    _h: float64[:, ::1]  # external field for each group, with shape (Q,T)
     node_marg: Array(
         float64, ndim=3, layout="C"
     )  # marginal group probabilities for each node
-    # twopoint_e_marg: float64[:, :, :, :, :]
-    twopoint_e_marg: twopoint_e_type
-    twopoint_t_marg: Array(float64, ndim=4, layout="C")
     # - NB this also referred to as nu, eta or
     # other terms elsewhere
-    _pres_nodes: bool_[:, :]
-    _pres_trans: bool_[:, :]
-    _edge_locs: int64[:, :]
-    _trans_locs: int64[:, :]
+    # twopoint_e_marg: float64[:, :, :, :, :]
+    twopoint_e_marg: twopoint_e_type  # [t][i][len(nbrs[t][i]),Q,Q]
+    twopoint_t_marg: Array(float64, ndim=4, layout="C")  # N x T - 1 X Q x Q
+    _pres_nodes: bool_[:, ::1]
+    _pres_trans: bool_[:, ::1]
+    _edge_locs: int64[:, ::1]
+    _trans_locs: int64[:, ::1]
     nbrs: nbrs_type
+    n_msgs: int64
+    msg_diff: float64
 
     def __init__(self, dsbmm: DSBMMBase.class_type.instance_type):
         self.model = dsbmm
@@ -78,6 +85,7 @@ class BPBase:
         self.Q = self.model.Q
         self.deg_corr = self.model.deg_corr
         self.A = self.model.A
+        self.n_msgs = np.count_nonzero(self.A) + self.N * (self.T - 1) * 2
         self.X = self.model.X
         # start with given membership and corresponding messages, iterate until reach fixed point
         # given messages at fixed point, can update parameters to their most likely values - these emerge naturally
@@ -86,7 +94,7 @@ class BPBase:
         self.node_marg = np.zeros((self.N, self.T, self.Q))
         self._zero_twopoint_e_marg()
         # print(self._edge_locs)
-        pass
+        self.msg_diff = 0.0
 
     @property
     def n_timesteps(self):
@@ -150,7 +158,7 @@ class BPBase:
 
     def init_messages(self, mode):
         if mode == "random":
-            # initialise by random messages
+            # initialise by random messages and marginals
             # self._psi_e = [
             #     [
             #         np.random.rand(len(self.nbrs[t][i]), self.Q)
@@ -167,6 +175,10 @@ class BPBase:
             #     ]
             #     for t in range(self.T)
             # ]
+            ## INIT MARGINALS ##
+            self.node_marg = np.random.rand(self.N, self.T, self.Q)
+            self.node_marg /= np.expand_dims(self.node_marg.sum(axis=2), 2)
+            ## INIT MESSAGES ##
             tmp = List()
             for t in range(self.T):
                 tmp2 = List()
@@ -181,7 +193,7 @@ class BPBase:
                     tmp2.append(msg)
                 # print("Trying to update psi_e")
                 tmp.append(tmp2)
-            self._psi_e = tmp
+            self._psi_e = tmp  # msgs from [t][i] to nbr j about i being in q (so 4d)
             # print("psi_e updated")
             # self._psi_t = [
             #     [np.random.rand(2, self.Q) for i in range(self.N)]
@@ -191,170 +203,201 @@ class BPBase:
             #     [msg / msg.sum(axis=1) for msg in self._psi_t[t]]
             #     for t in range(self.T - 1)
             # ]
-            self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, self.Q, 2)
+            self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, 2)
             # self._psi_t /= self._psi_t.sum(axis=3)[:, :, :, np.newaxis, :]
-            self._psi_t /= np.expand_dims(self._psi_t.sum(axis=3), 3)
+            self._psi_t /= np.expand_dims(
+                self._psi_t.sum(axis=2), 2
+            )  # msgs from i at t forwards/backwards
+            # about being in group q,
+            # so again 4d
+            # assert np.all((self._psi_t.sum(axis=3) - 1) ** 2 < 1e-14)
         elif mode == "partial":
-            # initialise by partly planted partition - others left random
+            # initialise by partly planted partition plus some noise - others left random
+            # see planted below for info on how planting considered
+            ## INIT MARGINALS ##
+            pass
+            ## INIT MESSAGES ##
             pass
         elif mode == "planted":
-            # initialise by given partition
+            # initialise by given partition plus some random noise, with strength of info used
+            # specified by plant_strength (shortened to ps below)
+            # i.e. if z_0(i,t) = r,
+            # \psi^{it}_q = \delta_{qr}(ps + (1 - ps)*rand) + (1 - \delta_{qr})*(1 - ps)*rand
+            ## INIT MARGINALS ##
+            pass
+            ## INIT MESSAGES ##
             pass
 
-        pass
-
-    def update_messages(self,):
-        # assume want to visit messages in (almost) random order - here only random over edge locations, then use
-        # i vals as choice of loc to update temporal messages
-        np.random.shuffle(self._edge_locs)
-        for i, j, t in self._edge_locs:
-            self.update_spatial_message(i, j, t)
-        print("\tUpdated spatial messages")
-        np.random.shuffle(self._trans_locs)
-        for i, t in self._trans_locs:
-            self.update_temporal_messages(i, t)
-        print("\tUpdated temporal messages")
-
-    def update_spatial_message(self, i, j, t):
-        j_idx = self.nbrs[t][i] == j
-        cavity_term = self.cavity_spatial_message(i, j, t)
-
-        marg = self.meta_prob(i, t) * np.exp(self._h[:, t]) * cavity_term
+    def forward_temp_msg_term(self, i, t):
+        # sum_qprime(self.trans_prob(qprime,q)*self._psi_t[i,t-1,qprime,1])
+        # from t-1 to t
         try:
-            if self._pres_trans[i, t]:
-                # i pres at t and t+1, can include backward temp msg term
-                marg *= self.backward_temp_msg_term(i, t)
+            # print(self.trans_prob)
+            # print(self.trans_prob.T)
+            out = np.ascontiguousarray(self.trans_prob.T) @ np.ascontiguousarray(
+                self._psi_t[i, t - 1, :, 1]
+            )
         except:
-            # t must be T-1, so no t+1, that's fine - doing this way means don't have to check t val for every edge
-            assert t == self.T - 1
-        try:
-            if self._pres_trans[i, t - 1]:
-                # i pres at t-1 and t, can include forward temp msg term
-                marg *= self.forward_temp_msg_term(i, t)
-        except:
-            # t must be 0, so no t-1, that's fine
+            # must have t=0 so t-1 outside of range, no forward message, but do have alpha instead
             assert t == 0
-        self._psi_e[t][i][j_idx] = marg
+            out = self.model._alpha
+        return out
 
-    def cavity_spatial_message(self, i, j, t):
-        # sum_r(p_rq^t *
-        # self._psi_e[t][k][i_idx (=self.nbrs[t][k]==i)][r]
-        # for k in self.nbrs[t][i]!=j (= self.nbrs[t][i][j_idx]))
-        nbrs = np.array([k for k in self.nbrs[t][i] if k != j])
+    def backward_temp_msg_term(self, i, t):
+        """Backwards temporal message term for marginal of i at t, coming from i at t + 1
+        Much as for spatial messages, by definition 
+            \psi^{i(t)\to i(t+1)} \propto \psi^{it} / \psi^{i(t+1)\to i(t)} 
+        so we can use this term to update forward temporal messages to t + 1 if t < T
+
+        Args:
+            i (_type_): _description_
+            t (_type_): _description_
+
+        Raises:
+            RuntimeError: _description_
+
+        Returns:
+            _type_: _description_
+        """
+        # sum_qprime(self.trans_prob(q,qprime)*self._psi_t[i,t,qprime,0])
+        # from t+1 to t
+        try:
+            # TODO: remove pushes to contiguous array and just write out multiplication
+            out = np.ascontiguousarray(self.trans_prob) @ np.ascontiguousarray(
+                self._psi_t[i, t, :, 0]
+            )
+            try:
+                assert not np.all(out < TOL)
+            except:
+                print("(i,t):", i, t)
+                print("Trans:", self.trans_prob)
+                print("Psi_t:", self._psi_t[i, t, :, 0])
+                print("psi_t shape:", self._psi_t.shape)
+                print("backward out:", out)
+                raise RuntimeError("Problem with backward msg term")
+        except:
+            # t=T outside of range, so no backward message
+            assert t == self.T - 1
+            out = np.ones((self.Q,))
+        return np.ascontiguousarray(out)
+
+    def spatial_msg_term_small_deg(self, i, t, nbrs):
+        """For node i with degree smaller than threshold within timestep t, and
+        neighbours nbrs, calculate the spatial message term for the marginal distribution of i, 
+        updating spatial messages \psi^{i\to j}(t) and external field h(t) in the process.
+        
+        Updating together rational as by definition, 
+            \psi^{i\to j}(t) \propto \psi^{it}/\psi^{j\to i}(t),
+        hence we can 
+            (i) Calculate all terms involved in unnormalised node marginal / node messages 
+            (ii) Calculate product of these (for unnorm marginals), divide by term involving j 
+                 for \psi^{i\to j}(t) for unnorm messages
+            (iii) Calculate normalisation for node marginals, update marginals 
+            (iv) Calculate normalisation for node messages, update messages 
+            
+        As there are \Oh(Q d_i) terms only involved for each q (so \Oh(Q^2 d_i) total),
+        for sparse networks where the average degree d ~ \Oh(1), updating all messages 
+        and marginals together is an \Oh(Q^2 N T d) process. As typically Q ~ log(N), 
+        this means approximate complexity of \Oh(2 N T d log(N)), so roughly linear in the 
+        number of nodes - a significant improvement to quadratic complexity of mean-field VI!
+            
+        Args:
+            i (_type_): node to update
+            t (_type_): timestep
+            nbrs (_type_): neighbours of i in network at time t
+
+        Raises:
+            RuntimeError: _description_
+
+        Returns:
+            msg (_type_): spatial message term of total node marginal for i at t
+            field_iter (_type_): len(nbrs) x Q array containing value of term corresponding to  
+                                 each nbr so can update corresponding message
+        """
+        beta = self.block_edge_prob[:, :, t]
+
+        # print("Beta:", beta)
         # sum_terms = np.array(
         #     [
         #         self.block_edge_prob[:, :, t].T
-        #         @ self._psi_e[t][k][self.nbrs[t][k] == i]
-        #         for k in nbrs
+        #         @ self._psi_e[t][j][self.nbrs[t][j] == i]
+        #         for j in nbrs
         #     ]
-        # )  # |N_i| - 1 x Q
-        # return np.prod(sum_terms, axis=0)
+        # )  # |N_i| x Q
+        # np.prod(sum_terms, axis=0) # can't use axis kwarg for prod in numba
+        # for sum_term in sum_terms:
+        #     msg *= sum_term
+
         msg = np.ones((self.Q,))
-        if len(nbrs) > 0:
-            beta = self.block_edge_prob[:, :, t]
-            for k in nbrs:
-                if len(self.nbrs[t][k] > 0):
-                    idx = self.nbrs[t][k] == i
-                    if idx.sum() == 0:
-                        print("Fault:", k, t)
-                else:
-                    print("Fault:", k, t)
-                ktoi_msgs = self._psi_e[t][k][idx, :].reshape(
-                    -1
-                )  # for whatever reason this stays 2d, so need to flatten first
-                # print("jtoi_msg:", jtoi_msgs.shape)
-                tmp = beta.T @ ktoi_msgs
-                # print("summed:", tmp.shape)
-                msg *= tmp
-        else:
-            print("Fault:", i, t)
-        return msg
+        field_iter = np.zeros((len(nbrs), self.Q))
+        for nbr_idx, j in enumerate(nbrs):
+            if len(self.nbrs[t][j] > 0):
+                idx = self.nbrs[t][j] == i
+                if idx.sum() == 0:
+                    print("Fault, i should be nbr of j:", j, t)
+                    raise RuntimeError("Problem calc spatial msg term")
+            else:
+                print("Fault, j has no nbrs but should at least have i:", j, t)
+                raise RuntimeError("Problem calc spatial msg term")
+            jtoi_msgs = self._psi_e[t][j][idx, :].reshape(
+                -1
+            )  # for whatever reason this stays 2d, so need to flatten first
+            # print("jtoi_msg:", jtoi_msgs.shape)
+            tmp = np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs)
+            field_iter[nbr_idx, :] = tmp
+            # print("summed:", tmp.shape)
+            msg *= tmp
+            try:
+                assert not np.all(msg < TOL)
+            except:
+                print("(i,j,t):", i, j, t)
+                print("deg[i,t]:", len(nbrs))
+                print("jtoi:", jtoi_msgs)
+                print("Beta:", beta)
+                print("tmp:", tmp)
+                print("spatial msg term:", msg)
+                raise RuntimeError("Problem vanishing spatial msg term")
+        return msg, field_iter
 
-    def forward_temp_msg_term(self, i, t):
-        # sum_qprime(self.trans_prob(qprime,q)*self._psi_t[i,t-1,qprime,q,1])
-        # from t-1 to t
-        try:
-            prod = self.trans_prob.T @ self._psi_t[i, t - 1, :, :, 1]
-            return np.diag(prod)
-        except:
-            # must have t=0 so t-1 outside of range, no forward message, but do have alpha instead
-            return self.model._alpha
+    def spatial_msg_term_large_deg(self, i, t, nbrs):
+        """Same as spatial_msg_term_small_deg but for node i that has degree within timestep t 
+        larger than specified threshold - basically just handle logs + subtract max value 
+        before exponentiating and normalising instead for numerical stability
 
-    def backward_temp_msg_term(self, i, t):
-        # sum_qprime(self.trans_prob(q,qprime)*self._psi_t[i,t,qprime,q,0])
-        # from t+1 to t
-        try:
-            prod = self.trans_prob @ self._psi_t[i, t, :, :, 0]
-            return np.diag(prod)
-        except:
-            # t=T outside of range, so no backward message
-            return np.ones((self.Q,))
+        Args:
+            i (_type_): _description_
+            t (_type_): _description_
+            nbrs (_type_): _description_
 
-    def update_temporal_messages(self, i, t):
-        # know that i present at t and t+1, so want to update forward from t,
-        # backward from t+1
-        self.update_backward_temporal_message(i, t)
-        self.update_forward_temporal_message(i, t)
-
-    def update_forward_temporal_message(self, i, t):
-        # size N x T - 1 x Q, w itq entry corresponding to temporal message from i at t to
-        # i at t+1 (i.e. covering t=0 to T-2)
-        marg = (
-            self.meta_prob(i, t)
-            * self.forward_temp_msg_term(i, t)
-            * np.exp(self._h[:, t])
-            * self.spatial_msg_term(i, t)
-        )
-        self._psi_t[t][i][1] = marg
-
-    def update_backward_temporal_message(self, i, t):
-        # size N x T - 1 x Q, w itq entry corresponding to temporal message from i at t+1
-        # to i at t (i.e. covering t=0 to T-2 again)
-        try:
-            marg = (
-                self.meta_prob(i, t + 1)
-                * self.backward_temp_msg_term(i, t + 1)
-                * np.exp(self._h[:, t + 1])
-                * self.spatial_msg_term(i, t + 1)
-            )
-            self._psi_t[t][i][0] = marg
-        except:
-            # at t=T, no backward msg
-            assert t == self.T - 1
-
-    def spatial_msg_term(self, i, t):
-        msg = np.ones((self.Q,))
-        nbrs = self.nbrs[t][i]
+        Returns:
+            _type_: _description_
+        """
         beta = self.block_edge_prob[:, :, t]
-        if len(nbrs) > 0:
-            # print("Beta:", beta)
-            # sum_terms = np.array(
-            #     [
-            #         self.block_edge_prob[:, :, t].T
-            #         @ self._psi_e[t][j][self.nbrs[t][j] == i]
-            #         for j in nbrs
-            #     ]
-            # )  # |N_i| x Q
-            # np.prod(sum_terms, axis=0) # can't use axis kwarg for prod in numba
-            # for sum_term in sum_terms:
-            #     msg *= sum_term
-            for j in nbrs:
-                if len(self.nbrs[t][j] > 0):
-                    idx = self.nbrs[t][j] == i
-                    if idx.sum() == 0:
-                        print("Fault:", j, t)
-                else:
+        # deg_i = len(nbrs)
+        msg = np.zeros((self.Q,))
+        log_field_iter = np.zeros((len(nbrs), self.Q))
+        # TODO: make logger that tracks this
+        # print("Large deg version used")
+        max_log_msg = -100000.0
+        for nbr_idx, j in enumerate(nbrs):
+            if len(self.nbrs[t][j] > 0):
+                idx = self.nbrs[t][j] == i
+                if idx.sum() == 0:
                     print("Fault:", j, t)
-                jtoi_msgs = self._psi_e[t][j][idx, :].reshape(
-                    -1
-                )  # for whatever reason this stays 2d, so need to flatten first
-                # print("jtoi_msg:", jtoi_msgs.shape)
-                tmp = beta.T @ jtoi_msgs
-                # print("summed:", tmp.shape)
-                msg *= tmp
-        else:
-            print("Fault:", i, t)
-        return msg
+            else:
+                print("Fault:", j, t)
+            jtoi_msgs = self._psi_e[t][j][idx, :].reshape(
+                -1
+            )  # for whatever reason this stays 2d, so need to flatten first
+            # print("jtoi_msg:", jtoi_msgs.shape)
+            tmp = np.log(np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs))
+            log_field_iter[nbr_idx, :] = tmp
+            # print("summed:", tmp.shape)
+            msg += tmp
+            max_msg_log = msg.max()
+            if max_msg_log > max_log_msg:
+                max_log_msg = max_msg_log
+        return msg, max_log_msg, log_field_iter
 
     def meta_prob(self, i, t):
         return self.model.meta_lkl[i, t, :]
@@ -392,9 +435,11 @@ class BPBase:
             self.block_edge_prob.transpose(1, 0, 2) * self.node_marg.sum(axis=0).T
         ).sum(axis=1)
 
-    def update_h(self, i, t, old_marg):
-        self._h += self.block_edge_prob[:, :, t].T @ (
-            self.node_marg[i, t, :] - old_marg
+    def update_h(self, i, t, sign):
+        self._h[:, t] += (
+            sign
+            * np.ascontiguousarray(self.block_edge_prob[:, :, t].T)
+            @ np.ascontiguousarray(self.node_marg[i, t, :])
         )
 
     def convergence(self):
@@ -413,16 +458,134 @@ class BPBase:
         pass
 
     def update_node_marg(self):
-        for i in range(self.N):
-            for t in range(self.T):
-                if self.model.degs[i, t, :].sum() > 0:
-                    tmp = self.spatial_msg_term(i, t)
-                    tmp *= self.backward_temp_msg_term(i, t)
-                    tmp *= self.forward_temp_msg_term(i, t)
-                    tmp /= tmp.sum()
-                    self.node_marg[i, t, :] = tmp
+        """Update all node marginals (in random order), simultaneously updating messages and 
+        external fields h(t) - process is as follows:
+            (i) Determine whether large or small degree version of spatial message updates 
+                should be used 
+            (ii) Subtract old marginals for i from external field h(t)
+            (iii) Update spatial messages while calculating spatial term  
+            (iv) Update forwards temporal messages from i at t while calculating backward temp 
+                 term from i at t + 1
+            (v) Update backwards temporal messages from i at t while calculating forward temp term
+                from i at t - 1
+            (vi) Update marginals for i at t
+            (vii) Add new marginals for i to external field h(t)
+        """
+        node_update_order = np.arange(self.N)
+        np.random.shuffle(node_update_order)
+        time_update_order = np.arange(self.T)
+        np.random.shuffle(time_update_order)
+        for i in node_update_order:
+            for t in time_update_order:
+                self.update_h(i, t, -1.0)
+                nbrs = self.nbrs[t][i]
+                deg_i = len(nbrs)
+                if deg_i > 0:
+                    if deg_i < LARGE_DEG_THR:
+                        spatial_msg_term, field_iter = self.spatial_msg_term_small_deg(
+                            i, t, nbrs
+                        )
+                        tmp = spatial_msg_term
+                        if t < self.T - 1:
+                            back_term = self.backward_temp_msg_term(i, t)
+                            tmp *= back_term
+                        ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
+                        if t > 0:
+                            tmp_backwards_msg = tmp.copy()
+                            tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
+                            tmp_backwards_msg /= tmp_backwards_msg.sum()
+                            self.msg_diff += (
+                                np.abs(
+                                    tmp_backwards_msg - self._psi_t[i, t - 1, :, 0]
+                                ).mean()
+                                / self.n_msgs
+                            )
+                            self._psi_t[i, t - 1, :, 0] = tmp_backwards_msg
+                            tmp *= self.forward_temp_msg_term(i, t)
+                        ## UPDATE SPATIAL MESSAGES FROM i AT t ##
+                        tmp_spatial_msg = np.expand_dims(tmp, 0) / field_iter
+                        for nbr_idx in range(deg_i):
+                            for q in range(self.Q):
+                                if tmp_spatial_msg[nbr_idx, q] < TOL:
+                                    tmp_spatial_msg[nbr_idx, q] = TOL
+                        tmp_spatial_msg /= np.expand_dims(
+                            tmp_spatial_msg.sum(axis=1), 1
+                        )
+                        self.msg_diff += (
+                            np.abs(tmp_spatial_msg - self._psi_e[t][i]).mean()
+                            * deg_i
+                            / self.n_msgs
+                        )  # NB need to mult by deg_i so weighted correctly
+                        self._psi_e[t][i] = tmp_spatial_msg
+                        ## UPDATE FORWARDS MESSAGES FROM i AT t ##
+                        if t < self.T - 1:
+                            tmp_forwards_msg = (
+                                tmp / back_term
+                            )  # TODO: fix if back_term << 1
+                            tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
+                            tmp_forwards_msg /= tmp_forwards_msg.sum()
+                            self.msg_diff += (
+                                np.abs(
+                                    tmp_forwards_msg - self._psi_t[i, t, :, 1]
+                                ).mean()
+                                / self.n_msgs
+                            )
+                            self._psi_t[i, t, :, 1] = tmp_forwards_msg
+                        ## UPDATE MARGINAL OF i AT t ##
+                        tmp_marg = tmp
+                        tmp_marg[tmp_marg < TOL] = TOL
+                        tmp_marg = tmp_marg / tmp_marg.sum()
+                        self.node_marg[i, t, :] = tmp_marg
+
+                    else:
+                        (
+                            spatial_msg_term,
+                            max_log_spatial_msg_term,
+                            log_field_iter,
+                        ) = self.spatial_msg_term_large_deg(i, t, nbrs)
+                        tmp = spatial_msg_term
+                        back_term = np.log(self.backward_temp_msg_term(i, t))
+                        tmp += back_term
+                        ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
+                        if t > 0:
+                            tmp_backwards_msg = np.exp(tmp - max_log_spatial_msg_term)
+                            tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
+                            tmp_backwards_msg /= tmp_backwards_msg.sum()
+                            self._psi_t[i, t - 1, :, 0] = tmp_backwards_msg
+                        tmp += np.log(self.forward_temp_msg_term(i, t))
+                        ## UPDATE SPATIAL MESSAGES FROM i AT t ##
+                        tmp_spatial_msg = np.expand_dims(tmp, 0) - log_field_iter
+                        log_field_iter_max = np.array(
+                            [nbr_fld.max() for nbr_fld in tmp_spatial_msg]
+                        )
+                        tmp_spatial_msg = np.exp(
+                            tmp_spatial_msg - np.expand_dims(log_field_iter_max, 1)
+                        )
+                        for nbr_idx in range(deg_i):
+                            for q in range(self.Q):
+                                if tmp_spatial_msg[nbr_idx, q] < TOL:
+                                    tmp_spatial_msg[nbr_idx, q] = TOL
+                        tmp_spatial_msg /= np.expand_dims(
+                            tmp_spatial_msg.sum(axis=1), 1
+                        )
+                        self._psi_e[t][i] = tmp_spatial_msg
+                        ## UPDATE FORWARDS MESSAGES FROM i AT t ##
+                        if t < self.T - 1:
+                            tmp_forwards_msg = np.exp(
+                                tmp - max_log_spatial_msg_term - back_term
+                            )
+                            tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
+                            tmp_forwards_msg /= tmp_forwards_msg.sum()
+                            self._psi_t[i, t, :, 1] = tmp_forwards_msg
+                        ## UPDATE MARGINAL OF i AT t ##
+                        tmp_marg = np.exp(tmp - max_log_spatial_msg_term)
+                        tmp_marg[tmp_marg < TOL] = TOL
+                        tmp_marg /= tmp_marg.sum()
+                        self.node_marg[i, t, :] = tmp_marg
+
                 else:
                     self.node_marg[i, t, :] = 0.0
+                self.update_h(i, t, 1.0)
 
     def update_twopoint_marginals(self):
         # TODO: ask Leto to check the two-point marginals eqns, as there's a chance they should include product of metaprob terms for i,j at t.
@@ -454,11 +617,18 @@ class BPBase:
         # psi_e in shape [t][i][j_idx in nbrs[t][i],q] (list(list(2d array)))
         for i, j, t in self._edge_locs:
             # print(i, j, t)
-            j_idx = self.nbrs[t][i] == j
+            j_idx = (
+                self.nbrs[t][i] == j
+            )  # TODO: create inverse array that holds these values
+            #       in memory rather than calc on the fly each time
             i_idx = self.nbrs[t][j] == i
             tmp = self.block_edge_prob[:, :, t]
             tmp *= np.outer(self._psi_e[t][i][j_idx, :], self._psi_e[t][j][i_idx, :])
             tmp *= np.outer(self._psi_e[t][j][i_idx, :], self._psi_e[t][i][j_idx, :])
+            for q in range(self.Q):
+                for r in range(self.Q):
+                    if tmp[q, r] < TOL:
+                        tmp[q, r] = TOL
             self.twopoint_e_marg[t][i][j_idx, :, :] = tmp / tmp.sum()
 
     def update_twopoint_temp_marg(self):
@@ -469,11 +639,18 @@ class BPBase:
         for i in range(self.N):
             for t in range(self.T - 1):
                 tmp = self.trans_prob
-                tmp *= (
-                    self._psi_t[i, t, :, :, 1] * self._psi_t[i, t, :, :, 0].T
+                tmp *= np.outer(
+                    self._psi_t[i, t, :, 1], self._psi_t[i, t, :, 0]
                 )  # TODO: check this
-                tmp *= self._psi_t[i, t, :, :, 0].T * self._psi_t[i, t, :, :, 1]
+                tmp *= np.outer(self._psi_t[i, t, :, 0], self._psi_t[i, t, :, 1])
+                for q in range(self.Q):
+                    for qprime in range(self.Q):
+                        if tmp[q, qprime] < TOL:
+                            tmp[q, qprime] = TOL
                 self.twopoint_t_marg[i, t, :, :] = tmp / tmp.sum()
+
+    def zero_diff(self):
+        self.msg_diff = 0.0
 
 
 class BP:
@@ -536,8 +713,8 @@ class BP:
     def update_backward_temporal_message(self, i, t):
         self.jit_model.update_backward_temporal_message(i, t)
 
-    def spatial_msg_term(self, i, t):
-        return self.jit_model.spatial_msg_term(i, t)
+    # def spatial_msg_term(self, i, t):
+    #     return self.jit_model.spatial_msg_term(i, t)
 
     def meta_prob(self, i, t):
         return self.model.meta_lkl[i, t]
@@ -605,3 +782,5 @@ class BP:
         # recall t msgs in shape (i,t,q,q',2), w t from 0 to T-2, and final dim (backwards from t+1, forwards from t)
         self.jit_model.update_twopoint_temp_marg()
 
+    def zero_diff(self):
+        self.jit_model.zero_diff()
