@@ -86,7 +86,7 @@ def nb_poisson_lkl_vec(k, mu):
     return np.exp(_logpoispmf_vec(k, mu))
 
 
-@njit(fastmath=True, error_model="numpy", parallel=True)
+@njit(fastmath=True, error_model="numpy")
 def gammaln_nb_p_int(z):
     """Numerical Recipes 6.1
     Code from https://stackoverflow.com/questions/55048299/why-is-this-log-gamma-numba-function-slower-than-scipy-for-large-arrays-but-fas"""
@@ -163,73 +163,40 @@ def nb_ib_lkl(xs, ps):
 
 
 @njit
-def nb_contingency_matrix(
-    labels_true, labels_pred, *, eps=None, sparse=False, dtype=np.int64
-):
-    """Modified from sklearn impl 
-    Build a contingency matrix describing the relationship between labels.
-    Parameters
-    ----------
-    labels_true : int array, shape = [n_samples]
-        Ground truth class labels to be used as a reference.
-    labels_pred : array-like of shape (n_samples,)
-        Cluster labels to evaluate.
-    eps : float, default=None
-        If a float, that value is added to all values in the contingency
-        matrix. This helps to stop NaN propagation.
-        If ``None``, nothing is adjusted.
-    sparse : bool, default=False
-        If `True`, return a sparse CSR continency matrix. If `eps` is not
-        `None` and `sparse` is `True` will raise ValueError.
-        .. versionadded:: 0.18
-    dtype : numeric type, default=np.int64
-        Output dtype. Ignored if `eps` is not `None`.
-        .. versionadded:: 0.24
-    Returns
-    -------
-    contingency : {array-like, sparse}, shape=[n_classes_true, n_classes_pred]
-        Matrix :math:`C` such that :math:`C_{i, j}` is the number of samples in
-        true class :math:`i` and in predicted class :math:`j`. If
-        ``eps is None``, the dtype of this array will be integer unless set
-        otherwise with the ``dtype`` argument. If ``eps`` is given, the dtype
-        will be float.
-        Will be a ``sklearn.sparse.csr_matrix`` if ``sparse=True``.
+def nb_contingency_matrix(labels_true, labels_pred):
+    """Build a contingency matrix describing the relationship between labels.
+        NB possibly less efficient than sklearn implementation via numpy
+
+    Args:
+        labels_true (_type_): _description_
+        labels_pred (_type_): _description_
+
+    Returns:
+        _type_: _description_
     """
-
-    if eps is not None and sparse:
-        raise ValueError("Cannot set 'eps' when sparse=True")
-
-    classes, class_idx = np.unique(labels_true, return_inverse=True)
-    clusters, cluster_idx = np.unique(labels_pred, return_inverse=True)
+    N = len(labels_true)
+    assert len(labels_pred) == N
+    labels_true = labels_true.astype(np.int64)
+    labels_pred = labels_pred.astype(np.int64)
+    classes = np.unique(labels_true)
+    clusters = np.unique(labels_pred)
     n_classes = classes.shape[0]
     n_clusters = clusters.shape[0]
-    # Using coo_matrix to accelerate simple histogram calculation,
-    # i.e. bins are consecutive integers
-    # Currently, coo_matrix is faster than histogram2d for simple cases
-    contingency = sp.coo_matrix(
-        (np.ones(class_idx.shape[0]), (class_idx, cluster_idx)),
-        shape=(n_classes, n_clusters),
-        dtype=dtype,
-    )
-    if sparse:
-        contingency = contingency.tocsr()
-        contingency.sum_duplicates()
-    else:
-        contingency = contingency.toarray()
-        if eps is not None:
-            # don't use += as contingency is integer
-            contingency = contingency + eps
+    contingency = np.zeros((n_classes, n_clusters))
+    for i in range(N):
+        contingency[labels_true[i], labels_pred[i]] += 1
     return contingency
 
 
 @njit
-def nb_mi(pred, true):
+def nb_mi(labels_true, labels_pred):
+    # TODO: fix
     """Calculate mutual information between two integer vectors
     Modified from sklearn impl 
 
     Args:
-        pred (_type_): _description_
-        true (_type_): _description_
+        labels_true (_type_): _description_
+        labels_pred (_type_): _description_
     """
 
     """Mutual Information between two clusterings.
@@ -277,24 +244,27 @@ def nb_mi(pred, true):
     normalized_mutual_info_score : Normalized Mutual Information.
     """
     if contingency is None:
-        labels_true, labels_pred = check_clusterings(labels_true, labels_pred)
-        contingency = contingency_matrix(labels_true, labels_pred, sparse=True)
-    else:
-        contingency = check_array(
-            contingency,
-            accept_sparse=["csr", "csc", "coo"],
-            dtype=[int, np.int32, np.int64],
-        )
+        # labels_true, labels_pred = check_clusterings(labels_true, labels_pred)
+        contingency = nb_contingency_matrix(labels_true, labels_pred)
+    # else:
+    #     contingency = check_array(
+    #         contingency,
+    #         accept_sparse=["csr", "csc", "coo"],
+    #         dtype=[int, np.int32, np.int64],
+    #     )
 
     if isinstance(contingency, np.ndarray):
         # For an array
         nzx, nzy = np.nonzero(contingency)
-        nz_val = contingency[nzx, nzy]
-    elif sp.issparse(contingency):
-        # For a sparse matrix
-        nzx, nzy, nz_val = sp.find(contingency)
-    else:
-        raise ValueError("Unsupported type for 'contingency': %s" % type(contingency))
+        nnzs = len(nzx)
+        nz_val = np.zeros(nnzs)
+        for i in range(nnzs):
+            nz_val[i] = contingency[nzx[i], nzy[i]]
+    # elif sp.issparse(contingency):
+    #     # For a sparse matrix
+    #     nzx, nzy, nz_val = sp.find(contingency)
+    # else:
+    #     raise ValueError("Unsupported type for 'contingency': %s" % type(contingency))
 
     contingency_sum = contingency.sum()
     pi = np.ravel(contingency.sum(axis=1))
@@ -305,35 +275,81 @@ def nb_mi(pred, true):
     outer = pi.take(nzx).astype(np.int64, copy=False) * pj.take(nzy).astype(
         np.int64, copy=False
     )
-    log_outer = -np.log(outer) + log(pi.sum()) + log(pj.sum())
+    log_outer = -np.log(outer) + np.log(pi.sum()) + np.log(pj.sum())
     mi = (
-        contingency_nm * (log_contingency_nm - log(contingency_sum))
+        contingency_nm * (log_contingency_nm - np.log(contingency_sum))
         + contingency_nm * log_outer
     )
     mi = np.where(np.abs(mi) < np.finfo(mi.dtype).eps, 0.0, mi)
-    return np.clip(mi.sum(), 0.0, None)
+    # h_x =
+    # h_y =
+    return np.clip(mi.sum(), 0.0, None)  # , h_x, h_y
 
 
 @njit
-def nb_nmi(pred, true):
-    mi, h_x, h_y = nb_mi(pred, true)
+def nb_nmi(labels_true, labels_pred):
+    mi, h_x, h_y = nb_mi(labels_true, labels_pred)
     nmi = mi / (h_x + h_y)
     print("Success nmi")
     return nmi
 
 
 @njit
-def nb_nmi_local(pred, true):
+def nb_nmi_local(labels_true, labels_pred):
     """Assume given temporal partitions in shape N x T 
 
     Args:
         pred (_type_): _description_
         true (_type_): _description_
     """
-    assert len(pred.shape) == 2
-    assert pred.shape == true.shape
-    n_nan = np.isnan(pred).sum()
+    assert len(labels_true.shape) == 2
+    assert labels_true.shape == labels_pred.shape
+    n_nan = np.isnan(labels_true).sum()
     assert n_nan == 0
-    T = pred.shape[1]
-    nmis = np.array([nb_nmi(pred[:, t], true[:, t]) for t in range(T)])
+    T = labels_true.shape[1]
+    nmis = np.array([nb_nmi(labels_true[:, t], labels_pred[:, t]) for t in range(T)])
+    return nmis
 
+
+@njit
+def nb_pair_confusion_mat(labels_true, labels_pred):
+    """Using sklearn implementation suitably mod"""
+    n_samples = np.int64(labels_true.shape[0])
+
+    # Computation using the contingency data
+    contingency = nb_contingency_matrix(labels_true, labels_pred)
+    n_c = np.ravel(contingency.sum(axis=1))
+    n_k = np.ravel(contingency.sum(axis=0))
+    sum_squares = (contingency ** 2).sum()
+    C = np.empty((2, 2), dtype=np.int64)
+    C[1, 1] = sum_squares - n_samples
+    C[0, 1] = contingency.dot(n_k).sum() - sum_squares
+    C[1, 0] = contingency.transpose().dot(n_c).sum() - sum_squares
+    C[0, 0] = n_samples ** 2 - C[0, 1] - C[1, 0] - sum_squares
+    return C
+
+
+@njit
+def nb_ari(labels_true, labels_pred):
+    """Using sklearn implementation suitably mod"""
+    (tn, fp), (fn, tp) = nb_pair_confusion_mat(labels_true, labels_pred)
+    # convert to Python integer types, to avoid overflow or underflow
+    tn, fp, fn, tp = int(tn), int(fp), int(fn), int(tp)
+
+    # Special cases: empty data or full agreement
+    if fn == 0 and fp == 0:
+        return 1.0
+
+    return 2.0 * (tp * tn - fn * fp) / ((tp + fn) * (fn + tn) + (tp + fp) * (fp + tn))
+
+
+@njit
+def nb_ari_local(labels_true, labels_pred):
+    """Calculate ARI between true and inferred partition at each timestep"""
+    assert len(labels_true.shape) == 2
+    assert labels_true.shape == labels_pred.shape
+    n_nan = np.isnan(labels_true).sum()
+    assert n_nan == 0
+    T = labels_true.shape[1]
+    aris = np.array([nb_ari(labels_true[:, t], labels_pred[:, t]) for t in range(T)])
+    return aris

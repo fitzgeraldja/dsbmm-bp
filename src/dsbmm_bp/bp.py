@@ -33,7 +33,7 @@ twopoint_e_ex = List.empty_list(ListType(Array(float64, ndim=3, layout="C")))
 twopoint_e_type = typeof(
     twopoint_e_ex
 )  # TODO: replace as array type of size (Q^2 sum_t E_t), along w lookup table for idx of i,j,t as this should be sufficient
-# given implementation below
+# given implementation below - would this actually result in speedup over lru cache implementation?
 # twopoint_t_ex = List.empty_list(ListType(float64[:,:])) # unnecessary for t marg, as memory size O(NTQ^2) at most O(Q^2\sum_t E_t) size of constrained formulation
 # of e marg (for sparse networks w E_t approx N for each t), and arrays generally preferable structure if significant overall savings not possible
 
@@ -95,6 +95,9 @@ class BPBase:
         self._zero_twopoint_e_marg()
         # print(self._edge_locs)
         self.msg_diff = 0.0
+        self.twopoint_t_marg = np.zeros(
+            (self.N, self.T - 1, self.Q, self.Q)
+        )  # TODO: move instantiation to init
 
     @property
     def n_timesteps(self):
@@ -156,6 +159,8 @@ class BPBase:
         # then structure such that just loop over all in random order - nonzeros should give these
         # Key is that when consider a known message from i to j, can recover idxs for
 
+    # TODO: implement lru cached nbr and inverse nbr lookup functions - should basically be same efficiency as putting in memory
+
     def init_messages(self, mode):
         if mode == "random":
             # initialise by random messages and marginals
@@ -190,6 +195,8 @@ class BPBase:
                         msg /= np.expand_dims(msg.sum(axis=1), 1)
                     else:
                         msg = np.empty((1, self.Q), dtype=np.float64)
+                    # TODO: remove after fix
+                    assert np.isnan(msg).sum() == 0
                     tmp2.append(msg)
                 # print("Trying to update psi_e")
                 tmp.append(tmp2)
@@ -208,6 +215,8 @@ class BPBase:
             self._psi_t /= np.expand_dims(
                 self._psi_t.sum(axis=2), 2
             )  # msgs from i at t forwards/backwards
+            # TODO: remove after fix
+            assert np.isnan(self._psi_t).sum() == 0
             # about being in group q,
             # so again 4d
             # assert np.all((self._psi_t.sum(axis=3) - 1) ** 2 < 1e-14)
@@ -223,10 +232,41 @@ class BPBase:
             # specified by plant_strength (shortened to ps below)
             # i.e. if z_0(i,t) = r,
             # \psi^{it}_q = \delta_{qr}(ps + (1 - ps)*rand) + (1 - \delta_{qr})*(1 - ps)*rand
+            p = 0.8  # TODO: don't hardcode
             ## INIT MARGINALS ##
-            pass
+            one_hot_Z = np.zeros((self.N, self.T, self.Q))
+            for i in range(self.N):
+                for t in range(self.T):
+                    one_hot_Z[i, t, self.model.Z[i, t]] = 1.0
+
+            self.node_marg = p * one_hot_Z + (1 - p) * np.random.rand(
+                self.N, self.T, self.Q
+            )
+
             ## INIT MESSAGES ##
-            pass
+            tmp = List()
+            for t in range(self.T):
+                tmp2 = List()
+                for i in range(self.N):
+                    n_nbrs = len(self.nbrs[t][i])
+                    if n_nbrs > 0:
+                        msg = p * np.expand_dims(one_hot_Z[i, t, :], 0) + (
+                            1 - p
+                        ) * np.random.rand(n_nbrs, self.Q)
+                    else:
+                        print("WARNING: empty nodes not properly handled yet")
+                        msg = np.empty((1, self.Q), dtype=np.float64)
+                    # TODO: remove after fix
+                    assert np.isnan(msg).sum() == 0
+                    tmp2.append(msg)
+                # print("Trying to update psi_e")
+                tmp.append(tmp2)
+            self._psi_e = tmp
+
+            self._psi_t = (1 - p) * np.random.rand(self.N, self.T - 1, self.Q, 2)
+            for t in range(self.T - 1):
+                self._psi_t[:, t, :, 0] += p * one_hot_Z[:, t + 1, :]
+                self._psi_t[:, t, :, 1] += p * one_hot_Z[:, t, :]
 
     def forward_temp_msg_term(self, i, t):
         # sum_qprime(self.trans_prob(qprime,q)*self._psi_t[i,t-1,qprime,1])
@@ -237,10 +277,13 @@ class BPBase:
             out = np.ascontiguousarray(self.trans_prob.T) @ np.ascontiguousarray(
                 self._psi_t[i, t - 1, :, 1]
             )
+            for q in range(self.Q):
+                if out[q] < TOL:
+                    out[q] = TOL
         except:
-            # must have t=0 so t-1 outside of range, no forward message, but do have alpha instead
+            # must have t=0 so t-1 outside of range, no forward message, but do have alpha instead - stopped now as need for backward term
             assert t == 0
-            out = self.model._alpha
+            # out = self.model._alpha
         return out
 
     def backward_temp_msg_term(self, i, t):
@@ -266,12 +309,18 @@ class BPBase:
             out = np.ascontiguousarray(self.trans_prob) @ np.ascontiguousarray(
                 self._psi_t[i, t, :, 0]
             )
+            for q in range(self.Q):
+                if out[q] < TOL:
+                    out[q] = TOL
             try:
+                # TODO: remove after fix
                 assert not np.all(out < TOL)
+                assert np.isnan(out).sum() == 0
+                assert np.all(out >= 0)
             except:
                 print("(i,t):", i, t)
                 print("Trans:", self.trans_prob)
-                print("Psi_t:", self._psi_t[i, t, :, 0])
+                print("Psi_t back:", self._psi_t[i, t, :, 0])
                 print("psi_t shape:", self._psi_t.shape)
                 print("backward out:", out)
                 raise RuntimeError("Problem with backward msg term")
@@ -344,19 +393,37 @@ class BPBase:
             )  # for whatever reason this stays 2d, so need to flatten first
             # print("jtoi_msg:", jtoi_msgs.shape)
             tmp = np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs)
-            field_iter[nbr_idx, :] = tmp
-            # print("summed:", tmp.shape)
-            msg *= tmp
+            for q in range(self.Q):
+                if tmp[q] < TOL:
+                    tmp[q] = TOL
             try:
-                assert not np.all(msg < TOL)
+                assert not np.isnan(tmp).sum() > 0
             except:
+                print("A[t]:", self.A[:, :, t])
                 print("(i,j,t):", i, j, t)
                 print("deg[i,t]:", len(nbrs))
                 print("jtoi:", jtoi_msgs)
+                print("full j msgs:", self._psi_e[t][j])
                 print("Beta:", beta)
                 print("tmp:", tmp)
                 print("spatial msg term:", msg)
-                raise RuntimeError("Problem vanishing spatial msg term")
+                raise RuntimeError("Problem with field iter term")
+            field_iter[nbr_idx, :] = tmp
+            # print("summed:", tmp.shape)
+            msg *= tmp
+            # TODO: consider if this check still necessary
+            # try:
+            #     assert not np.all(msg < TOL)
+            # except:
+            #     print("(i,j,t):", i, j, t)
+            #     print("deg[i,t]:", len(nbrs))
+            #     print("jtoi:", jtoi_msgs)
+            #     print("Beta:", beta)
+            #     print("tmp:", tmp)
+            #     print("spatial msg term:", msg)
+            #     raise RuntimeError("Problem vanishing spatial msg term")
+        msg *= np.exp(-1.0 * self._h[:, t])
+        msg[msg < TOL] = TOL
         return msg, field_iter
 
     def spatial_msg_term_large_deg(self, i, t, nbrs):
@@ -391,12 +458,21 @@ class BPBase:
             )  # for whatever reason this stays 2d, so need to flatten first
             # print("jtoi_msg:", jtoi_msgs.shape)
             tmp = np.log(np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs))
+
+            try:
+                assert np.isinf(tmp).sum() == 0
+            except:
+                print("jtoi msgs:", jtoi_msgs)
+                print("i,j,t:", i, j, t)
+                print("beta:", beta)
+                raise RuntimeError("Problem w large deg spatial msg")
             log_field_iter[nbr_idx, :] = tmp
             # print("summed:", tmp.shape)
             msg += tmp
             max_msg_log = msg.max()
             if max_msg_log > max_log_msg:
                 max_log_msg = max_msg_log
+        msg -= self._h[:, t]  # NB don't need / self.N as using p_ab to calc, not c_ab
         return msg, max_log_msg, log_field_iter
 
     def meta_prob(self, i, t):
@@ -434,6 +510,7 @@ class BPBase:
         self._h = (
             self.block_edge_prob.transpose(1, 0, 2) * self.node_marg.sum(axis=0).T
         ).sum(axis=1)
+        # print("h after init:", self._h)
 
     def update_h(self, i, t, sign):
         self._h[:, t] += (
@@ -477,7 +554,6 @@ class BPBase:
         np.random.shuffle(time_update_order)
         for i in node_update_order:
             for t in time_update_order:
-                self.update_h(i, t, -1.0)
                 nbrs = self.nbrs[t][i]
                 deg_i = len(nbrs)
                 if deg_i > 0:
@@ -485,15 +561,38 @@ class BPBase:
                         spatial_msg_term, field_iter = self.spatial_msg_term_small_deg(
                             i, t, nbrs
                         )
-                        tmp = spatial_msg_term
+                        self.update_h(i, t, -1.0)
+                        # REMOVE CHECK AFTER FIX
+                        if np.isnan(spatial_msg_term).sum() > 0:
+                            print("i,t:", i, t)
+                            print("spatial:", spatial_msg_term)
+                            print("deg[i,t]", self.model.degs[i, t])
+                            print("beta:", self.block_edge_prob[:, :, t])
+                            raise RuntimeError("Problem w spatial term")
+                        tmp = spatial_msg_term.copy()
+                        if t == 0:
+                            tmp *= self.model._alpha
+                        back_term = np.ones(self.Q)
                         if t < self.T - 1:
                             back_term = self.backward_temp_msg_term(i, t)
+                            # REMOVE CHECK AFTER FIX
+                            if np.isnan(back_term).sum() > 0:
+                                print("i,t:", i, t)
+                                print("back:", back_term)
+                                raise RuntimeError("Problem w back term")
                             tmp *= back_term
                         ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
+                        forward_term = np.ones(self.Q)
                         if t > 0:
                             tmp_backwards_msg = tmp.copy()
-                            tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
                             tmp_backwards_msg /= tmp_backwards_msg.sum()
+                            for q in range(self.Q):
+                                if tmp_backwards_msg[q] < TOL:
+                                    tmp_backwards_msg[q] = TOL
+                                if tmp_backwards_msg[q] > 1 - TOL:
+                                    tmp_backwards_msg[q] = 1 - TOL
+                            tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
+                            tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = 1 - TOL
                             self.msg_diff += (
                                 np.abs(
                                     tmp_backwards_msg - self._psi_t[i, t - 1, :, 0]
@@ -501,29 +600,73 @@ class BPBase:
                                 / self.n_msgs
                             )
                             self._psi_t[i, t - 1, :, 0] = tmp_backwards_msg
-                            tmp *= self.forward_temp_msg_term(i, t)
+                            forward_term = self.forward_temp_msg_term(i, t)
+                        # REMOVE CHECK AFTER FIX
+                        if np.isnan(forward_term).sum() > 0:
+                            print("i,t:", i, t)
+                            print("forward:", forward_term)
+                            raise RuntimeError("Problem w back term")
+                        tmp *= forward_term
                         ## UPDATE SPATIAL MESSAGES FROM i AT t ##
-                        tmp_spatial_msg = np.expand_dims(tmp, 0) / field_iter
+                        # tmp_spatial_msg = (
+                        #     np.expand_dims(tmp, 0) / field_iter
+                        # )  # can't use as problem if field_iter << 1
+                        tmp_spatial_msg = np.ones((deg_i, self.Q))
+                        for nbr_idx in range(deg_i):
+                            for q in range(self.Q):
+                                if field_iter[nbr_idx, q] > TOL:
+                                    tmp_spatial_msg[nbr_idx, q] = (
+                                        tmp[q] / field_iter[nbr_idx, q]
+                                    )
+                                else:
+                                    # too small for stable div, construct
+                                    # directly instead
+                                    tmp_loc = back_term[q] * forward_term[q]
+                                    alt_nbrs = np.arange(deg_i)
+                                    alt_nbrs = alt_nbrs[alt_nbrs != nbr_idx]
+                                    for k in alt_nbrs:
+                                        tmp_loc *= field_iter[k, q]
+                                    tmp_spatial_msg[nbr_idx, q] = tmp_loc
+                        tmp_spatial_msg /= np.expand_dims(
+                            tmp_spatial_msg.sum(axis=1), 1
+                        )
                         for nbr_idx in range(deg_i):
                             for q in range(self.Q):
                                 if tmp_spatial_msg[nbr_idx, q] < TOL:
                                     tmp_spatial_msg[nbr_idx, q] = TOL
-                        tmp_spatial_msg /= np.expand_dims(
-                            tmp_spatial_msg.sum(axis=1), 1
-                        )
+                                if tmp_spatial_msg[nbr_idx, q] > 1 - TOL:
+                                    tmp_spatial_msg[nbr_idx, q] = 1 - TOL
                         self.msg_diff += (
                             np.abs(tmp_spatial_msg - self._psi_e[t][i]).mean()
                             * deg_i
                             / self.n_msgs
                         )  # NB need to mult by deg_i so weighted correctly
+                        # TODO: remove after fix
+                        try:
+                            assert np.isnan(tmp_spatial_msg).sum() == 0
+                        except:
+                            print("tmp_spatial:", tmp_spatial_msg)
+                            print("back_term:", back_term)
+                            print("forward_term:", forward_term)
+                            print("unnorm spatial:", spatial_msg_term)
+                            print("field iters:", field_iter)
+                            raise RuntimeError("Problem with spatial msg")
                         self._psi_e[t][i] = tmp_spatial_msg
                         ## UPDATE FORWARDS MESSAGES FROM i AT t ##
                         if t < self.T - 1:
-                            tmp_forwards_msg = (
-                                tmp / back_term
-                            )  # TODO: fix if back_term << 1
-                            tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
+                            # tmp_forwards_msg = (
+                            #     tmp / back_term
+                            # )  # again causes problem if back_term << 1
+                            # so better to just calc directly - in this
+                            # case just insignificant memory overhead
+                            # as calc complexity identical (if anything
+                            # easier)
+                            tmp_forwards_msg = spatial_msg_term
+                            if t > 0:
+                                tmp_forwards_msg *= forward_term
                             tmp_forwards_msg /= tmp_forwards_msg.sum()
+                            tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
+                            tmp_forwards_msg[tmp_forwards_msg > 1 - TOL] = 1 - TOL
                             self.msg_diff += (
                                 np.abs(
                                     tmp_forwards_msg - self._psi_t[i, t, :, 1]
@@ -533,8 +676,9 @@ class BPBase:
                             self._psi_t[i, t, :, 1] = tmp_forwards_msg
                         ## UPDATE MARGINAL OF i AT t ##
                         tmp_marg = tmp
-                        tmp_marg[tmp_marg < TOL] = TOL
                         tmp_marg = tmp_marg / tmp_marg.sum()
+                        tmp_marg[tmp_marg < TOL] = TOL
+                        tmp_marg[tmp_marg > 1 - TOL] = 1 - TOL
                         self.node_marg[i, t, :] = tmp_marg
 
                     else:
@@ -543,16 +687,20 @@ class BPBase:
                             max_log_spatial_msg_term,
                             log_field_iter,
                         ) = self.spatial_msg_term_large_deg(i, t, nbrs)
+                        self.update_h(i, t, -1.0)
+                        if t == 0:
+                            tmp += np.log(self.model._alpha)
                         tmp = spatial_msg_term
                         back_term = np.log(self.backward_temp_msg_term(i, t))
                         tmp += back_term
                         ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
                         if t > 0:
                             tmp_backwards_msg = np.exp(tmp - max_log_spatial_msg_term)
-                            tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
                             tmp_backwards_msg /= tmp_backwards_msg.sum()
+                            tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
+                            tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = TOL
                             self._psi_t[i, t - 1, :, 0] = tmp_backwards_msg
-                        tmp += np.log(self.forward_temp_msg_term(i, t))
+                            tmp += np.log(self.forward_temp_msg_term(i, t))
                         ## UPDATE SPATIAL MESSAGES FROM i AT t ##
                         tmp_spatial_msg = np.expand_dims(tmp, 0) - log_field_iter
                         log_field_iter_max = np.array(
@@ -561,31 +709,59 @@ class BPBase:
                         tmp_spatial_msg = np.exp(
                             tmp_spatial_msg - np.expand_dims(log_field_iter_max, 1)
                         )
+                        tmp_spatial_msg /= np.expand_dims(
+                            tmp_spatial_msg.sum(axis=1), 1
+                        )
                         for nbr_idx in range(deg_i):
                             for q in range(self.Q):
                                 if tmp_spatial_msg[nbr_idx, q] < TOL:
                                     tmp_spatial_msg[nbr_idx, q] = TOL
-                        tmp_spatial_msg /= np.expand_dims(
-                            tmp_spatial_msg.sum(axis=1), 1
-                        )
+                                if tmp_spatial_msg[nbr_idx, q] > 1 - TOL:
+                                    tmp_spatial_msg[nbr_idx, q] = 1 - TOL
+                        # TODO: remove after fix
+                        try:
+                            assert np.isnan(tmp_spatial_msg).sum() == 0
+                        except:
+                            print("tmp_spatial:", tmp_spatial_msg)
+                            print("back_term:", back_term)
+                            print("forward_term:", forward_term)
+                            print("unnorm spatial:", spatial_msg_term)
+                            print("field iters:", field_iter)
+                            raise RuntimeError("Problem with spatial msg")
                         self._psi_e[t][i] = tmp_spatial_msg
                         ## UPDATE FORWARDS MESSAGES FROM i AT t ##
                         if t < self.T - 1:
                             tmp_forwards_msg = np.exp(
                                 tmp - max_log_spatial_msg_term - back_term
                             )
-                            tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
                             tmp_forwards_msg /= tmp_forwards_msg.sum()
+                            tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
+                            tmp_forwards_msg[tmp_forwards_msg > 1 - TOL] = 1 - TOL
                             self._psi_t[i, t, :, 1] = tmp_forwards_msg
                         ## UPDATE MARGINAL OF i AT t ##
                         tmp_marg = np.exp(tmp - max_log_spatial_msg_term)
-                        tmp_marg[tmp_marg < TOL] = TOL
                         tmp_marg /= tmp_marg.sum()
+                        tmp_marg[tmp_marg < TOL] = TOL
+                        tmp_marg[tmp_marg > 1 - TOL] = 1 - TOL
                         self.node_marg[i, t, :] = tmp_marg
 
                 else:
                     self.node_marg[i, t, :] = 0.0
                 self.update_h(i, t, 1.0)
+        if np.isnan(self.msg_diff):
+            for i in range(self.N):
+                for t in range(self.T - 1):
+                    if np.isnan(self.node_marg[i, t]).sum() > 0:
+                        print("nans for node marg @ (i,t)=", i, t)
+                    if np.isnan(self._psi_e[t][i]).sum() > 0:
+                        print("nans for spatial msgs @ (i,t)=", i, t)
+                    if np.isnan(self._psi_t[i, t]).sum() > 0:
+                        print("nans for temp marg @ (i,t)=", i, t)
+                if np.isnan(self.node_marg[i, self.T - 1]).sum() > 0:
+                    print("nans for node marg @ (i,t)=", i, self.T - 1)
+                if np.isnan(self._psi_e[self.T - 1][i]).sum() > 0:
+                    print("nans for spatial msgs @ (i,t)=", i, self.T - 1)
+            raise RuntimeError("Problem updating messages")
 
     def update_twopoint_marginals(self):
         # TODO: ask Leto to check the two-point marginals eqns, as there's a chance they should include product of metaprob terms for i,j at t.
@@ -622,32 +798,31 @@ class BPBase:
             )  # TODO: create inverse array that holds these values
             #       in memory rather than calc on the fly each time
             i_idx = self.nbrs[t][j] == i
-            tmp = self.block_edge_prob[:, :, t]
-            tmp *= np.outer(self._psi_e[t][i][j_idx, :], self._psi_e[t][j][i_idx, :])
-            tmp *= np.outer(self._psi_e[t][j][i_idx, :], self._psi_e[t][i][j_idx, :])
+            tmp = np.outer(self._psi_e[t][i][j_idx, :], self._psi_e[t][j][i_idx, :])
+            tmp += np.outer(self._psi_e[t][j][i_idx, :], self._psi_e[t][i][j_idx, :])
+            tmp *= self.block_edge_prob[:, :, t]
+            tmp /= tmp.sum()
             for q in range(self.Q):
                 for r in range(self.Q):
                     if tmp[q, r] < TOL:
                         tmp[q, r] = TOL
-            self.twopoint_e_marg[t][i][j_idx, :, :] = tmp / tmp.sum()
+            self.twopoint_e_marg[t][i][j_idx, :, :] = tmp
 
     def update_twopoint_temp_marg(self):
-        # recall t msgs in shape (i,t,q,q',2), w t from 0 to T-2, and final dim (backwards from t+1, forwards from t)
-        self.twopoint_t_marg = np.zeros(
-            (self.N, self.T - 1, self.Q, self.Q)
-        )  # TODO: move instantiation to init
+        # recall t msgs in shape (i,t,q,2), w t from 0 to T-2, and final dim (backwards from t+1, forwards from t)
         for i in range(self.N):
             for t in range(self.T - 1):
-                tmp = self.trans_prob
-                tmp *= np.outer(
+                tmp = np.outer(
                     self._psi_t[i, t, :, 1], self._psi_t[i, t, :, 0]
                 )  # TODO: check this
-                tmp *= np.outer(self._psi_t[i, t, :, 0], self._psi_t[i, t, :, 1])
+                tmp += np.outer(self._psi_t[i, t, :, 0], self._psi_t[i, t, :, 1])
+                tmp *= self.trans_prob
+                tmp /= tmp.sum()
                 for q in range(self.Q):
                     for qprime in range(self.Q):
                         if tmp[q, qprime] < TOL:
                             tmp[q, qprime] = TOL
-                self.twopoint_t_marg[i, t, :, :] = tmp / tmp.sum()
+                self.twopoint_t_marg[i, t, :, :] = tmp
 
     def zero_diff(self):
         self.msg_diff = 0.0

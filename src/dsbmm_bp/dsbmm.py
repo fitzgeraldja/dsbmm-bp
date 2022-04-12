@@ -201,7 +201,7 @@ class DSBMMBase:
             # ).fit_predict(kmeans_mat)
             # self.Z = np.tile(kmeans_labels, (1, self.T))
 
-        self.diff = 0.0
+        self.diff = 1.0
 
     @property
     def num_nodes(self):
@@ -314,21 +314,21 @@ class DSBMMBase:
         """
         pass
 
-    def update_params(self, init):
+    def update_params(self, init, learning_rate):
         """Given marginals, update parameters suitably
 
         Args:
             messages (_type_): _description_
         """
         # first init of parameters given initial groups if init=True, else use provided marginals
-        self.update_alpha(init)
-        self.update_pi(init)
+        self.update_alpha(init, learning_rate)
+        self.update_pi(init, learning_rate)
         if self.deg_corr:
-            self.update_lambda(init)
+            self.update_lambda(init, learning_rate)
         else:
             # NB only implemented for binary case
-            self.update_beta(init)
-        self.update_meta_params(init)
+            self.update_beta(init, learning_rate)
+        self.update_meta_params(init, learning_rate)
         self.calc_meta_lkl()
 
     def calc_meta_lkl(self):
@@ -374,7 +374,7 @@ class DSBMMBase:
     def set_twopoint_edge_marg(self, values):
         self.twopoint_edge_marg = values
 
-    def update_alpha(self, init):
+    def update_alpha(self, init, learning_rate):
         if init:
             # case of no marginals / true partition provided to calculate most likely params
             self._alpha = np.array([(self.Z[:, 0] == q).mean() for q in range(self.Q)])
@@ -385,16 +385,18 @@ class DSBMMBase:
             tmp = (
                 self.node_marg[:, 0, :].sum(axis=0) / self.N
             )  # NB mean w axis argument not supported by numba beyond single integer
-            tmp[tmp < TOL] = TOL
             tmp /= tmp.sum()
-            tmp_diff = np.abs(tmp - self._alpha).mean()
-            print("Alpha diff:", tmp_diff)
-            self.diff += tmp_diff
+            tmp[tmp < TOL] = TOL
+            tmp[tmp > 1 - TOL] = 1 - TOL
+            if not init:
+                tmp_diff = np.abs(tmp - self._alpha).mean()
+                if np.isnan(tmp_diff):
+                    raise RuntimeError("Problem updating alpha")
+                print("Alpha diff:", np.round_(tmp_diff, 3))
+                self.diff += tmp_diff
             self._alpha = tmp
 
-    def update_pi(
-        self, init,
-    ):
+    def update_pi(self, init, learning_rate):
         if init:
             qqprime_trans = np.zeros((self.Q, self.Q))
             for q in range(self.Q):
@@ -403,24 +405,47 @@ class DSBMMBase:
                         tm1_idxs = self.Z[:, t - 1] == q
                         t_idxs = self.Z[:, t] == qprime
                         qqprime_trans[q, qprime] += (tm1_idxs * t_idxs).sum()
+            # TODO: provide different cases for non-uniform init clustering
+            # NB for uniform init clustering this provides too homogeneous pi, and is more important now
+            p = 0.8
+            qqprime_trans = p * qqprime_trans + (1 - p) * np.random.rand(
+                *qqprime_trans.shape
+            )
 
         else:
-            qqprime_trans = self.twopoint_time_marg.sum(axis=0).sum(
-                axis=0
-            ) / np.expand_dims(
-                self.node_marg[:, :-1, :].sum(axis=0).sum(axis=0), 1
-            )  # need to do sums twice as numba axis argument only takes integers (rather than axis=(0,1) as we would want)
+            qqprime_trans = self.twopoint_time_marg.sum(axis=0).sum(axis=0)
+            # TODO: remove after fix
+            print("twopoint sums:", qqprime_trans)
+            # qqprime_trans /= np.expand_dims(
+            #     self.node_marg[:, :-1, :].sum(axis=0).sum(axis=0), 1
+            # )  # need to do sums twice as numba axis argument
+            # # only takes integers (rather than axis=(0,1) as
+            # # we would want) - can't use this as node_marg sums could
+            # # be tiny / zero
+            tot_marg = self.node_marg[:, :-1, :].sum(axis=0).sum(axis=0)
+            print("tot marg sums:", tot_marg)
+            for q in range(self.Q):
+                if tot_marg[q] > TOL:
+                    qqprime_trans[q, :] = qqprime_trans[q, :] / tot_marg[q]
+                else:
+                    raise RuntimeError("Problem with node marginals")
+                    # qqprime_trans[q, :] = TOL
             # self.correct_pi()
+        qqprime_trans = qqprime_trans / np.expand_dims(
+            qqprime_trans.sum(axis=-1), 1
+        )  # normalise rows
         for q in range(self.Q):
             for qprime in range(self.Q):
                 if qqprime_trans[q, qprime] < TOL:
                     qqprime_trans[q, qprime] = TOL
-        qqprime_trans = qqprime_trans / np.expand_dims(
-            qqprime_trans.sum(axis=-1), 1
-        )  # normalise rows
-        tmp_diff = np.abs(qqprime_trans - self._pi).mean()
-        print("Pi diff:", tmp_diff)
-        self.diff += tmp_diff
+                if qqprime_trans[q, qprime] > 1 - TOL:
+                    qqprime_trans[q, qprime] = 1 - TOL
+        if not init:
+            tmp_diff = np.abs(qqprime_trans - self._pi).mean()
+            if np.isnan(tmp_diff):
+                raise RuntimeError("Problem updating pi")
+            print("Pi diff:", np.round_(tmp_diff, 3))
+            self.diff += tmp_diff
         self._pi = qqprime_trans
 
     def correct_pi(self):
@@ -429,16 +454,16 @@ class DSBMMBase:
             for qprime in range(self.Q):
                 if self._pi[q, qprime] < TOL:
                     self._pi[q, qprime] = TOL
+                if self._pi[q, qprime] > 1 - TOL:
+                    self._pi[q, qprime] = 1 - TOL
         self._pi = self._pi / self._pi.sum(axis=-1)
 
-    def update_lambda(self, init):
+    def update_lambda(self, init, learning_rate):
         lam_num = np.zeros((self.Q, self.Q, self.T))
         lam_den = np.zeros((self.Q, self.Q, self.T))
         if init:
-            for t in range(self.T):
-                for i in range(self.N):
-                    for j in range(self.N):
-                        lam_num[self.Z[i, t], self.Z[j, t], t] += self.A[i, j, t]
+            for i, j, t in self._edge_locs:
+                lam_num[self.Z[i, t], self.Z[j, t], t] += self.A[i, j, t]
             # np.array(
             #     [
             #         [
@@ -511,12 +536,15 @@ class DSBMMBase:
                             lam_den[q, r, t] = 1.0
         # NB use relative rather than absolute difference here as lam could be large
         tmp = lam_num / lam_den
-        tmp_diff = np.abs((tmp - self._lam) / self._lam).mean()
-        print("Lambda diff:", tmp_diff)
-        self.diff += tmp_diff
+        if not init:
+            tmp_diff = np.abs((tmp - self._lam) / self._lam).mean()
+            if np.isnan(tmp_diff):
+                raise RuntimeError("Problem updating lambda")
+            print("Lambda diff:", np.round_(tmp_diff, 3))
+            self.diff += tmp_diff
         self._lam = tmp
 
-    def update_beta(self, init):
+    def update_beta(self, init, learning_rate):
         beta_num = np.zeros((self.Q, self.Q, self.T))
         beta_den = np.zeros((self.Q, self.Q, self.T))
         if init:
@@ -532,10 +560,8 @@ class DSBMMBase:
             #         for t in range(self.T)
             #     ]
             # )
-            for t in range(self.T):
-                for i in range(self.N):
-                    for j in range(self.N):
-                        beta_num[self.Z[i, t], self.Z[j, t], t] += self.A[i, j, t]
+            for i, j, t in self._edge_locs:
+                beta_num[self.Z[i, t], self.Z[j, t], t] += self.A[i, j, t]
             # beta_den = np.array(
             #     [
             #         [self.degs[self.Z[:, t] == q].sum() for q in range(self.Q)]
@@ -573,9 +599,7 @@ class DSBMMBase:
                             print("twopoint marg: ", val)
                             raise RuntimeError("Problem updating beta")
                         beta_num[q, r, t] += val
-                    for t in range(self.T):
-                        if beta_num[q, r, t] < TOL:
-                            beta_num[q, r, t] = TOL
+
             # beta_den = np.einsum("itq,it->qt", self.node_marg, self.degs)
             # beta_den = np.einsum("qt,rt->qrt", beta_den, beta_den)
             group_marg = np.zeros((self.Q, self.T))
@@ -590,30 +614,42 @@ class DSBMMBase:
                         beta_den[q, r, t] = group_marg[q, t] * group_marg[r, t]
                         if beta_den[q, r, t] < TOL:
                             beta_den[q, r, t] = 1.0
+        # TODO: fix for case where beta_den very small (just consider using logs)
+        # correct for numerical stability
         tmp = beta_num / beta_den
-        tmp_diff = np.abs(tmp - self._beta).mean()
-        print("Beta diff:", tmp_diff)
-        self.diff += tmp_diff
+        for q in range(self.Q):
+            for r in range(self.Q):
+                for t in range(self.T):
+                    if tmp[q, r, t] < TOL:
+                        tmp[q, r, t] = TOL
+                    elif tmp[q, r, t] > 1 - TOL:
+                        tmp[q, r, t] = 1 - TOL
+        if not init:
+            tmp_diff = np.abs(tmp - self._beta).mean()
+            if np.isnan(tmp_diff):
+                raise RuntimeError("Problem updating beta")
+            print("Beta diff:", np.round_(tmp_diff, 3))
+            self.diff += tmp_diff
         self._beta = tmp
 
-    def update_meta_params(self, init):
+    def update_meta_params(self, init, learning_rate):
         for s, mt in enumerate(self.meta_types):
             # print(f"Updating params for {mt} dist")
             if mt == "poisson":
                 # print("In Poisson")
-                self.update_poisson_meta(s, init)
+                self.update_poisson_meta(s, init, learning_rate)
                 print("\tUpdated Poisson")
             elif mt == "indep bernoulli":
                 # print("In IB")
-                self.update_indep_bern_meta(s, init)
+                self.update_indep_bern_meta(s, init, learning_rate)
                 print("\tUpdated IB")
             else:
                 raise NotImplementedError(
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
                 )  # NB can't use string formatting for print in numba
 
-    def update_poisson_meta(self, s, init):
-        xi = np.zeros((self.Q, self.T, 1))
+    def update_poisson_meta(self, s, init, learning_rate):
+        xi = np.ones((self.Q, self.T, 1))
         zeta = np.zeros((self.Q, self.T, 1))
         if init:
             # xi = np.array(
@@ -648,14 +684,20 @@ class DSBMMBase:
                     if zeta[q, t, 0] < TOL:
                         zeta[q, t, 0] = TOL
         # NB again use relative error here as could be large
+        # TODO: fix for case where xi small - rather than just setting as 1 when less than
+        # 1e-50 (just consider using logs)
         tmp = zeta / xi
-        tmp_diff = np.abs((tmp - self._meta_params[s]) / self._meta_params[s]).mean()
-        print("Poisson diff: ", tmp_diff)
-        self.diff += tmp_diff
+        if not init:
+            tmp_diff = np.abs(
+                (tmp - self._meta_params[s]) / self._meta_params[s]
+            ).mean()
+            if np.isnan(tmp_diff):
+                raise RuntimeError("Problem updating poisson params")
+            print("Poisson diff: ", np.round_(tmp_diff, 3))
+            self.diff += tmp_diff
         self._meta_params[s] = tmp
 
-    def update_indep_bern_meta(self, s, init):
-        # TODO: handle correct normalisation
+    def update_indep_bern_meta(self, s, init, learning_rate):
         xi = np.zeros((self.Q, self.T, 1))
         L = self.X[s].shape[-1]
         rho = np.zeros((self.Q, self.T, L))
@@ -695,14 +737,29 @@ class DSBMMBase:
                     ).sum(axis=0)
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
-                    for l in range(L):
-                        if rho[q, t, l] < TOL:
-                            rho[q, t, l] = TOL
+                    # for l in range(L):
+                    #     if rho[q, t, l] < TOL:
+                    #         rho[q, t, l] = TOL
+        # TODO: fix for xi very small (just use logs)
         tmp = rho / xi
-        tmp_diff = np.abs(tmp - self._meta_params[s]).mean()
-        print("IB diff: ", tmp_diff)
-        self.diff += tmp_diff
-        self._meta_params[s] = tmp
+        for q in range(self.Q):
+            for t in range(self.T):
+                for l in range(L):
+                    if tmp[q, t, l] < TOL:
+                        tmp[q, t, l] = TOL
+                    elif tmp[q, t, l] > 1 - TOL:
+                        tmp[q, t, l] = 1 - TOL
+        if not init:
+            tmp_diff = np.abs(tmp - self._meta_params[s]).mean()
+            if np.isnan(tmp_diff):
+                raise RuntimeError("Problem updating IB params")
+            print("IB diff: ", np.round_(tmp_diff, 3))
+            self.diff += tmp_diff
+            self._meta_params[s] = (
+                learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
+            )
+        else:
+            self._meta_params[s] = tmp
 
     def zero_diff(self):
         self.diff = 0.0
@@ -869,25 +926,25 @@ class DSBMM:
         """
         return self.jit_model.compute_log_likelihood()
 
-    def update_params(self, init=False):
+    def update_params(self, init=False, learning_rate=0.2):
         """Given marginals, update parameters suitably
 
         Args:
             messages (_type_): _description_
         """
         # first init of parameters given initial groups if init=True, else use provided marginals
-        self.jit_model.update_alpha(init)
+        self.jit_model.update_alpha(init, learning_rate)
         print("\tUpdated alpha")
-        self.jit_model.update_pi(init)
+        self.jit_model.update_pi(init, learning_rate)
         print("\tUpdated pi")
         if self.jit_model.deg_corr:
-            self.jit_model.update_lambda(init)
+            self.jit_model.update_lambda(init, learning_rate)
             print("\tUpdated lambda")
         else:
             # NB only implemented for binary case
-            self.jit_model.update_beta(init)
+            self.jit_model.update_beta(init, learning_rate)
             print("\tUpdated beta")
-        self.jit_model.update_meta_params(init)
+        self.jit_model.update_meta_params(init, learning_rate)
         print("\tUpdated meta")
         self.jit_model.calc_meta_lkl()
 

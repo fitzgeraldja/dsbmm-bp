@@ -1,6 +1,7 @@
 from numba import jit, njit, prange
 import numpy as np
 from scipy.stats import norm, poisson, nbinom, bernoulli
+import pickle
 
 
 @njit
@@ -76,9 +77,14 @@ def gen_ppm(Z, p_in=0.4, p_out=0.1, beta_mat=None, self_loops=False):
         for q in range(Q):
             for r in range(Q):
                 if beta_mat is not None:
-                    A[t][np.ix_(idxs[t][q], idxs[t][r])] = (
-                        A[t][np.ix_(idxs[t][q], idxs[t][r])] <= beta_mat[t, q, r]
-                    ) * 1.0
+                    if len(beta_mat.shape) == 3:
+                        A[t][np.ix_(idxs[t][q], idxs[t][r])] = (
+                            A[t][np.ix_(idxs[t][q], idxs[t][r])] <= beta_mat[t, q, r]
+                        ) * 1.0
+                    elif len(beta_mat.shape) == 2:
+                        A[t][np.ix_(idxs[t][q], idxs[t][r])] = (
+                            A[t][np.ix_(idxs[t][q], idxs[t][r])] <= beta_mat[q, r]
+                        ) * 1.0
                 else:
                     if q == r:
                         A[t][np.ix_(idxs[t][q], idxs[t][r])] = (
@@ -351,7 +357,329 @@ def sample_dynsbm_meta(
     return {
         "A": np.ascontiguousarray(A.transpose(1, 2, 0)),
         "Z": np.ascontiguousarray(Z),
-        "sizes": np.ascontiguousarray(sizes),
         "X": {k: np.ascontiguousarray(v) for k, v in Xt.items()},
+        "meta_part": np.ascontiguousarray(meta_part),
     }
+
+
+def gen_test_data(
+    test_no="000",
+    n_samps=20,
+    N=100,
+    Q=4,
+    meta_Q=None,
+    p_in=None,
+    p_out=None,
+    beta_mat=None,
+    T=5,
+    p_stay=None,
+    trans_mat=None,
+    meta_types=["poisson", "indep bernoulli"],
+    L=4,
+    meta_dims=None,
+    pois_params=None,
+    base_bern_params=None,
+    indep_bern_params=None,
+    sample_meta_params=False,
+    meta_aligned=True,
+    save=False,
+    export_dir=".",
+):
+    """Generate test data given params (multiple runs, 
+    optionally saved)
+    
+    Args:
+        test_no (_type_): _description_
+        n_samps (int, optional): _description_. Defaults to 20.
+        N (int, optional): _description_. Defaults to 100.
+        Q (int, optional): _description_. Defaults to 4.
+        meta_Q (_type_, optional): _description_. Defaults to None.
+        p_in (_type_, optional): _description_. Defaults to None.
+        p_out (_type_, optional): _description_. Defaults to None.
+        beta_mat (_type_, optional): _description_. Defaults to None.
+        T (int, optional): _description_. Defaults to 5.
+        p_stay (_type_, optional): _description_. Defaults to None.
+        trans_mat (_type_, optional): _description_. Defaults to None. 
+        meta_types (list, optional): _description_. Defaults to ["poisson", "indep bernoulli"].
+        L (int, optional): _description_. Defaults to 4.
+        meta_dims (_type_, optional): _description_. Defaults to None.
+        pois_params (_type_, optional): _description_. Defaults to None.
+        base_bern_params (_type_, optional): _description_. Defaults to None.
+        indep_bern_params (_type_, optional): _description_. Defaults to None.
+        sample_meta_params (bool,optional): _description_. Defaults to False.
+        meta_aligned (bool, optional): _description_. Defaults to True.
+        save (bool, optional): _description_. Defaults to False.
+        export_dir (str, optional): _description_. Defaults to ".".
+
+    Returns:
+        _type_: _description_
+        
+    Example for test 7 - misaligned metadata for relatively difficult test (poor group stability)
+    gen_test_data(
+        7,
+        n_samps=20,
+        N=100,
+        Q=4,
+        p_in=0.4,
+        p_out=0.1,
+        p_stay=0.6,
+        T=5,
+        meta_types=["poisson", "indep bernoulli"],
+        L=4,
+        meta_aligned=False,
+        save=True,
+        export_dir='.',
+    )
+    """
+    if "poisson" in meta_types and pois_params is None:
+        pois_params = np.array(
+            [[[5 * (q + 1)] for q in range(Q)] for t in range(T)]
+        ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
+    if "indep bernoulli" in meta_types and indep_bern_params is None:
+        if base_bern_params is None:
+            base_bern_params = 0.1 * (
+                np.ones((L, 1, T))
+            )  # +np.random.normal(loc=0,scale=0.1))
+        indep_bern_params = np.concatenate(
+            [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q)], axis=1
+        )
+    if sample_meta_params:
+        # TODO: allow generalisation of params to sample around
+        meta_params = [
+            [
+                np.array(
+                    [
+                        [[np.random.randint(3, high=12)] for q in range(Q)]
+                        for t in range(T)
+                    ]
+                ).T,
+                np.random.rand(L, Q, T),
+            ]
+            for _ in range(n_samps)
+        ]
+    else:
+        meta_params = [pois_params, indep_bern_params]
+
+    if meta_dims is None and meta_types == ["poisson", "indep bernoulli"]:
+        meta_dims = [1, L]
+
+    params = {
+        "N": N,
+        "Q": Q,
+        "meta_Q": meta_Q,
+        "block_params": {"p_in": p_in, "p_out": p_out, "beta_mat": beta_mat},
+        "p_stay": p_stay,
+        "trans_mat": trans_mat,
+        "T": T,
+        "meta_types": meta_types,
+        "L": L,
+        "meta_dims": meta_dims,
+        "meta_params": meta_params,
+    }
+
+    tests = []
+    # meta_parts = []
+    if trans_mat is None:
+        trans_mat = gen_trans_mat(p_stay, Q)
+
+    for samp_no in range(n_samps):
+        Z_1 = np.random.randint(0, high=Q, size=(N,))
+        sizes = np.array([len([i for i in Z_1 if i == q]) for q in range(Q)])
+        cum_size = np.cumsum(sizes)
+        Z_1 = np.zeros((N,))
+        Z_1[: cum_size[0]] = 0
+        for q in range(1, Q):
+            Z_1[cum_size[q - 1] : cum_size[q]] = q
+
+        if meta_aligned:
+            meta_part = None
+        else:
+            if meta_Q is None:
+                meta_Q = Q
+            meta_part = evolve_Z(
+                np.random.randint(0, high=meta_Q, size=(N,)),
+                gen_trans_mat(p_stay, meta_Q),
+                T,
+            )  # TODO: allow to pass more general transitions for metadata
+            # meta_parts.append(meta_part)
+
+        if not sample_meta_params:
+            test = sample_dynsbm_meta(
+                Z_1,
+                Q=Q,
+                T=T,
+                meta_types=meta_types,
+                meta_dims=meta_dims,
+                meta_params=meta_params,
+                p_in=p_in,
+                p_out=p_out,
+                beta_mat=beta_mat,
+                trans_prob=trans_mat,
+                meta_part=meta_part,
+            )
+        else:
+            test = sample_dynsbm_meta(
+                Z_1,
+                Q=Q,
+                T=T,
+                meta_types=meta_types,
+                meta_dims=meta_dims,
+                meta_params=meta_params[samp_no],
+                p_in=p_in,
+                p_out=p_out,
+                beta_mat=beta_mat,
+                trans_prob=trans_mat,
+                meta_part=meta_part,
+            )
+        tests.append(test)
+
+    if save:
+        with open(export_dir + f"/test{test_no}_params.pkl", "wb") as f:
+            pickle.dump(params, f)
+        with open(export_dir + f"/test{test_no}_data.pkl", "wb") as f:
+            pickle.dump(tests, f)
+
+    return tests
+
+
+################################################################
+##################   SPECIFY DEFAULT PARAMS   ##################
+################################################################
+
+default_test_params = {}
+
+n_samps = 20
+default_test_params["n_samps"] = n_samps
+test_no = [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+]
+default_test_params["test_no"] = test_no
+N = [100, 100, 100, 100, 100, 100, 100, 100, 200, 500, 1000, 2000]
+default_test_params["N"] = N
+Q = [4, 4, 4, 4, 4, 4, 4, 4, 4, 6, 8, 12]
+default_test_params["Q"] = Q
+p_in = [
+    0.4,
+    0.4,
+    0.3,
+    0.3,
+    0.4,
+    0.3,
+    0.4,
+    0.3,
+    0.4,
+    0.4,
+    0.4,
+    0.4,
+]
+default_test_params["p_in"] = p_in
+p_out = 0.1
+default_test_params["p_out"] = p_out
+p_stay = [
+    0.8,
+    0.6,
+    0.8,
+    0.6,
+    0.6,
+    0.8,
+    0.6,
+    0.6,
+    0.8,
+    0.8,
+    0.8,
+    0.8,
+]
+default_test_params["p_stay"] = p_stay
+T = 5
+default_test_params["T"] = T
+meta_types = ["poisson", "indep bernoulli"]
+default_test_params["meta_types"] = meta_types
+L = 4
+default_test_params["L"] = L
+meta_dims = [1, L]
+default_test_params["meta_dims"] = meta_dims
+pois_params = [
+    np.array(
+        [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
+    ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
+    for Q_i in Q
+]
+base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
+indep_bern_params = [
+    np.concatenate(
+        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)], axis=1
+    )
+    for Q_i in Q
+]
+meta_params = list(zip(pois_params, indep_bern_params))
+default_test_params["meta_params"] = meta_params
+meta_align = [
+    True,
+    True,
+    True,
+    True,
+    False,
+    False,
+    False,
+    False,
+    True,
+    True,
+    True,
+    True,
+]
+default_test_params["meta_align"] = meta_align
+
+# OG paper tests
+og_test_params = {}
+og_test_params["test_no"] = []
+og_test_params["n_samps"] = n_samps
+Q = 2
+og_test_params["Q"] = Q
+N = 100
+og_test_params["N"] = N
+Ts = [5, 10]
+og_test_params["T"] = []
+beta_11 = np.array([0.2, 0.25, 0.3, 0.4, 0.3])
+beta_12 = np.array([0.1, 0.1, 0.1, 0.1, 0.1])
+beta_22 = np.array([0.15, 0.2, 0.2, 0.2, 0.3])
+beta_mats = [
+    np.array([[beta_11[i], beta_12[i]], [beta_12[i], beta_22[i]]])
+    for i in range(len(beta_11))
+]
+og_test_params["beta_mat"] = []
+
+# pi_low, pi_medium, pi_high from paper
+trans_mats = [gen_trans_mat(p, Q) for p in [0.6, 0.75, 0.9]]
+og_test_params["trans_mat"] = []
+
+meta_types = ["poisson", "indep bernoulli"]
+og_test_params["meta_types"] = meta_types
+L = 4
+og_test_params["L"] = L
+meta_dims = [1, L]
+og_test_params["meta_dims"] = meta_dims
+
+# meta_params_og = []
+og_test_params["sample_meta_params"] = True
+
+for bn, beta_mat in enumerate(beta_mats):
+    for trn, trans_mat in enumerate(trans_mats):
+        for tn, T in enumerate(Ts):
+            testno = 13 + bn * len(trans_mats) * len(Ts) + trn * len(Ts) + tn
+            # print(testno)
+            og_test_params["test_no"].append(testno)
+            og_test_params["T"].append(T)
+            og_test_params["trans_mat"].append(trans_mat)
+            og_test_params["beta_mat"].append(beta_mat)
 
