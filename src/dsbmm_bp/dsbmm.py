@@ -378,8 +378,9 @@ class DSBMMBase:
         if init:
             # case of no marginals / true partition provided to calculate most likely params
             self._alpha = np.array([(self.Z[:, 0] == q).mean() for q in range(self.Q)])
-            self._alpha[self._alpha < TOL] = TOL
             self._alpha /= self._alpha.sum()
+            self._alpha[self._alpha < TOL] = TOL
+            self._alpha[self._alpha > 1 - TOL] = 1 - TOL
         else:
             # print("Updating alpha")
             tmp = (
@@ -388,13 +389,13 @@ class DSBMMBase:
             tmp /= tmp.sum()
             tmp[tmp < TOL] = TOL
             tmp[tmp > 1 - TOL] = 1 - TOL
-            if not init:
-                tmp_diff = np.abs(tmp - self._alpha).mean()
-                if np.isnan(tmp_diff):
-                    raise RuntimeError("Problem updating alpha")
-                print("Alpha diff:", np.round_(tmp_diff, 3))
-                self.diff += tmp_diff
-            self._alpha = tmp
+
+            tmp_diff = np.abs(tmp - self._alpha).mean()
+            if np.isnan(tmp_diff):
+                raise RuntimeError("Problem updating alpha")
+            print("Alpha diff:", np.round_(tmp_diff, 3))
+            self.diff += tmp_diff
+            self._alpha = learning_rate * tmp + (1 - learning_rate) * self._alpha
 
     def update_pi(self, init, learning_rate):
         if init:
@@ -446,7 +447,9 @@ class DSBMMBase:
                 raise RuntimeError("Problem updating pi")
             print("Pi diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-        self._pi = qqprime_trans
+            self._pi = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
+        else:
+            self._pi = qqprime_trans
 
     def correct_pi(self):
         # print("correcting")
@@ -542,7 +545,9 @@ class DSBMMBase:
                 raise RuntimeError("Problem updating lambda")
             print("Lambda diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-        self._lam = tmp
+            self._lam = learning_rate * tmp + (1 - learning_rate) * self._lam
+        else:
+            self._lam = tmp
 
     def update_beta(self, init, learning_rate):
         beta_num = np.zeros((self.Q, self.Q, self.T))
@@ -630,7 +635,9 @@ class DSBMMBase:
                 raise RuntimeError("Problem updating beta")
             print("Beta diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-        self._beta = tmp
+            self._beta = learning_rate * tmp + (1 - learning_rate) * self._beta
+        else:
+            self._beta = tmp
 
     def update_meta_params(self, init, learning_rate):
         for s, mt in enumerate(self.meta_types):
@@ -695,7 +702,11 @@ class DSBMMBase:
                 raise RuntimeError("Problem updating poisson params")
             print("Poisson diff: ", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-        self._meta_params[s] = tmp
+            self._meta_params[s] = (
+                learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
+            )
+        else:
+            self._meta_params[s] = tmp
 
     def update_indep_bern_meta(self, s, init, learning_rate):
         xi = np.zeros((self.Q, self.T, 1))
