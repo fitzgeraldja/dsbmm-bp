@@ -2,7 +2,9 @@ import simulation
 import data_processer
 import dsbmm
 import bp
-from utils import nb_ari_local  # , nb_nmi_local
+
+# from utils import nb_ari_local  # , nb_nmi_local
+from sklearn.metrics import adjusted_rand_score as ari
 import numpy as np
 from numba.typed import List
 from sklearn.cluster import MiniBatchKMeans
@@ -174,7 +176,14 @@ class EM:
         # wait for a second to execute in case of parallelisation issues
         time.sleep(1)
         try:
-            aris = nb_ari_local(self.bp.model.jit_model.Z, true_Z)
+            # could try and replace with numba again but seemed
+            # to cause issues
+            aris = np.array(
+                [
+                    ari(true, pred)
+                    for true, pred in zip(self.bp.model.jit_model.Z.T, true_Z.T)
+                ]
+            )
             if self.verbose:
                 print("ARIs:", aris)
             return aris
@@ -188,6 +197,27 @@ class EM:
     # print("NMIs: ", nb_nmi_local(bp_ex.model.Z, Z))
 
     # print("Overlaps:", (bp_ex.model.Z == Z).sum(axis=0) / Z.shape[0])
+
+
+def calc_present(A):
+    """Calculate whether nodes present at each time period given adjacency
+    (i.e. either send or receive a link)
+
+    Args:
+        A (_type_): N x N x T adjacency (assume sparse)
+    """
+    present = (A.sum(axis=0) > 0) | (A.sum(axis=1) > 0)
+    return present
+
+
+def calc_trans_present(present):
+    """Calculate whether nodes present in adjacent time periods and so should be
+    counted in transitions
+
+    Args:
+        present (_type_): N x T boolean for presence of node i at time t 
+    """
+    return present[:, :-1] & present[:, 1:]
 
 
 def effective_pi(Z):
@@ -215,44 +245,45 @@ if __name__ == "__main__":
     ## Simulate data (for multiple tests)
     default_test_params = simulation.default_test_params
     og_test_params = simulation.og_test_params
+    test_params = og_test_params  # choose which set of tests to run
     # NB n_samps, p_out, T, meta_types, L, meta_dims all fixed
     # in default test set - all other params change over 12 tests
     all_samples = []
     params_set = []
-    for i, testno in enumerate(og_test_params["test_no"]):
+    for i, testno in enumerate(test_params["test_no"]):
         if i < 2:
             # default:
             # params = {
             #     "test_no": testno,
-            #     "N": default_test_params["N"][i],
-            #     "Q": default_test_params["Q"][i],
-            #     "p_in": default_test_params["p_in"][i],
-            #     "p_stay": default_test_params["p_stay"][i],
-            #     "n_samps": default_test_params["n_samps"],
-            #     "p_out": default_test_params["p_out"],
-            #     "T": default_test_params["T"],
-            #     "meta_types": default_test_params["meta_types"],
-            #     "L": default_test_params["L"],
-            #     "meta_dims": default_test_params["meta_dims"],
-            #     "pois_params": default_test_params["meta_params"][i][0],
-            #     "indep_bern_params": default_test_params["meta_params"][i][1],
-            #     "meta_aligned": default_test_params["meta_align"][i],
+            #     "N": test_params["N"][i],
+            #     "Q": test_params["Q"][i],
+            #     "p_in": test_params["p_in"][i],
+            #     "p_stay": test_params["p_stay"][i],
+            #     "n_samps": test_params["n_samps"],
+            #     "p_out": test_params["p_out"],
+            #     "T": test_params["T"],
+            #     "meta_types": test_params["meta_types"],
+            #     "L": test_params["L"],
+            #     "meta_dims": test_params["meta_dims"],
+            #     "pois_params": test_params["meta_params"][i][0],
+            #     "indep_bern_params": test_params["meta_params"][i][1],
+            #     "meta_aligned": test_params["meta_align"][i],
             # }
             # og:
             params = {
                 "test_no": testno,
-                "N": og_test_params["N"],
-                "Q": og_test_params["Q"],
-                "beta_mat": og_test_params["beta_mat"][i],
-                "trans_mat": og_test_params["trans_mat"][i],
-                "n_samps": og_test_params["n_samps"],
-                "T": og_test_params["T"][i],
-                "meta_types": og_test_params["meta_types"],
-                "L": og_test_params["L"],
-                "meta_dims": og_test_params["meta_dims"],
+                "N": test_params["N"],
+                "Q": test_params["Q"],
+                "beta_mat": test_params["beta_mat"][i],
+                "trans_mat": test_params["trans_mat"][i],
+                "n_samps": test_params["n_samps"],
+                "T": test_params["T"][i],
+                "meta_types": test_params["meta_types"],
+                "L": test_params["L"],
+                "meta_dims": test_params["meta_dims"],
                 # "pois_params": og_test_params["meta_params"][i][0],
                 # "indep_bern_params": og_test_params["meta_params"][i][1],
-                "sample_meta_params": og_test_params["sample_meta_params"],
+                "sample_meta_params": test_params["sample_meta_params"],
             }
             # print(params)
             samples = simulation.gen_test_data(**params)
@@ -290,86 +321,100 @@ if __name__ == "__main__":
     pass  # not needed as simulating directly in form needed
 
     use_X_init = False
-    test_aris = np.zeros((len(all_samples), 20, 5))
+    if len(test_params["T"]) > 1:
+        test_aris = [np.zeros((20, T)) for T in test_params["T"]]
+    else:
+        test_aris = np.zeros((len(all_samples), 20, 5))
     for test_no, (samples, params) in enumerate(zip(all_samples, params_set)):
         for samp_no, sample in enumerate(samples):
-            print()
-            print("$" * 12, "At sample", samp_no, "$" * 12)
-            sample.update(params)
-            ## Initialise model
-            true_Z = sample["Z"]
+            if samp_no < 1:
+                print()
+                print("$" * 12, "At sample", samp_no, "$" * 12)
+                sample.update(params)
+                present = calc_present(sample["A"])
+                trans_present = calc_trans_present(present)
+                print(present)
+                print(trans_present)
+                ## Initialise model
+                true_Z = sample["Z"]
 
-            if use_X_init:
-                kmeans_mat = np.concatenate(
-                    [
-                        sample["A"].reshape(params["N"], -1),
-                        *[
-                            Xs.transpose(1, 2, 0).reshape(params["N"], -1)
-                            for Xs in sample["X"].values()
+                if use_X_init:
+                    kmeans_mat = np.concatenate(
+                        [
+                            sample["A"].reshape(params["N"], -1),
+                            *[
+                                Xs.transpose(1, 2, 0).reshape(params["N"], -1)
+                                for Xs in sample["X"].values()
+                            ],
                         ],
-                    ],
-                    axis=1,
-                )  # done for fixing labels over time
-            else:
-                kmeans_mat = sample["A"].reshape(
-                    params["N"], -1
-                )  # done for fixing labels over time
-            kmeans_labels = (
-                MiniBatchKMeans(
-                    n_clusters=params["Q"],
-                    #   random_state=0, # TODO: consider allowing fixing this for reproducibility
-                    batch_size=20,
-                    max_iter=10,
+                        axis=1,
+                    )  # done for fixing labels over time
+                else:
+                    kmeans_mat = sample["A"].reshape(
+                        params["N"], -1
+                    )  # done for fixing labels over time
+                kmeans_labels = (
+                    MiniBatchKMeans(
+                        n_clusters=params["Q"],
+                        #   random_state=0, # TODO: consider allowing fixing this for reproducibility
+                        batch_size=20,
+                        max_iter=10,
+                    )
+                    .fit_predict(kmeans_mat)
+                    .reshape(-1, 1)
                 )
-                .fit_predict(kmeans_mat)
-                .reshape(-1, 1)
-            )
-            init_Z = np.tile(kmeans_labels, (1, params["T"]))
-            # add some noise to init clustering
-            prop = 0.1  # proportion of noise to add
-            mask = np.random.rand(*init_Z.shape) < prop
-            init_Z[mask] += np.random.randint(
-                -sample["Q"] // 2, sample["Q"] // 2, size=(sample["N"], sample["T"])
-            )[mask]
-            init_Z[init_Z < 0] = 0
-            init_Z[init_Z > sample["Q"] - 1] = sample["Q"] - 1
-            try:
-                assert init_Z.shape == sample["Z"].shape
-            except:
-                print(init_Z.shape)
-                print(sample["Z"].shape)
-                raise ValueError("Wrong partition shape")
-            sample["Z"] = init_Z
-            ## Initialise
-            em = EM(sample)
-            ## Score from K means
-            print("Before fitting model, K-means init partition has")
-            em.ari_score(true_Z)
-            ## Fit to given data
-            em.fit(true_Z=true_Z, learning_rate=0.2)
-            ## Score after fit
-            test_aris[test_no, samp_no, :] = em.ari_score(true_Z)
-            print("Z inferred:", em.bp.model.jit_model.Z)
-            ## Show transition matrix inferred
-            print("Pi inferred:", em.bp.trans_prob)
-            try:
-                print("Versus true pi:", params["trans_mat"])
-            except:
+                init_Z = np.tile(kmeans_labels, (1, params["T"]))
+                # add some noise to init clustering
+                prop = 0.1  # proportion of noise to add
+                mask = np.random.rand(*init_Z.shape) < prop
+                init_Z[mask] += np.random.randint(
+                    -sample["Q"] // 2, sample["Q"] // 2, size=(sample["N"], sample["T"])
+                )[mask]
+                init_Z[init_Z < 0] = 0
+                init_Z[init_Z > sample["Q"] - 1] = sample["Q"] - 1
+                try:
+                    assert init_Z.shape == sample["Z"].shape
+                except:
+                    print(init_Z.shape)
+                    print(sample["Z"].shape)
+                    raise ValueError("Wrong partition shape")
+                sample["Z"] = init_Z
+                ## Initialise
+                em = EM(sample)
+                ## Score from K means
+                print("Before fitting model, K-means init partition has")
+                em.ari_score(true_Z)
+                ## Fit to given data
+                em.fit(true_Z=true_Z, learning_rate=0.2)
+                ## Score after fit
+                try:
+                    test_aris[test_no, samp_no, :] = em.ari_score(true_Z)
+                except:
+                    test_aris[test_no][samp_no, :] = em.ari_score(true_Z)
+                print("Z inferred:", em.bp.model.jit_model.Z)
+                ## Show transition matrix inferred
+                print("Pi inferred:", em.bp.trans_prob)
+                try:
+                    print("Versus true pi:", params["trans_mat"])
+                except:
+                    print(
+                        "Versus true pi:",
+                        simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
+                    )
+                print("True effective pi:", effective_pi(true_Z))
                 print(
-                    "Versus true pi:",
-                    simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
+                    "Effective pi from partition inferred:",
+                    effective_pi(em.bp.model.jit_model.Z),
                 )
-            print("True effective pi:", effective_pi(true_Z))
-            print(
-                "Effective pi from partition inferred:",
-                effective_pi(em.bp.model.jit_model.Z),
-            )
-            time.sleep(
-                1
-            )  # sleep a second to allow threads to complete, TODO: properly sort this
+                time.sleep(
+                    1
+                )  # sleep a second to allow threads to complete, TODO: properly sort this
         print(f"Finished test {test_no}:")
         print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
 
     print("Mean ARIs inferred for each test:")
-    print(test_aris.mean(axis=(1, 2)))
+    try:
+        print(test_aris.mean(axis=(1, 2)))
+    except:
+        print(np.array([aris.mean() for aris in test_aris]))
 

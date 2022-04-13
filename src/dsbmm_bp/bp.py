@@ -50,6 +50,7 @@ class BPBase:
     T: int
     _beta: float  # temperature
     deg_corr: bool
+    directed: bool
     model: DSBMMBase.class_type.instance_type
     A: float64[:, :, ::1]
     # X: list[np.ndarray]
@@ -84,6 +85,7 @@ class BPBase:
         self.N = self.model.N
         self.Q = self.model.Q
         self.deg_corr = self.model.deg_corr
+        self.directed = self.model.directed
         self.A = self.model.A
         self.n_msgs = np.count_nonzero(self.A) + self.N * (self.T - 1) * 2
         self.X = self.model.X
@@ -393,9 +395,9 @@ class BPBase:
             )  # for whatever reason this stays 2d, so need to flatten first
             # print("jtoi_msg:", jtoi_msgs.shape)
             tmp = np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs)
-            for q in range(self.Q):
-                if tmp[q] < TOL:
-                    tmp[q] = TOL
+            # for q in range(self.Q):
+            #     if tmp[q] < TOL:
+            #         tmp[q] = TOL
             try:
                 assert not np.isnan(tmp).sum() > 0
             except:
@@ -423,7 +425,7 @@ class BPBase:
             #     print("spatial msg term:", msg)
             #     raise RuntimeError("Problem vanishing spatial msg term")
         msg *= np.exp(-1.0 * self._h[:, t])
-        msg[msg < TOL] = TOL
+        # msg[msg < TOL] = TOL
         return msg, field_iter
 
     def spatial_msg_term_large_deg(self, i, t, nbrs):
@@ -798,8 +800,17 @@ class BPBase:
             )  # TODO: create inverse array that holds these values
             #       in memory rather than calc on the fly each time
             i_idx = self.nbrs[t][j] == i
-            tmp = np.outer(self._psi_e[t][i][j_idx, :], self._psi_e[t][j][i_idx, :])
-            tmp += np.outer(self._psi_e[t][j][i_idx, :], self._psi_e[t][i][j_idx, :])
+            # tmp = np.outer(self._psi_e[t][i][j_idx, :], self._psi_e[t][j][i_idx, :])
+            # if not self.directed:
+            #     tmp += np.outer(
+            #         self._psi_e[t][j][i_idx, :], self._psi_e[t][i][j_idx, :]
+            #     )
+            tmp = np.zeros((self.Q, self.Q))
+            for q in range(self.Q):
+                tmp[q, q] += self._psi_e[t][i][j_idx,q]*self._psi_e[t][j][i_idx,q]
+                for r in range(q + 1, self.Q):
+                    tmp
+
             tmp *= self.block_edge_prob[:, :, t]
             tmp /= tmp.sum()
             for q in range(self.Q):

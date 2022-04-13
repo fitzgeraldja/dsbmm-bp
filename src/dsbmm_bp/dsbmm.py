@@ -83,6 +83,7 @@ class DSBMMBase:
     meta_types: meta_types_type
     meta_dims: int32[::1]
     deg_corr: bool
+    directed: bool
     degs: float64[:, :, ::1]  # N x T x [in,out]
     kappa: float64[:, :, ::1]  # Q x T x [in,out]
     edgemat: float64[:, :, ::1]
@@ -112,6 +113,7 @@ class DSBMMBase:
         Z,
         Q,
         deg_corr,
+        directed,
         meta_types,
     ):
         # if data is not None:
@@ -123,6 +125,8 @@ class DSBMMBase:
         self.N = self.A.shape[0]
         self.E = np.array(list(map(np.count_nonzero, self.A.transpose(2, 0, 1))))
         self.T = self.A.shape[-1]
+        # TODO: consider making this unique if undirected (i.e. so
+        # don't loop over both i and j each time)
         self._edge_locs = np.array(
             list(zip(*self.A.nonzero()))
         )  # E x 3 array w rows [i,j,t] where A[i,j,t]!=0
@@ -151,6 +155,7 @@ class DSBMMBase:
         assert self.A is not None
         assert self.X is not None
         self.deg_corr = deg_corr
+        self.directed = directed
         self.degs = self.compute_degs(self.A)
         self.kappa = self.compute_group_degs()
         self.edgemat = self.compute_block_edgemat()
@@ -377,35 +382,39 @@ class DSBMMBase:
     def update_alpha(self, init, learning_rate):
         if init:
             # case of no marginals / true partition provided to calculate most likely params
-            self._alpha = np.array([(self.Z[:, 0] == q).mean() for q in range(self.Q)])
+            self._alpha = np.array([(self.Z == q).mean() for q in range(self.Q)])
             self._alpha /= self._alpha.sum()
             self._alpha[self._alpha < TOL] = TOL
             self._alpha[self._alpha > 1 - TOL] = 1 - TOL
         else:
             # print("Updating alpha")
-            tmp = (
-                self.node_marg[:, 0, :].sum(axis=0) / self.N
+            #
+            tmp = np.array(
+                [self.node_marg[:, :, q].mean() for q in range(self.Q)]
             )  # NB mean w axis argument not supported by numba beyond single integer
+
             tmp /= tmp.sum()
             tmp[tmp < TOL] = TOL
             tmp[tmp > 1 - TOL] = 1 - TOL
 
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._alpha
             tmp_diff = np.abs(tmp - self._alpha).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating alpha")
             print("Alpha diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-            self._alpha = learning_rate * tmp + (1 - learning_rate) * self._alpha
+            self._alpha = tmp
 
     def update_pi(self, init, learning_rate):
+        qqprime_trans = np.zeros((self.Q, self.Q))
         if init:
-            qqprime_trans = np.zeros((self.Q, self.Q))
             for q in range(self.Q):
                 for qprime in range(self.Q):
                     for t in range(1, self.T):
                         tm1_idxs = self.Z[:, t - 1] == q
                         t_idxs = self.Z[:, t] == qprime
                         qqprime_trans[q, qprime] += (tm1_idxs * t_idxs).sum()
+            qqprime_trans /= np.expand_dims(qqprime_trans.sum(axis=1), 1)
             # TODO: provide different cases for non-uniform init clustering
             # NB for uniform init clustering this provides too homogeneous pi, and is more important now
             p = 0.8
@@ -423,14 +432,16 @@ class DSBMMBase:
             # # only takes integers (rather than axis=(0,1) as
             # # we would want) - can't use this as node_marg sums could
             # # be tiny / zero
-            tot_marg = self.node_marg[:, :-1, :].sum(axis=0).sum(axis=0)
-            print("tot marg sums:", tot_marg)
-            for q in range(self.Q):
-                if tot_marg[q] > TOL:
-                    qqprime_trans[q, :] = qqprime_trans[q, :] / tot_marg[q]
-                else:
-                    raise RuntimeError("Problem with node marginals")
-                    # qqprime_trans[q, :] = TOL
+            # below is unnecessary as can enforce normalisation directly
+            # - just introduces instability
+            # tot_marg = self.node_marg[:, :-1, :].sum(axis=0).sum(axis=0)
+            # print("tot marg sums:", tot_marg)
+            # for q in range(self.Q):
+            #     if tot_marg[q] > TOL:
+            #         qqprime_trans[q, :] = qqprime_trans[q, :] / tot_marg[q]
+            #     else:
+            #         raise RuntimeError("Problem with node marginals")
+            # qqprime_trans[q, :] = TOL
             # self.correct_pi()
         qqprime_trans = qqprime_trans / np.expand_dims(
             qqprime_trans.sum(axis=-1), 1
@@ -442,12 +453,13 @@ class DSBMMBase:
                 if qqprime_trans[q, qprime] > 1 - TOL:
                     qqprime_trans[q, qprime] = 1 - TOL
         if not init:
-            tmp_diff = np.abs(qqprime_trans - self._pi).mean()
+            tmp = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
+            tmp_diff = np.abs(tmp - self._pi).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating pi")
             print("Pi diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-            self._pi = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
+            self._pi = tmp
         else:
             self._pi = qqprime_trans
 
@@ -467,6 +479,7 @@ class DSBMMBase:
         if init:
             for i, j, t in self._edge_locs:
                 lam_num[self.Z[i, t], self.Z[j, t], t] += self.A[i, j, t]
+
             # np.array(
             #     [
             #         [
@@ -487,15 +500,35 @@ class DSBMMBase:
             # )
             # lam_den = np.einsum("tq,tr->tqr", lam_den, lam_den)
             for q in range(self.Q):
-                for r in range(self.Q):
-                    for t in range(self.T):
+                for t in range(self.T):
+                    lam_den[q, q, t] = (
+                        self.kappa[q, t, 1] * self.kappa[q, t, 0]
+                    )  # TODO: check right for r==q
+                    if lam_num[q, q, t] < TOL:
+                        lam_num[q, q, t] = TOL
+                    if lam_den[q, q, t] < TOL:
+                        lam_den[q, q, t] = 1.0
+                    for r in range(q + 1, self.Q):
                         lam_den[q, r, t] = (
-                            self.kappa[q, t, 0] * self.kappa[r, t, 0]
+                            self.kappa[q, t, 1] * self.kappa[r, t, 0]
                         )  # TODO: check right in directed case
                         if lam_num[q, r, t] < TOL:
                             lam_num[q, r, t] = TOL
                         if lam_den[q, r, t] < TOL:
                             lam_den[q, r, t] = 1.0
+                        if not self.directed:
+                            lam_num[r, q, t] = lam_num[q, r, t]
+                            lam_den[r, q, t] = lam_den[q, r, t]
+                    if self.directed:
+                        for r in range(q):
+                            lam_den[q, r, t] = (
+                                self.kappa[q, t, 1] * self.kappa[r, t, 0]
+                            )  # TODO: check right in directed case
+                            if lam_num[q, r, t] < TOL:
+                                lam_num[q, r, t] = TOL
+                            if lam_den[q, r, t] < TOL:
+                                lam_den[q, r, t] = 1.0
+
             # lam_den = np.array(
             #     [
             #         [
@@ -511,41 +544,58 @@ class DSBMMBase:
         else:
             # lam_num = np.einsum("ijtqr,ijt->qrt", self.twopoint_edge_marg, self.A)
             for q in range(self.Q):
-                for r in range(self.Q):
+                for r in range(q, self.Q):
                     for i, j, t in self._edge_locs:
                         j_idx = self.nbrs[t][i] == j
+                        # if r==q: # TODO: special treatment?
                         lam_num[q, r, t] += (
                             self.twopoint_edge_marg[t][i][j_idx, q, r] * self.A[i, j, t]
                         )
                     for t in range(self.T):
                         if lam_num[q, r, t] < TOL:
                             lam_num[q, r, t] = TOL
+                        if not self.directed:
+                            lam_num[r, q, t] = lam_num[q, r, t]
+                if self.directed:
+                    for r in range(q):
+                        for i, j, t in self._edge_locs:
+                            j_idx = self.nbrs[t][i] == j
+                            # if r==q: # TODO: special treatment?
+                            lam_num[q, r, t] += (
+                                self.twopoint_edge_marg[t][i][j_idx, q, r]
+                                * self.A[i, j, t]
+                            )
 
             # lam_den = np.einsum("itq,it->qt", self.node_marg, self.degs)
             # lam_den = np.einsum("qt,rt->qrt", lam_den, lam_den)
-            marg_kappa = np.zeros((self.Q, self.T))
+            marg_kappa_out = np.zeros((self.Q, self.T))
+            marg_kappa_in = np.zeros((self.Q, self.T))
             for q in range(self.Q):
                 for t in range(self.T):
-                    marg_kappa[q, t] = (
-                        self.node_marg[:, t, q] * self.degs[:, t, 0]
+                    marg_kappa_out[q, t] = (
+                        self.node_marg[:, t, q] * self.degs[:, t, 1]
                     ).sum(
                         axis=0
                     )  # TODO: again check this uses right deg if directed
+                    marg_kappa_in[q, t] = (
+                        self.node_marg[:, t, q] * self.degs[:, t, 0]
+                    ).sum(axis=0)
             for q in range(self.Q):
                 for r in range(self.Q):
                     for t in range(self.T):
-                        lam_den[q, r, t] = marg_kappa[q, t] * marg_kappa[r, t]
+                        lam_den[q, r, t] = marg_kappa_out[q, t] * marg_kappa_in[r, t]
                         if lam_den[q, r, t] < TOL:
                             lam_den[q, r, t] = 1.0
         # NB use relative rather than absolute difference here as lam could be large
         tmp = lam_num / lam_den
         if not init:
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._lam
             tmp_diff = np.abs((tmp - self._lam) / self._lam).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating lambda")
             print("Lambda diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-            self._lam = learning_rate * tmp + (1 - learning_rate) * self._lam
+            self._lam = tmp
         else:
             self._lam = tmp
 
@@ -575,13 +625,13 @@ class DSBMMBase:
             # )
             # beta_den = np.einsum("tq,tr->tqr", beta_den, beta_den)
             for q in range(self.Q):
-                for r in range(self.Q):
+                for r in range(q, self.Q):
                     for t in range(self.T):
                         beta_den[q, r, t] = (
-                            self.kappa[q, t, 0] * self.kappa[r, t, 0]
-                        )  # TODO: check right in directed case
-                        if beta_num[q, r, t] < TOL:
-                            beta_num[q, r, t] = TOL
+                            self.kappa[q, t, 1] * self.kappa[r, t, 0]
+                        )  # TODO: check right in directed case, and if r==q
+                        # if beta_num[q, r, t] < TOL:
+                        #     beta_num[q, r, t] = TOL
                         if beta_den[q, r, t] < TOL:
                             beta_den[q, r, t] = 1.0
 
@@ -590,7 +640,7 @@ class DSBMMBase:
             #     "ijtqr,ijt->qrt", self.twopoint_edge_marg, (self.A > 0)
             # )
             for q in range(self.Q):
-                for r in range(self.Q):
+                for r in range(q, self.Q):
                     for i, j, t in self._edge_locs:
                         j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
                         # print(self.twopoint_edge_marg[t][i][j_idx, q, r])
@@ -604,21 +654,34 @@ class DSBMMBase:
                             print("twopoint marg: ", val)
                             raise RuntimeError("Problem updating beta")
                         beta_num[q, r, t] += val
+                    if not self.directed:
+                        beta_num[r, q, t] = beta_num[q, r, t]
+                if self.directed:
+                    for r in range(q):
+                        for i, j, t in self._edge_locs:
+                            j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
+                            val = self.twopoint_edge_marg[t][i][j_idx, q, r][0]
+                            beta_num[q, r, t] += val
 
             # beta_den = np.einsum("itq,it->qt", self.node_marg, self.degs)
             # beta_den = np.einsum("qt,rt->qrt", beta_den, beta_den)
             group_marg = np.zeros((self.Q, self.T))
             for q in range(self.Q):
                 for t in range(self.T):
-                    group_marg[q, t] = self.node_marg[:, t, q].sum(
-                        axis=0
-                    )  # TODO: again check this uses right deg if directed
+                    group_marg[q, t] = self.node_marg[
+                        :, t, q
+                    ].sum()  # TODO: again check this uses right deg if directed
             for q in range(self.Q):
-                for r in range(self.Q):
-                    for t in range(self.T):
+                for t in range(self.T):
+                    for r in range(q, self.Q):
+                        # TODO: check if right if r==q
                         beta_den[q, r, t] = group_marg[q, t] * group_marg[r, t]
+
                         if beta_den[q, r, t] < TOL:
                             beta_den[q, r, t] = 1.0
+                        # if not self.directed: same either way (should this be?)
+                        beta_den[r, q, t] = beta_den[q, r, t]
+
         # TODO: fix for case where beta_den very small (just consider using logs)
         # correct for numerical stability
         tmp = beta_num / beta_den
@@ -630,12 +693,13 @@ class DSBMMBase:
                     elif tmp[q, r, t] > 1 - TOL:
                         tmp[q, r, t] = 1 - TOL
         if not init:
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._beta
             tmp_diff = np.abs(tmp - self._beta).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating beta")
             print("Beta diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-            self._beta = learning_rate * tmp + (1 - learning_rate) * self._beta
+            self._beta = tmp
         else:
             self._beta = tmp
 
@@ -695,6 +759,7 @@ class DSBMMBase:
         # 1e-50 (just consider using logs)
         tmp = zeta / xi
         if not init:
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
             tmp_diff = np.abs(
                 (tmp - self._meta_params[s]) / self._meta_params[s]
             ).mean()
@@ -702,9 +767,7 @@ class DSBMMBase:
                 raise RuntimeError("Problem updating poisson params")
             print("Poisson diff: ", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-            self._meta_params[s] = (
-                learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
-            )
+            self._meta_params[s] = tmp
         else:
             self._meta_params[s] = tmp
 
@@ -761,14 +824,13 @@ class DSBMMBase:
                     elif tmp[q, t, l] > 1 - TOL:
                         tmp[q, t, l] = 1 - TOL
         if not init:
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
             tmp_diff = np.abs(tmp - self._meta_params[s]).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating IB params")
             print("IB diff: ", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
-            self._meta_params[s] = (
-                learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
-            )
+            self._meta_params[s] = tmp
         else:
             self._meta_params[s] = tmp
 
@@ -795,6 +857,7 @@ class DSBMM:
         Z=None,
         Q=None,
         deg_corr=False,
+        directed=False,
         meta_types=["poisson", "indep bernoulli"],
     ):
         # if data is not None:
@@ -802,7 +865,9 @@ class DSBMM:
         #     self.X = data["X"]
         #     self.Z = data.get("Z", None)
         # else:
-        self.jit_model = DSBMMBase(A, X, X_poisson, X_ib, Z, Q, deg_corr, meta_types)
+        self.jit_model = DSBMMBase(
+            A, X, X_poisson, X_ib, Z, Q, deg_corr, directed, meta_types
+        )
         # self.A = A
         # if X_poisson is not None and X_ib is not None:
         #     tmp = List()
