@@ -7,7 +7,7 @@ import bp
 from sklearn.metrics import adjusted_rand_score as ari
 import numpy as np
 from numba.typed import List
-from sklearn.cluster import MiniBatchKMeans
+from sklearn.cluster import MiniBatchKMeans, KMeans
 import time
 
 import faulthandler
@@ -44,12 +44,12 @@ class EM:
         # self.X_poisson = data["X_poisson"]
         # self.X_ib = data["X_ib"]
         try:
-            self.Z = data["Z"]
+            self.init_Z = data["Z"]
             # print("Z:")
             # print(Z.flags)
         except:
             if self.verbose:
-                print("No ground truth partition passed")
+                print("No init partition passed")
         try:
             self.Q = data["Q"]
         except:
@@ -58,7 +58,7 @@ class EM:
                     "Inferring Q from given Z:",
                     "\nTaking as max(Z) + 1, so -1 may be used for missing data",
                 )
-            self.Q = self.Z.max() + 1
+            self.Q = self.init_Z.max() + 1
         try:
             self.meta_types = List()
             for mt in data["meta_types"]:
@@ -99,7 +99,7 @@ class EM:
             A=self.A,
             X_poisson=self.X_poisson,
             X_ib=self.X_ib,
-            Z=self.Z,
+            Z=self.init_Z,
             Q=self.Q,
             meta_types=self.meta_types,
         )  # X=X,
@@ -155,7 +155,7 @@ class EM:
             self.bp.model.set_twopoint_time_marg(self.bp.jit_model.twopoint_t_marg)
             if self.verbose:
                 print("\tPassed marginals to DSBMM")
-            self.bp.model.update_params(learning_rate)
+            self.bp.model.update_params(init=False, learning_rate=learning_rate)
             if self.verbose:
                 print("\tUpdated DSBMM params given marginals")
             diff = self.bp.model.jit_model.diff
@@ -170,29 +170,36 @@ class EM:
                 self.bp.model.set_Z_by_MAP()
                 if true_Z is not None:
                     self.ari_score(true_Z)
+                    print()
         self.bp.model.set_Z_by_MAP()
 
-    def ari_score(self, true_Z):
+    def ari_score(self, true_Z, pred_Z=None):
         # wait for a second to execute in case of parallelisation issues
         time.sleep(1)
-        try:
-            # could try and replace with numba again but seemed
-            # to cause issues
-            aris = np.array(
-                [
-                    ari(true, pred)
-                    for true, pred in zip(self.bp.model.jit_model.Z.T, true_Z.T)
-                ]
-            )
+        if pred_Z == None:
+            try:
+                # could try and replace with numba again but seemed
+                # to cause issues
+                aris = np.array(
+                    [
+                        ari(true, pred)
+                        for true, pred in zip(self.bp.model.jit_model.Z.T, true_Z.T)
+                    ]
+                )
+                if self.verbose:
+                    print("ARIs:", aris)
+                return aris
+            except:
+                print(
+                    "Can't provide ARI score - make sure have both",
+                    "provided ground truth \nwhen initialising model,",
+                    "and have called fit",
+                )
+        else:
+            aris = np.array([ari(true, pred) for true, pred in zip(pred_Z.T, true_Z.T)])
             if self.verbose:
                 print("ARIs:", aris)
             return aris
-        except:
-            print(
-                "Can't provide ARI score - make sure have both",
-                "provided ground truth \nwhen initialising model,",
-                "and have called fit",
-            )
 
     # print("NMIs: ", nb_nmi_local(bp_ex.model.Z, Z))
 
@@ -250,8 +257,10 @@ if __name__ == "__main__":
     # in default test set - all other params change over 12 tests
     all_samples = []
     params_set = []
+    chosen_test_idx = 10
+    # print(test_params)
     for i, testno in enumerate(test_params["test_no"]):
-        if i < 2:
+        if i == chosen_test_idx:
             # default:
             # params = {
             #     "test_no": testno,
@@ -326,91 +335,113 @@ if __name__ == "__main__":
     else:
         test_aris = np.zeros((len(all_samples), 20, 5))
     for test_no, (samples, params) in enumerate(zip(all_samples, params_set)):
-        for samp_no, sample in enumerate(samples):
-            if samp_no < 1:
-                print()
-                print("$" * 12, "At sample", samp_no, "$" * 12)
-                sample.update(params)
-                present = calc_present(sample["A"])
-                trans_present = calc_trans_present(present)
-                print(present)
-                print(trans_present)
-                ## Initialise model
-                true_Z = sample["Z"]
+        if test_no < 1:
+            for samp_no, sample in enumerate(samples):
+                if samp_no < 1:
+                    print("true params:", params)
+                    print()
+                    print("$" * 12, "At sample", samp_no, "$" * 12)
+                    sample.update(params)
+                    # present = calc_present(sample["A"])
+                    # trans_present = calc_trans_present(present)
+                    # print(present)
+                    # print(trans_present)+
+                    ## Initialise model
+                    true_Z = sample["Z"]
 
-                if use_X_init:
-                    kmeans_mat = np.concatenate(
-                        [
-                            sample["A"].reshape(params["N"], -1),
-                            *[
-                                Xs.transpose(1, 2, 0).reshape(params["N"], -1)
-                                for Xs in sample["X"].values()
+                    if use_X_init:
+                        kmeans_mat = np.concatenate(
+                            [
+                                *[sample["A"][:, :, t] for t in range(sample["T"])],
+                                *[
+                                    Xs.transpose(1, 2, 0).reshape(params["N"], -1)
+                                    for Xs in sample["X"].values()
+                                ],
                             ],
-                        ],
-                        axis=1,
-                    )  # done for fixing labels over time
-                else:
-                    kmeans_mat = sample["A"].reshape(
-                        params["N"], -1
-                    )  # done for fixing labels over time
-                kmeans_labels = (
-                    MiniBatchKMeans(
-                        n_clusters=params["Q"],
-                        #   random_state=0, # TODO: consider allowing fixing this for reproducibility
-                        batch_size=20,
-                        max_iter=10,
-                    )
-                    .fit_predict(kmeans_mat)
-                    .reshape(-1, 1)
-                )
-                init_Z = np.tile(kmeans_labels, (1, params["T"]))
-                # add some noise to init clustering
-                prop = 0.1  # proportion of noise to add
-                mask = np.random.rand(*init_Z.shape) < prop
-                init_Z[mask] += np.random.randint(
-                    -sample["Q"] // 2, sample["Q"] // 2, size=(sample["N"], sample["T"])
-                )[mask]
-                init_Z[init_Z < 0] = 0
-                init_Z[init_Z > sample["Q"] - 1] = sample["Q"] - 1
-                try:
-                    assert init_Z.shape == sample["Z"].shape
-                except:
-                    print(init_Z.shape)
-                    print(sample["Z"].shape)
-                    raise ValueError("Wrong partition shape")
-                sample["Z"] = init_Z
-                ## Initialise
-                em = EM(sample)
-                ## Score from K means
-                print("Before fitting model, K-means init partition has")
-                em.ari_score(true_Z)
-                ## Fit to given data
-                em.fit(true_Z=true_Z, learning_rate=0.2)
-                ## Score after fit
-                try:
-                    test_aris[test_no, samp_no, :] = em.ari_score(true_Z)
-                except:
-                    test_aris[test_no][samp_no, :] = em.ari_score(true_Z)
-                print("Z inferred:", em.bp.model.jit_model.Z)
-                ## Show transition matrix inferred
-                print("Pi inferred:", em.bp.trans_prob)
-                try:
-                    print("Versus true pi:", params["trans_mat"])
-                except:
+                            axis=1,
+                        )  # done for fixing labels over time
+                    else:
+                        kmeans_mat = np.concatenate(
+                            [sample["A"][:, :, t] for t in range(sample["T"])], axis=1
+                        )  # done for fixing labels over time
+                    if sample["N"] > 1e5:
+                        kmeans_labels = (
+                            MiniBatchKMeans(
+                                n_clusters=params["Q"],
+                                #   random_state=0, # TODO: consider allowing fixing this for reproducibility
+                                batch_size=20,
+                                max_iter=10,
+                            )
+                            .fit_predict(kmeans_mat)
+                            .reshape(-1, 1)
+                        )
+                    else:
+                        kmeans_labels = (
+                            KMeans(
+                                n_clusters=params["Q"],
+                                #   random_state=0, # TODO: consider allowing fixing this for reproducibility
+                                max_iter=10,
+                            )
+                            .fit_predict(kmeans_mat)
+                            .reshape(-1, 1)
+                        )
+                    init_Z = np.tile(kmeans_labels, (1, params["T"]))
+                    # add some noise to init clustering
+                    prop = 0.1  # proportion of noise to add
+                    mask = np.random.rand(*init_Z.shape) < prop
+                    init_Z[mask] += np.random.randint(
+                        -sample["Q"] // 2,
+                        sample["Q"] // 2 + 1,
+                        size=(sample["N"], sample["T"]),
+                    )[mask]
+                    init_Z[init_Z < 0] = 0
+                    init_Z[init_Z > sample["Q"] - 1] = sample["Q"] - 1
+                    try:
+                        assert init_Z.shape == sample["Z"].shape
+                    except:
+                        print(init_Z.shape)
+                        print(sample["Z"].shape)
+                        raise ValueError("Wrong partition shape")
+                    sample["Z"] = init_Z
+                    ## Initialise
+                    em = EM(sample)
+                    ## Score from K means
+                    print("Before fitting model, K-means init partition has")
+                    em.ari_score(true_Z)
+                    ## Fit to given data
+                    em.fit(true_Z=true_Z, learning_rate=0.2)
+                    ## Score after fit
+                    try:
+                        test_aris[test_no, samp_no, :] = 0.0
+                        print("BP Z ARI:")
+                        test_aris[test_no, samp_no, :] = em.ari_score(true_Z)
+                        print("Init Z ARI:")
+                        em.ari_score(true_Z, pred_Z=em.init_Z)
+                    except:
+                        print("BP Z ARI:")
+                        test_aris[test_no][samp_no, :] = em.ari_score(true_Z)
+                        print("Init Z ARI:")
+                        em.ari_score(true_Z, pred_Z=em.init_Z)
+                    # print("Z inferred:", em.bp.model.jit_model.Z)
+                    ## Show transition matrix inferred
+                    print("Pi inferred:", em.bp.trans_prob)
+                    try:
+                        print("Versus true pi:", params["trans_mat"])
+                    except:
+                        print(
+                            "Versus true pi:",
+                            simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
+                        )
+                    print("True effective pi:", effective_pi(true_Z))
                     print(
-                        "Versus true pi:",
-                        simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
+                        "Effective pi from partition inferred:",
+                        effective_pi(em.bp.model.jit_model.Z),
                     )
-                print("True effective pi:", effective_pi(true_Z))
-                print(
-                    "Effective pi from partition inferred:",
-                    effective_pi(em.bp.model.jit_model.Z),
-                )
-                time.sleep(
-                    1
-                )  # sleep a second to allow threads to complete, TODO: properly sort this
-        print(f"Finished test {test_no}:")
-        print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
+                    time.sleep(
+                        1
+                    )  # sleep a second to allow threads to complete, TODO: properly sort this
+            print(f"Finished test {test_no}:")
+            print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
 
     print("Mean ARIs inferred for each test:")
     try:

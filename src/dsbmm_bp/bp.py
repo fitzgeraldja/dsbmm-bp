@@ -41,6 +41,7 @@ twopoint_e_type = typeof(
 TOL = 1e-50  # min value permitted for msgs etc (for numerical stability)
 LARGE_DEG_THR = 20  # threshold of node degree above which log msgs calculated
 # (for numerical stability)
+RANDOM_ONLINE_UPDATE_MSG = False  # if true then update messages online (always using most recent vals), otherwise update all messages simultaneously
 
 
 @jitclass
@@ -51,6 +52,7 @@ class BPBase:
     _beta: float  # temperature
     deg_corr: bool
     directed: bool
+    use_meta: bool
     model: DSBMMBase.class_type.instance_type
     A: float64[:, :, ::1]
     # X: list[np.ndarray]
@@ -86,6 +88,7 @@ class BPBase:
         self.Q = self.model.Q
         self.deg_corr = self.model.deg_corr
         self.directed = self.model.directed
+        self.use_meta = self.model.use_meta
         self.A = self.model.A
         self.n_msgs = np.count_nonzero(self.A) + self.N * (self.T - 1) * 2
         self.X = self.model.X
@@ -146,6 +149,26 @@ class BPBase:
         # ]  # so self.nbrs[t][i] gives
         self.nbrs = tmp
         # nbrs of i at t (possibly none)
+        # TODO: make inverse lookup also:
+        # void blockmodel:: graph_build_neis_inv()
+        # {
+        #     //build graph_neis_inv
+        #     graph_neis_inv.resize(N);
+        #     for (int i=0;i<N;i++){
+        #         graph_neis_inv[i].resize(graph_neis[i].size());
+        #         for (int idxij=0;idxij<graph_neis[i].size();idxij++){
+        #             int j=graph_neis[i][idxij];
+        #             int target=0;
+        #             for (int idxji=0;idxji<graph_neis[j].size();idxji++){
+        #                 if (graph_neis[j][idxji]==i){
+        #                     target = idxji;
+        #                     break;
+        #                 }
+        #             }
+        #             graph_neis_inv[i][idxij]=target;
+        #         }
+        #     }
+        # }
 
         # want to have spatial and temporal messages, each of which relies on the other as well
         # so need to be able to (i) recall temporal messages (forward and backward) for a given node at a given time
@@ -244,6 +267,7 @@ class BPBase:
             self.node_marg = p * one_hot_Z + (1 - p) * np.random.rand(
                 self.N, self.T, self.Q
             )
+            self.node_marg /= np.expand_dims(self.node_marg.sum(axis=2), 2)
 
             ## INIT MESSAGES ##
             tmp = List()
@@ -255,6 +279,7 @@ class BPBase:
                         msg = p * np.expand_dims(one_hot_Z[i, t, :], 0) + (
                             1 - p
                         ) * np.random.rand(n_nbrs, self.Q)
+                        msg /= np.expand_dims(msg.sum(axis=1), 1)
                     else:
                         print("WARNING: empty nodes not properly handled yet")
                         msg = np.empty((1, self.Q), dtype=np.float64)
@@ -269,6 +294,7 @@ class BPBase:
             for t in range(self.T - 1):
                 self._psi_t[:, t, :, 0] += p * one_hot_Z[:, t + 1, :]
                 self._psi_t[:, t, :, 1] += p * one_hot_Z[:, t, :]
+            self._psi_t /= np.expand_dims(self._psi_t.sum(axis=2), 2)
 
     def forward_temp_msg_term(self, i, t):
         # sum_qprime(self.trans_prob(qprime,q)*self._psi_t[i,t-1,qprime,1])
@@ -394,7 +420,13 @@ class BPBase:
                 -1
             )  # for whatever reason this stays 2d, so need to flatten first
             # print("jtoi_msg:", jtoi_msgs.shape)
-            tmp = np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs)
+            # tmp = np.ascontiguousarray(beta.T) @ np.ascontiguousarray(
+            #     jtoi_msgs
+            # )  # should have * deg_i * deg_j if DC
+            tmp = np.zeros(self.Q)
+            for q in range(self.Q):
+                for r in range(self.Q):
+                    tmp[q] += beta[r, q] * jtoi_msgs[r]
             # for q in range(self.Q):
             #     if tmp[q] < TOL:
             #         tmp[q] = TOL
@@ -424,7 +456,8 @@ class BPBase:
             #     print("tmp:", tmp)
             #     print("spatial msg term:", msg)
             #     raise RuntimeError("Problem vanishing spatial msg term")
-        msg *= np.exp(-1.0 * self._h[:, t])
+        msg *= np.exp(-1.0 * self._h[:, t])  # should be exp(-h * deg_i) if DC
+        msg *= self.meta_prob(i, t)
         # msg[msg < TOL] = TOL
         return msg, field_iter
 
@@ -447,7 +480,7 @@ class BPBase:
         log_field_iter = np.zeros((len(nbrs), self.Q))
         # TODO: make logger that tracks this
         # print("Large deg version used")
-        max_log_msg = -100000.0
+        max_log_msg = -1000000.0
         for nbr_idx, j in enumerate(nbrs):
             if len(self.nbrs[t][j] > 0):
                 idx = self.nbrs[t][j] == i
@@ -459,7 +492,14 @@ class BPBase:
                 -1
             )  # for whatever reason this stays 2d, so need to flatten first
             # print("jtoi_msg:", jtoi_msgs.shape)
-            tmp = np.log(np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs))
+            # tmp = np.log(
+            #     np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs)
+            # )  # * deg_i * deg_j if DC
+            tmp = np.zeros(self.Q)
+            for q in range(self.Q):
+                for r in range(self.Q):
+                    tmp[q] += beta[r, q] * jtoi_msgs[r]
+            tmp = np.log(tmp)
 
             try:
                 assert np.isinf(tmp).sum() == 0
@@ -474,11 +514,17 @@ class BPBase:
             max_msg_log = msg.max()
             if max_msg_log > max_log_msg:
                 max_log_msg = max_msg_log
-        msg -= self._h[:, t]  # NB don't need / self.N as using p_ab to calc, not c_ab
+        msg -= self._h[
+            :, t
+        ]  # NB don't need / self.N as using p_ab to calc, not c_ab. Should be * deg_i if DC
+        msg += np.log(self.meta_prob(i, t))
         return msg, max_log_msg, log_field_iter
 
     def meta_prob(self, i, t):
-        return self.model.meta_lkl[i, t, :]
+        if self.use_meta:
+            return self.model.meta_lkl[i, t, :]
+        else:
+            return np.ones(self.Q)
 
     @property
     def trans_prob(self):
@@ -509,17 +555,32 @@ class BPBase:
         # update within each timestep is unchanged from static case,
         # i.e. = \sum_r \sum_i \psi_r^{it} p_{rq}^t
         # self._h = np.einsum("itr,rqt->qt", self.node_marg, self.block_edge_prob)
-        self._h = (
-            self.block_edge_prob.transpose(1, 0, 2) * self.node_marg.sum(axis=0).T
-        ).sum(axis=1)
+        # self._h = (
+        #     self.block_edge_prob.transpose(1, 0, 2) * self.node_marg.sum(axis=0).T
+        # ).sum(axis=1)
+        self._h = np.zeros((self.Q, self.T))
+        for q in range(self.Q):
+            for t in range(self.T):
+                for i in range(self.N):
+                    for r in range(self.Q):
+                        self._h[q, t] += (
+                            self.block_edge_prob[r, q, t] * self.node_marg[i, t, r]
+                        )  # * deg_i if DC
         # print("h after init:", self._h)
 
     def update_h(self, i, t, sign):
-        self._h[:, t] += (
-            sign
-            * np.ascontiguousarray(self.block_edge_prob[:, :, t].T)
-            @ np.ascontiguousarray(self.node_marg[i, t, :])
-        )
+        # self._h[:, t] += (
+        #     sign
+        #     * np.ascontiguousarray(self.block_edge_prob[:, :, t].T)
+        #     @ np.ascontiguousarray(self.node_marg[i, t, :])
+        # )
+        for q in range(self.Q):
+            for r in range(self.Q):
+                self._h[q, t] += (
+                    sign
+                    * self.block_edge_prob[r, q, t]
+                    * self.node_marg[i, t, r]  # * deg_i if DC
+                )
 
     def convergence(self):
         pass
@@ -551,9 +612,10 @@ class BPBase:
             (vii) Add new marginals for i to external field h(t)
         """
         node_update_order = np.arange(self.N)
-        np.random.shuffle(node_update_order)
         time_update_order = np.arange(self.T)
-        np.random.shuffle(time_update_order)
+        if RANDOM_ONLINE_UPDATE_MSG:
+            np.random.shuffle(node_update_order)
+            np.random.shuffle(time_update_order)
         for i in node_update_order:
             for t in time_update_order:
                 nbrs = self.nbrs[t][i]
@@ -591,10 +653,11 @@ class BPBase:
                             for q in range(self.Q):
                                 if tmp_backwards_msg[q] < TOL:
                                     tmp_backwards_msg[q] = TOL
-                                if tmp_backwards_msg[q] > 1 - TOL:
-                                    tmp_backwards_msg[q] = 1 - TOL
+                                # if tmp_backwards_msg[q] > 1 - TOL:
+                                #     tmp_backwards_msg[q] = 1 - TOL
                             tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
-                            tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = 1 - TOL
+                            # tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = 1 - TOL
+                            tmp_backwards_msg /= tmp_backwards_msg.sum()
                             self.msg_diff += (
                                 np.abs(
                                     tmp_backwards_msg - self._psi_t[i, t - 1, :, 0]
@@ -603,12 +666,12 @@ class BPBase:
                             )
                             self._psi_t[i, t - 1, :, 0] = tmp_backwards_msg
                             forward_term = self.forward_temp_msg_term(i, t)
+                            tmp *= forward_term
                         # REMOVE CHECK AFTER FIX
                         if np.isnan(forward_term).sum() > 0:
                             print("i,t:", i, t)
                             print("forward:", forward_term)
-                            raise RuntimeError("Problem w back term")
-                        tmp *= forward_term
+                            raise RuntimeError("Problem w forward term")
                         ## UPDATE SPATIAL MESSAGES FROM i AT t ##
                         # tmp_spatial_msg = (
                         #     np.expand_dims(tmp, 0) / field_iter
@@ -629,15 +692,15 @@ class BPBase:
                                     for k in alt_nbrs:
                                         tmp_loc *= field_iter[k, q]
                                     tmp_spatial_msg[nbr_idx, q] = tmp_loc
-                        tmp_spatial_msg /= np.expand_dims(
-                            tmp_spatial_msg.sum(axis=1), 1
-                        )
                         for nbr_idx in range(deg_i):
                             for q in range(self.Q):
                                 if tmp_spatial_msg[nbr_idx, q] < TOL:
                                     tmp_spatial_msg[nbr_idx, q] = TOL
-                                if tmp_spatial_msg[nbr_idx, q] > 1 - TOL:
-                                    tmp_spatial_msg[nbr_idx, q] = 1 - TOL
+                                # if tmp_spatial_msg[nbr_idx, q] > 1 - TOL:
+                                #     tmp_spatial_msg[nbr_idx, q] = 1 - TOL
+                        tmp_spatial_msg /= np.expand_dims(
+                            tmp_spatial_msg.sum(axis=1), 1
+                        )
                         self.msg_diff += (
                             np.abs(tmp_spatial_msg - self._psi_e[t][i]).mean()
                             * deg_i
@@ -647,6 +710,7 @@ class BPBase:
                         try:
                             assert np.isnan(tmp_spatial_msg).sum() == 0
                         except:
+                            print("(i,t):", i, t)
                             print("tmp_spatial:", tmp_spatial_msg)
                             print("back_term:", back_term)
                             print("forward_term:", forward_term)
@@ -668,7 +732,8 @@ class BPBase:
                                 tmp_forwards_msg *= forward_term
                             tmp_forwards_msg /= tmp_forwards_msg.sum()
                             tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
-                            tmp_forwards_msg[tmp_forwards_msg > 1 - TOL] = 1 - TOL
+                            tmp_forwards_msg /= tmp_forwards_msg.sum()
+                            # tmp_forwards_msg[tmp_forwards_msg > 1 - TOL] = 1 - TOL
                             self.msg_diff += (
                                 np.abs(
                                     tmp_forwards_msg - self._psi_t[i, t, :, 1]
@@ -680,7 +745,8 @@ class BPBase:
                         tmp_marg = tmp
                         tmp_marg = tmp_marg / tmp_marg.sum()
                         tmp_marg[tmp_marg < TOL] = TOL
-                        tmp_marg[tmp_marg > 1 - TOL] = 1 - TOL
+                        tmp_marg = tmp_marg / tmp_marg.sum()
+                        # tmp_marg[tmp_marg > 1 - TOL] = 1 - TOL
                         self.node_marg[i, t, :] = tmp_marg
 
                     else:
@@ -693,16 +759,21 @@ class BPBase:
                         if t == 0:
                             tmp += np.log(self.model._alpha)
                         tmp = spatial_msg_term
-                        back_term = np.log(self.backward_temp_msg_term(i, t))
-                        tmp += back_term
+                        back_term = np.zeros(self.Q)
+                        if t < self.T - 1:
+                            back_term = np.log(self.backward_temp_msg_term(i, t))
+                            tmp += back_term
                         ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
+                        forward_term = np.zeros(self.Q)
                         if t > 0:
                             tmp_backwards_msg = np.exp(tmp - max_log_spatial_msg_term)
                             tmp_backwards_msg /= tmp_backwards_msg.sum()
                             tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
-                            tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = TOL
+                            # tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = TOL
+                            tmp_backwards_msg /= tmp_backwards_msg.sum()
                             self._psi_t[i, t - 1, :, 0] = tmp_backwards_msg
-                            tmp += np.log(self.forward_temp_msg_term(i, t))
+                            forward_term = np.log(self.forward_temp_msg_term(i, t))
+                            tmp += forward_term
                         ## UPDATE SPATIAL MESSAGES FROM i AT t ##
                         tmp_spatial_msg = np.expand_dims(tmp, 0) - log_field_iter
                         log_field_iter_max = np.array(
@@ -718,12 +789,16 @@ class BPBase:
                             for q in range(self.Q):
                                 if tmp_spatial_msg[nbr_idx, q] < TOL:
                                     tmp_spatial_msg[nbr_idx, q] = TOL
-                                if tmp_spatial_msg[nbr_idx, q] > 1 - TOL:
-                                    tmp_spatial_msg[nbr_idx, q] = 1 - TOL
+                                # if tmp_spatial_msg[nbr_idx, q] > 1 - TOL:
+                                #     tmp_spatial_msg[nbr_idx, q] = 1 - TOL
+                        tmp_spatial_msg /= np.expand_dims(
+                            tmp_spatial_msg.sum(axis=1), 1
+                        )
                         # TODO: remove after fix
                         try:
                             assert np.isnan(tmp_spatial_msg).sum() == 0
                         except:
+                            print("i,t", i, t)
                             print("tmp_spatial:", tmp_spatial_msg)
                             print("back_term:", back_term)
                             print("forward_term:", forward_term)
@@ -738,18 +813,22 @@ class BPBase:
                             )
                             tmp_forwards_msg /= tmp_forwards_msg.sum()
                             tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
-                            tmp_forwards_msg[tmp_forwards_msg > 1 - TOL] = 1 - TOL
+                            # tmp_forwards_msg[tmp_forwards_msg > 1 - TOL] = 1 - TOL
+                            tmp_forwards_msg /= tmp_forwards_msg.sum()
                             self._psi_t[i, t, :, 1] = tmp_forwards_msg
                         ## UPDATE MARGINAL OF i AT t ##
                         tmp_marg = np.exp(tmp - max_log_spatial_msg_term)
                         tmp_marg /= tmp_marg.sum()
                         tmp_marg[tmp_marg < TOL] = TOL
-                        tmp_marg[tmp_marg > 1 - TOL] = 1 - TOL
+                        # tmp_marg[tmp_marg > 1 - TOL] = 1 - TOL
+                        tmp_marg /= tmp_marg.sum()
                         self.node_marg[i, t, :] = tmp_marg
-
+                    self.update_h(i, t, 1.0)
                 else:
+                    print("WARNING: disconnected nodes not yet handled properly")
+                    print("i,t:", i, t)
                     self.node_marg[i, t, :] = 0.0
-                self.update_h(i, t, 1.0)
+
         if np.isnan(self.msg_diff):
             for i in range(self.N):
                 for t in range(self.T - 1):
@@ -807,9 +886,23 @@ class BPBase:
             #     )
             tmp = np.zeros((self.Q, self.Q))
             for q in range(self.Q):
-                tmp[q, q] += self._psi_e[t][i][j_idx,q]*self._psi_e[t][j][i_idx,q]
+                tmp[q, q] += (
+                    self._psi_e[t][i][j_idx, q] * self._psi_e[t][j][i_idx, q]
+                )[0]
                 for r in range(q + 1, self.Q):
-                    tmp
+                    tmp[q, r] += (
+                        self._psi_e[t][i][j_idx, q] * self._psi_e[t][j][i_idx, r]
+                    )[0]
+                    if not self.directed:
+                        tmp[q, r] += (
+                            self._psi_e[t][j][i_idx, q] * self._psi_e[t][i][j_idx, r]
+                        )[0]
+                        tmp[r, q] = tmp[q, r]
+                if self.directed:
+                    for r in range(q):
+                        tmp[q, r] += (
+                            self._psi_e[t][i][j_idx, q] * self._psi_e[t][j][i_idx, r]
+                        )[0]
 
             tmp *= self.block_edge_prob[:, :, t]
             tmp /= tmp.sum()
@@ -817,22 +910,31 @@ class BPBase:
                 for r in range(self.Q):
                     if tmp[q, r] < TOL:
                         tmp[q, r] = TOL
+            tmp /= tmp.sum()
             self.twopoint_e_marg[t][i][j_idx, :, :] = tmp
 
     def update_twopoint_temp_marg(self):
         # recall t msgs in shape (i,t,q,2), w t from 0 to T-2, and final dim (backwards from t+1, forwards from t)
         for i in range(self.N):
             for t in range(self.T - 1):
-                tmp = np.outer(
-                    self._psi_t[i, t, :, 1], self._psi_t[i, t, :, 0]
-                )  # TODO: check this
-                tmp += np.outer(self._psi_t[i, t, :, 0], self._psi_t[i, t, :, 1])
-                tmp *= self.trans_prob
+                tmp = np.zeros((self.Q, self.Q))
+                for q in range(self.Q):
+                    for qprime in range(self.Q):
+                        tmp[q, qprime] += self.trans_prob[q, qprime] * (
+                            self._psi_t[i, t, q, 1] * self._psi_t[i, t, qprime, 0]
+                            + self._psi_t[i, t, qprime, 1] * self._psi_t[i, t, q, 0]
+                        )
+                # tmp = np.outer(
+                #     self._psi_t[i, t, :, 1], self._psi_t[i, t, :, 0]
+                # )  # TODO: check this
+                # tmp += np.outer(self._psi_t[i, t, :, 0], self._psi_t[i, t, :, 1])
+                # tmp *= self.trans_prob
                 tmp /= tmp.sum()
                 for q in range(self.Q):
                     for qprime in range(self.Q):
                         if tmp[q, qprime] < TOL:
                             tmp[q, qprime] = TOL
+                tmp /= tmp.sum()
                 self.twopoint_t_marg[i, t, :, :] = tmp
 
     def zero_diff(self):
