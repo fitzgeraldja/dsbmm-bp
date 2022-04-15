@@ -473,8 +473,6 @@ class DSBMMBase:
 
         else:
             qqprime_trans = self.twopoint_time_marg.sum(axis=0).sum(axis=0)
-            # TODO: remove after fix
-            print("twopoint sums:", qqprime_trans)
             # qqprime_trans /= np.expand_dims(
             #     self.node_marg[:, :-1, :].sum(axis=0).sum(axis=0), 1
             # )  # need to do sums twice as numba axis argument
@@ -523,6 +521,7 @@ class DSBMMBase:
         self._pi = self._pi / self._pi.sum(axis=-1)
 
     def update_lambda(self, init, learning_rate):
+        # TODO: fix on basis of beta below
         lam_num = np.zeros((self.Q, self.Q, self.T))
         lam_den = np.zeros((self.Q, self.Q, self.T))
         if init:
@@ -676,6 +675,13 @@ class DSBMMBase:
             # )
             for i, j, t in self._edge_locs:
                 beta_num[self.Z[i, t], self.Z[j, t], t] += 1
+            for q in range(self.Q):
+                # enforce uniformity for identifiability
+                tmp = 0.0
+                for t in range(self.T):
+                    tmp += beta_num[q, q, t]
+                for t in range(self.T):
+                    beta_num[q, q, t] = tmp
             # beta_den = np.array(
             #     [
             #         [self.degs[self.Z[:, t] == q].sum() for q in range(self.Q)]
@@ -700,6 +706,10 @@ class DSBMMBase:
                             # be v. small anyway)
                         if not self.directed and r != q:
                             beta_den[r, q, t] = beta_den[q, r, t]
+                            beta_num[
+                                q, r, t
+                            ] /= 2.0  # done elsewhere, TODO: check basis
+                            beta_num[r, q, t] = beta_num[q, r, t]
                     if self.directed:
                         for r in range(q):
                             beta_den[q, r, t] = self._n_qt[q, t] * self._n_qt[r, t]
@@ -713,25 +723,43 @@ class DSBMMBase:
             # )
             for q in range(self.Q):
                 for r in range(q, self.Q):
-                    for i, j, t in self._edge_locs:
-                        j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
-                        # print(self.twopoint_edge_marg[t][i][j_idx, q, r])
-                        # assert j_idx.sum() == 1
-                        val = self.twopoint_edge_marg[t][i][j_idx, q, r][0]
-                        try:
-                            assert not np.isnan(val)
-                        except:
-                            print("(i,j,t):", i, j, t)
-                            print("A[i,j,t] = ", self.A[i, j, t])
-                            print("twopoint marg: ", val)
-                            raise RuntimeError("Problem updating beta")
-                        beta_num[q, r, t] += val
-                    if not self.directed and r != q:
-                        for t in range(self.T):
-                            beta_num[r, q, t] = beta_num[q, r, t]
-                    if r == q:
-                        for t in range(self.T):
-                            beta_num[q, r, t] *= 2.0
+                    if r != q:
+                        for i, j, t in self._edge_locs:
+                            j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
+                            # print(self.twopoint_edge_marg[t][i][j_idx, q, r])
+                            # assert j_idx.sum() == 1
+                            val = self.twopoint_edge_marg[t][i][j_idx, q, r][0]
+                            try:
+                                assert not np.isnan(val)
+                            except:
+                                print("(i,j,t):", i, j, t)
+                                print("A[i,j,t] = ", self.A[i, j, t])
+                                print("twopoint marg: ", val)
+                                raise RuntimeError("Problem updating beta")
+                            beta_num[q, r, t] += val
+                        if not self.directed:
+                            for t in range(self.T):
+                                beta_num[q, r, t] /= 2.0
+                                beta_num[r, q, t] = beta_num[q, r, t]
+                    else:
+                        # enforce uniformity across t for identifiability
+                        for i, j, t in self._edge_locs:
+                            j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
+                            # print(self.twopoint_edge_marg[t][i][j_idx, q, r])
+                            # assert j_idx.sum() == 1
+                            val = self.twopoint_edge_marg[t][i][j_idx, q, r][0]
+                            try:
+                                assert not np.isnan(val)
+                            except:
+                                print("(i,j,t):", i, j, t)
+                                print("A[i,j,t] = ", self.A[i, j, t])
+                                print("twopoint marg: ", val)
+                                raise RuntimeError("Problem updating beta")
+                            for tprime in range(self.T):
+                                beta_num[q, r, tprime] += (
+                                    val / 2.0
+                                )  # TODO: check if this should also be here
+
                 if self.directed:
                     for r in range(q):
                         for i, j, t in self._edge_locs:
@@ -750,13 +778,19 @@ class DSBMMBase:
             for q in range(self.Q):
                 for t in range(self.T):
                     for r in range(q, self.Q):
-                        # TODO: check if right if r==q
-                        beta_den[q, r, t] = group_marg[q, t] * group_marg[r, t]
+                        if r != q:
+                            beta_den[q, r, t] = group_marg[q, t] * group_marg[r, t]
 
-                        if beta_den[q, r, t] < TOL:
-                            beta_den[q, r, t] = 1.0
-                        # if not self.directed: same either way (should this be?)
-                        beta_den[r, q, t] = beta_den[q, r, t]
+                            if beta_den[q, r, t] < TOL:
+                                beta_den[q, r, t] = 1.0
+                            # if not self.directed: same either way (should this be?)
+                            beta_den[r, q, t] = beta_den[q, r, t]
+                        else:
+                            for tprime in range(self.T):
+                                # again enforce uniformity for identifiability
+                                beta_den[q, r, t] += (
+                                    group_marg[q, tprime] * group_marg[r, tprime]
+                                ) / 2.0
 
         # TODO: fix for case where beta_den very small (just consider using logs)
         # correct for numerical stability
@@ -1110,7 +1144,7 @@ class DSBMM:
                     self.jit_model._beta.transpose(1, 0, 2), self.jit_model._beta
                 )
         self.jit_model.update_meta_params(init, learning_rate)
-        print(self.jit_model._meta_params)
+        # print(self.jit_model._meta_params)
         print("\tUpdated meta")
         self.jit_model.calc_meta_lkl()
 

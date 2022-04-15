@@ -150,7 +150,7 @@ def sample_dynsbm_A(
     ZTP_params=None,
     self_loops=False,
 ):
-    """Generate temporal adjacnecy given dynsbm parameters
+    """Generate temporal adjacency given dynsbm parameters
 
     Args:
         Z_1 (_type_, optional): _description_. Defaults to np.zeros((10,)).
@@ -374,6 +374,7 @@ def gen_test_data(
     T=5,
     p_stay=None,
     trans_mat=None,
+    directed=False,
     meta_types=["poisson", "indep bernoulli"],
     L=4,
     meta_dims=None,
@@ -400,6 +401,7 @@ def gen_test_data(
         T (int, optional): _description_. Defaults to 5.
         p_stay (_type_, optional): _description_. Defaults to None.
         trans_mat (_type_, optional): _description_. Defaults to None. 
+        directed (bool, optional): _description_. Defaults to False.
         meta_types (list, optional): _description_. Defaults to ["poisson", "indep bernoulli"].
         L (int, optional): _description_. Defaults to 4.
         meta_dims (_type_, optional): _description_. Defaults to None.

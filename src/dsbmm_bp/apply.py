@@ -11,13 +11,17 @@ from sklearn.cluster import MiniBatchKMeans, KMeans
 import time
 
 import faulthandler
-from numba import gdb
 
 faulthandler.enable()
 
+import matplotlib.pyplot as plt
+
+plt.ion()
+
+
 MAX_MSG_ITER = 5
 MSG_CONV_TOL = 1e-4
-MAX_ITER = 10
+MAX_ITER = 100
 CONV_TOL = 1e-4
 
 
@@ -89,17 +93,16 @@ class EM:
                     + (self.Q - 1) * self.p_out * (1 - self.p_out)
                 )
                 print(f"\twith variance {deg_var:.2f}")
+
         except:
             if self.verbose:
-                print("No known parameters provided")
+                print("No p_in / p_out provided")
 
-        # TODO: remove after fix
-        # gdb()
         self.dsbmm = dsbmm.DSBMM(
             A=self.A,
             X_poisson=self.X_poisson,
             X_ib=self.X_ib,
-            Z=self.init_Z,
+            Z=self.init_Z.copy(),
             Q=self.Q,
             meta_types=self.meta_types,
         )  # X=X,
@@ -122,6 +125,17 @@ class EM:
             print("\tInitialised corresponding external fields")
         if self.verbose:
             print("Done, can now run updates")
+        if self.verbose:
+            # make updating plot of average score (e.g. ARI) if ground truth known
+            self.xdata, self.ydata = [], []
+            self.figure, self.ax = plt.subplots(dpi=200)
+            (self.lines,) = self.ax.plot([], [], "o")
+            # Autoscale on unknown axis and known lims on the other
+            self.ax.set_autoscaley_on(True)
+            self.ax.set_xlim(0, MAX_ITER)
+            # Other stuff
+            self.ax.grid()
+            # ...
 
     def fit(
         self,
@@ -135,6 +149,7 @@ class EM:
         for n_iter in range(max_iter):
             if self.verbose:
                 print(f"\n##### At iteration {n_iter+1} #####")
+                self.xdata.append(n_iter)
             for msg_iter in range(max_msg_iter):
                 if self.verbose:
                     print(f"Message update iter {msg_iter + 1}...")
@@ -169,14 +184,16 @@ class EM:
             if self.verbose:
                 self.bp.model.set_Z_by_MAP()
                 if true_Z is not None:
-                    self.ari_score(true_Z)
+                    current_score = self.ari_score(true_Z)
+                    self.ydata.append(current_score.mean())
+                    self.update_score_plot()
                     print()
         self.bp.model.set_Z_by_MAP()
 
     def ari_score(self, true_Z, pred_Z=None):
         # wait for a second to execute in case of parallelisation issues
         time.sleep(1)
-        if pred_Z == None:
+        if pred_Z is None:
             try:
                 # could try and replace with numba again but seemed
                 # to cause issues
@@ -200,6 +217,17 @@ class EM:
             if self.verbose:
                 print("ARIs:", aris)
             return aris
+
+    def update_score_plot(self):
+        # update score plot with new data
+        self.lines.set_xdata(self.xdata)
+        self.lines.set_ydata(self.ydata)
+        # Need both of these in order to rescale
+        self.ax.relim()
+        self.ax.autoscale_view()
+        # We need to draw *and* flush
+        self.figure.canvas.draw()
+        self.figure.canvas.flush_events()
 
     # print("NMIs: ", nb_nmi_local(bp_ex.model.Z, Z))
 
@@ -246,6 +274,18 @@ def effective_pi(Z):
     print("Num. trans. inferred:", qqprime_trans)
     qqprime_trans /= np.expand_dims(qqprime_trans.sum(axis=1), 1)
     return qqprime_trans
+
+
+def effective_beta(A, Z):
+    Q = len(np.unique(Z))
+    z_vals = np.unique(Z)
+    T = Z.shape[1]
+    beta = np.zeros((Q, Q, T))
+    for q in z_vals:
+        for r in z_vals:
+            for t in range(T):
+                beta[q, r, t] = A[:, :, t][np.ix_(Z[:, t] == q, Z[:, t] == r)].mean()
+    return beta / 2
 
 
 if __name__ == "__main__":
@@ -436,6 +476,18 @@ if __name__ == "__main__":
                     print(
                         "Effective pi from partition inferred:",
                         effective_pi(em.bp.model.jit_model.Z),
+                    )
+                    print(
+                        "True effective beta:",
+                        effective_beta(em.bp.model.jit_model.A, true_Z).transpose(
+                            2, 0, 1
+                        ),
+                    )
+                    print(
+                        "Pred effective beta:",
+                        effective_beta(
+                            em.bp.model.jit_model.A, em.bp.model.jit_model.Z
+                        ).transpose(2, 0, 1),
                     )
                     time.sleep(
                         1
