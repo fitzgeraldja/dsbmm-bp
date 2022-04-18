@@ -21,7 +21,7 @@ plt.ion()
 
 MAX_MSG_ITER = 5
 MSG_CONV_TOL = 1e-4
-MAX_ITER = 100
+MAX_ITER = 10
 CONV_TOL = 1e-4
 
 
@@ -370,6 +370,7 @@ if __name__ == "__main__":
     pass  # not needed as simulating directly in form needed
 
     use_X_init = False
+    verbose = False
     if len(test_params["T"]) > 1:
         test_aris = [np.zeros((20, T)) for T in test_params["T"]]
     else:
@@ -377,7 +378,7 @@ if __name__ == "__main__":
     for test_no, (samples, params) in enumerate(zip(all_samples, params_set)):
         if test_no < 1:
             for samp_no, sample in enumerate(samples):
-                if samp_no < 1:
+                if samp_no < len(samples):  # can limit num samples considered
                     print("true params:", params)
                     print()
                     print("$" * 12, "At sample", samp_no, "$" * 12)
@@ -444,7 +445,7 @@ if __name__ == "__main__":
                         raise ValueError("Wrong partition shape")
                     sample["Z"] = init_Z
                     ## Initialise
-                    em = EM(sample)
+                    em = EM(sample, verbose=verbose)
                     ## Score from K means
                     print("Before fitting model, K-means init partition has")
                     em.ari_score(true_Z)
@@ -463,32 +464,33 @@ if __name__ == "__main__":
                         print("Init Z ARI:")
                         em.ari_score(true_Z, pred_Z=em.init_Z)
                     # print("Z inferred:", em.bp.model.jit_model.Z)
-                    ## Show transition matrix inferred
-                    print("Pi inferred:", em.bp.trans_prob)
-                    try:
-                        print("Versus true pi:", params["trans_mat"])
-                    except:
+                    if verbose:
+                        ## Show transition matrix inferred
+                        print("Pi inferred:", em.bp.trans_prob)
+                        try:
+                            print("Versus true pi:", params["trans_mat"])
+                        except:
+                            print(
+                                "Versus true pi:",
+                                simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
+                            )
+                        print("True effective pi:", effective_pi(true_Z))
                         print(
-                            "Versus true pi:",
-                            simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
+                            "Effective pi from partition inferred:",
+                            effective_pi(em.bp.model.jit_model.Z),
                         )
-                    print("True effective pi:", effective_pi(true_Z))
-                    print(
-                        "Effective pi from partition inferred:",
-                        effective_pi(em.bp.model.jit_model.Z),
-                    )
-                    print(
-                        "True effective beta:",
-                        effective_beta(em.bp.model.jit_model.A, true_Z).transpose(
-                            2, 0, 1
-                        ),
-                    )
-                    print(
-                        "Pred effective beta:",
-                        effective_beta(
-                            em.bp.model.jit_model.A, em.bp.model.jit_model.Z
-                        ).transpose(2, 0, 1),
-                    )
+                        print(
+                            "True effective beta:",
+                            effective_beta(em.bp.model.jit_model.A, true_Z).transpose(
+                                2, 0, 1
+                            ),
+                        )
+                        print(
+                            "Pred effective beta:",
+                            effective_beta(
+                                em.bp.model.jit_model.A, em.bp.model.jit_model.Z
+                            ).transpose(2, 0, 1),
+                        )
                     time.sleep(
                         1
                     )  # sleep a second to allow threads to complete, TODO: properly sort this
