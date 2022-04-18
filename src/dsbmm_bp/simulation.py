@@ -571,22 +571,24 @@ N = [100, 100, 100, 100, 100, 100, 100, 100, 200, 500, 1000, 2000]
 default_test_params["N"] = N
 Q = [4, 4, 4, 4, 4, 4, 4, 4, 4, 6, 8, 12]
 default_test_params["Q"] = Q
-p_in = [
-    0.4,
-    0.4,
-    0.3,
-    0.3,
-    0.4,
-    0.3,
-    0.4,
-    0.3,
-    0.4,
-    0.4,
-    0.4,
-    0.4,
+c_in = [
+    10,
+    10,
+    6,
+    6,
+    10,
+    6,
+    10,
+    6,
+    10,
+    10,
+    10,
+    10,
 ]
+p_in = [ci / ni for ci, ni in zip(c_in, N)]
 default_test_params["p_in"] = p_in
-p_out = 0.1
+c_out = 2
+p_out = [c_out / ni for ni in N]
 default_test_params["p_out"] = p_out
 p_stay = [
     0.8,

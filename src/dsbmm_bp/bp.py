@@ -80,6 +80,7 @@ class BPBase:
     nbrs: nbrs_type
     n_msgs: int64
     msg_diff: float64
+    verbose: bool
 
     def __init__(self, dsbmm: DSBMMBase.class_type.instance_type):
         self.model = dsbmm
@@ -89,6 +90,7 @@ class BPBase:
         self.deg_corr = self.model.deg_corr
         self.directed = self.model.directed
         self.use_meta = self.model.use_meta
+        self.verbose = self.model.verbose
         self.A = self.model.A
         self.n_msgs = np.count_nonzero(self.A) + self.N * (self.T - 1) * 2
         self.X = self.model.X
@@ -848,9 +850,11 @@ class BPBase:
         # TODO: ask Leto to check the two-point marginals eqns, as there's a chance they should include product of metaprob terms for i,j at t.
         # node_marg = None
         self.update_twopoint_spatial_marg()
-        print("\tUpdated twopoint spatial marg")
+        if self.verbose:
+            print("\tUpdated twopoint spatial marg")
         self.update_twopoint_temp_marg()
-        print("\tUpdated twopoint temp marg")
+        if self.verbose:
+            print("\tUpdated twopoint temp marg")
         # self.twopoint_marginals = [twopoint_e_marg, twopoint_t_marg]
         return (self.twopoint_e_marg, self.twopoint_t_marg)
 

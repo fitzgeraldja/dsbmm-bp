@@ -104,6 +104,7 @@ class DSBMMBase:
     nbrs: nbrs_type
     _edge_locs: int64[:, ::1]
     diff: float64
+    verbose: bool
 
     def __init__(
         self,
@@ -118,6 +119,7 @@ class DSBMMBase:
         directed,
         use_meta,
         meta_types,
+        verbose,
     ):
         # if data is not None:
         #     self.A = data["A"]
@@ -212,6 +214,7 @@ class DSBMMBase:
             # self.Z = np.tile(kmeans_labels, (1, self.T))
 
         self.diff = 1.0
+        self.verbose = verbose
 
     @property
     def num_nodes(self):
@@ -340,18 +343,23 @@ class DSBMMBase:
         # first init of parameters given initial groups if init=True, else use provided marginals
         # TODO: remove prints after fix
         self.update_alpha(init, learning_rate)
-        print(self._alpha)
+        if self.verbose:
+            print(self._alpha)
         self.update_pi(init, learning_rate)
-        print(self._pi)
+        if self.verbose:
+            print(self._pi)
         if self.deg_corr:
             self.update_lambda(init, learning_rate)
-            print(self._lam)
+            if self.verbose:
+                print(self._lam)
         else:
             # NB only implemented for binary case
             self.update_beta(init, learning_rate)
-            print(self._beta)
+            if self.verbose:
+                print(self._beta)
         self.update_meta_params(init, learning_rate)
-        print(self._meta_params)
+        if self.verbose:
+            print(self._meta_params)
         self.calc_meta_lkl()
 
     def calc_meta_lkl(self):
@@ -371,7 +379,8 @@ class DSBMMBase:
                             self.meta_lkl[i, t, q] *= nb_poisson_lkl_int(
                                 self.X[s][i, t, 0], pois_params[q, t, 0]
                             )
-                print("\tUpdated Poisson lkl contribution")
+                if self.verbose:
+                    print("\tUpdated Poisson lkl contribution")
             elif mt == "indep bernoulli":
                 # print("In IB")
                 ib_params = self._meta_params[s]  # shape (Q x T x L)
@@ -382,7 +391,8 @@ class DSBMMBase:
                             self.meta_lkl[i, t, q] *= nb_ib_lkl(
                                 self.X[s][i, t, :], ib_params[q, t, :]
                             )
-                print("\tUpdated IB lkl contribution")
+                if self.verbose:
+                    print("\tUpdated IB lkl contribution")
             else:
                 raise NotImplementedError(
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
@@ -450,7 +460,8 @@ class DSBMMBase:
             tmp_diff = np.abs(tmp - self._alpha).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating alpha")
-            print("Alpha diff:", np.round_(tmp_diff, 3))
+            if self.verbose:
+                print("Alpha diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
             self._alpha = tmp
 
@@ -504,7 +515,8 @@ class DSBMMBase:
             tmp_diff = np.abs(tmp - self._pi).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating pi")
-            print("Pi diff:", np.round_(tmp_diff, 3))
+            if self.verbose:
+                print("Pi diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
             self._pi = tmp
         else:
@@ -651,7 +663,8 @@ class DSBMMBase:
             tmp_diff = np.abs((tmp - self._lam) / self._lam).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating lambda")
-            print("Lambda diff:", np.round_(tmp_diff, 3))
+            if self.verbose:
+                print("Lambda diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
             self._lam = tmp
         else:
@@ -715,6 +728,13 @@ class DSBMMBase:
                             beta_den[q, r, t] = self._n_qt[q, t] * self._n_qt[r, t]
                             if beta_den[q, r, t] < TOL:
                                 beta_den[q, r, t] = 1.0
+            for q in range(self.Q):
+                # enforce uniformity for identifiability
+                tmp = 0.0
+                for t in range(self.T):
+                    tmp += beta_den[q, q, t]
+                for t in range(self.T):
+                    beta_den[q, q, t] = tmp
             # print("beta_den:", beta_den)
 
         else:
@@ -790,7 +810,7 @@ class DSBMMBase:
                                 # again enforce uniformity for identifiability
                                 beta_den[q, r, t] += (
                                     group_marg[q, tprime] * group_marg[r, tprime]
-                                ) / 2.0
+                                )
 
         # TODO: fix for case where beta_den very small (just consider using logs)
         # correct for numerical stability
@@ -807,7 +827,8 @@ class DSBMMBase:
             tmp_diff = np.abs(tmp - self._beta).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating beta")
-            print("Beta diff:", np.round_(tmp_diff, 3))
+            if self.verbose:
+                print("Beta diff:", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
             self._beta = tmp
         else:
@@ -819,11 +840,13 @@ class DSBMMBase:
             if mt == "poisson":
                 # print("In Poisson")
                 self.update_poisson_meta(s, init, learning_rate)
-                print("\tUpdated Poisson")
+                if self.verbose:
+                    print("\tUpdated Poisson")
             elif mt == "indep bernoulli":
                 # print("In IB")
                 self.update_indep_bern_meta(s, init, learning_rate)
-                print("\tUpdated IB")
+                if self.verbose:
+                    print("\tUpdated IB")
             else:
                 raise NotImplementedError(
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
@@ -875,7 +898,8 @@ class DSBMMBase:
             ).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating poisson params")
-            print("Poisson diff: ", np.round_(tmp_diff, 3))
+            if self.verbose:
+                print("Poisson diff: ", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
             self._meta_params[s] = tmp
         else:
@@ -938,7 +962,8 @@ class DSBMMBase:
             tmp_diff = np.abs(tmp - self._meta_params[s]).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating IB params")
-            print("IB diff: ", np.round_(tmp_diff, 3))
+            if self.verbose:
+                print("IB diff: ", np.round_(tmp_diff, 3))
             self.diff += tmp_diff
             self._meta_params[s] = tmp
         else:
@@ -970,6 +995,7 @@ class DSBMM:
         directed=False,
         use_meta=True,  # control use of metadata or not (for debug)
         meta_types=["poisson", "indep bernoulli"],
+        verbose=False,
     ):
         # if data is not None:
         #     self.A = data["A"]
@@ -977,9 +1003,20 @@ class DSBMM:
         #     self.Z = data.get("Z", None)
         # else:
         self.jit_model = DSBMMBase(
-            A, X, X_poisson, X_ib, Z, Q, deg_corr, directed, use_meta, meta_types
+            A,
+            X,
+            X_poisson,
+            X_ib,
+            Z,
+            Q,
+            deg_corr,
+            directed,
+            use_meta,
+            meta_types,
+            verbose,
         )
         self.directed = directed
+        self.verbose = verbose
         # self.A = A
         # if X_poisson is not None and X_ib is not None:
         #     tmp = List()
@@ -1126,26 +1163,31 @@ class DSBMM:
         # first init of parameters given initial groups if init=True, else use provided marginals
         # TODO: remove extra prints after fix
         self.jit_model.update_alpha(init, learning_rate)
-        print(self.jit_model._alpha)
-        print("\tUpdated alpha")
+        if self.verbose:
+            print(self.jit_model._alpha)
+            print("\tUpdated alpha")
         self.jit_model.update_pi(init, learning_rate)
-        print(self.jit_model._pi)
-        print("\tUpdated pi")
+        if self.verbose:
+            print(self.jit_model._pi)
+            print("\tUpdated pi")
         if self.jit_model.deg_corr:
             self.jit_model.update_lambda(init, learning_rate)
-            print("\tUpdated lambda")
+            if self.verbose:
+                print("\tUpdated lambda")
         else:
             # NB only implemented for binary case
             self.jit_model.update_beta(init, learning_rate)
-            print(self.jit_model._beta.transpose(2, 0, 1))
-            print("\tUpdated beta")
+            if self.verbose:
+                print(self.jit_model._beta.transpose(2, 0, 1))
+                print("\tUpdated beta")
             if not self.directed:
                 assert np.allclose(
                     self.jit_model._beta.transpose(1, 0, 2), self.jit_model._beta
                 )
         self.jit_model.update_meta_params(init, learning_rate)
-        # print(self.jit_model._meta_params)
-        print("\tUpdated meta")
+        if self.verbose:
+            # print(self.jit_model._meta_params)
+            print("\tUpdated meta")
         self.jit_model.calc_meta_lkl()
 
     def set_node_marg(self, values):
