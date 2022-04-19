@@ -2,10 +2,13 @@ import simulation
 import data_processer
 import dsbmm
 import bp
+import dsbmm_sparse
+import bp_sparse
 
 # from utils import nb_ari_local  # , nb_nmi_local
 from sklearn.metrics import adjusted_rand_score as ari
 import numpy as np
+from scipy import sparse
 from numba.typed import List
 from sklearn.cluster import MiniBatchKMeans, KMeans
 import time
@@ -27,11 +30,17 @@ CONV_TOL = 1e-4
 
 
 class EM:
-    def __init__(self, data, msg_init_mode="planted", verbose=True):
+    def __init__(self, data, msg_init_mode="planted", sparse=False, verbose=True):
         self.verbose = verbose
         self.A = data["A"]
+        self.sparse = sparse
         try:
-            assert np.allclose(self.A, self.A.transpose(1, 0, 2))
+            if not sparse:
+                assert np.allclose(self.A, self.A.transpose(1, 0, 2))
+            else:
+                # TODO: fix properly - currently just force symmetrising and binarising
+                self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
+
         except:
             # symmetrise for this test case
             print(
@@ -41,8 +50,12 @@ class EM:
             )
             self.A = ((self.A + self.A.transpose(1, 0, 2)) > 0) * 1.0
         # NB expecting A in shape N x N x T
-        self.N = self.A.shape[0]
-        self.T = self.A.shape[2]
+        if not sparse:
+            self.N = self.A.shape[0]
+            self.T = self.A.shape[2]
+        else:
+            self.N = self.A[0].shape[0]
+            self.T = len(self.A)
         self.X = data["X"]
         self.X_poisson = np.ascontiguousarray(self.X["poisson"].transpose(1, 2, 0))
         self.X_ib = np.ascontiguousarray(self.X["indep bernoulli"].transpose(1, 2, 0))
@@ -98,21 +111,36 @@ class EM:
         except:
             if self.verbose:
                 print("No p_in / p_out provided")
-
-        self.dsbmm = dsbmm.DSBMM(
-            A=self.A,
-            X_poisson=self.X_poisson,
-            X_ib=self.X_ib,
-            Z=self.init_Z.copy(),
-            Q=self.Q,
-            meta_types=self.meta_types,
-            verbose=self.verbose,
-        )  # X=X,
-        if self.verbose:
-            print("Successfully instantiated DSBMM...")
-        self.bp = bp.BP(self.dsbmm)
-        if self.verbose:
-            print("Successfully instantiated BP system...")
+        if sparse:
+            self.dsbmm = dsbmm_sparse.DSBMMSparse(
+                A=self.A,
+                X_poisson=self.X_poisson,
+                X_ib=self.X_ib,
+                Z=self.init_Z.copy(),
+                Q=self.Q,
+                meta_types=self.meta_types,
+                verbose=self.verbose,
+            )  # X=X,
+            if self.verbose:
+                print("Successfully instantiated DSBMM...")
+            self.bp = bp_sparse.BPSparse(self.dsbmm)
+            if self.verbose:
+                print("Successfully instantiated BP system...")
+        else:
+            self.dsbmm = dsbmm.DSBMM(
+                A=self.A,
+                X_poisson=self.X_poisson,
+                X_ib=self.X_ib,
+                Z=self.init_Z.copy(),
+                Q=self.Q,
+                meta_types=self.meta_types,
+                verbose=self.verbose,
+            )  # X=X,
+            if self.verbose:
+                print("Successfully instantiated DSBMM...")
+            self.bp = bp.BP(self.dsbmm)
+            if self.verbose:
+                print("Successfully instantiated BP system...")
         ## Initialise model params
         if self.verbose:
             print("Now initialising model:")
@@ -243,7 +271,12 @@ def calc_present(A):
     Args:
         A (_type_): N x N x T adjacency (assume sparse)
     """
-    present = (A.sum(axis=0) > 0) | (A.sum(axis=1) > 0)
+    if type(A) == np.ndarray:
+        present = (A.sum(axis=0) > 0) | (A.sum(axis=1) > 0)
+    elif type(A) == list:
+        present = np.vstack(
+            [(A[t].sum(axis=0) > 0) | (A[t].sum(axis=1) > 0) for t in range(len(A))]
+        )
     return present
 
 
@@ -283,10 +316,18 @@ def effective_beta(A, Z):
     z_vals = np.unique(Z)
     T = Z.shape[1]
     beta = np.zeros((Q, Q, T))
-    for q in z_vals:
-        for r in z_vals:
-            for t in range(T):
-                beta[q, r, t] = A[:, :, t][np.ix_(Z[:, t] == q, Z[:, t] == r)].mean()
+    if type(A) == np.ndarray:
+        for q in z_vals:
+            for r in z_vals:
+                for t in range(T):
+                    beta[q, r, t] = A[:, :, t][
+                        np.ix_(Z[:, t] == q, Z[:, t] == r)
+                    ].mean()
+    elif type(A) == list:
+        for q in z_vals:
+            for r in z_vals:
+                for t in range(T):
+                    beta[q, r, t] = A[t][np.ix_(Z[:, t] == q, Z[:, t] == r)].mean()
     return beta / 2
 
 
@@ -294,12 +335,16 @@ if __name__ == "__main__":
     ## Simulate data (for multiple tests)
     default_test_params = simulation.default_test_params
     og_test_params = simulation.og_test_params
-    testset_name = "default"  # or 'og'
+    scaling_test_params = simulation.scaling_test_params
+    testset_names = ["og", "default", "scaling"]
+    testset_name = testset_names[2]
     # choose which set of tests to run
     if testset_name == "og":
         test_params = og_test_params
     elif testset_name == "default":
         test_params = default_test_params
+    elif testset_name == "scaling":
+        test_params = scaling_test_params
 
     # NB n_samps, p_out, T, meta_types, L, meta_dims all fixed
     # in default test set - all other params change over 12 tests
@@ -309,7 +354,7 @@ if __name__ == "__main__":
     # print(test_params)
     for i, testno in enumerate(test_params["test_no"]):
         # if i == chosen_test_idx:
-        if testset_name == "default":
+        if testset_name in ["default", "scaling"]:
             params = {
                 "test_no": testno,
                 "N": test_params["N"][i],
@@ -344,6 +389,15 @@ if __name__ == "__main__":
             }
         # print(params)
         samples = simulation.gen_test_data(**params)
+        if testset_name == "scaling":
+            print()
+            print(f"Simulated test {testno}")
+            for i, sample in enumerate(samples):
+                print(f"...converting sample {i+1} to sparse format")
+                sample["A"] = [
+                    sparse.csr_matrix(sample["A"][:, :, t]) for t in range(params["T"])
+                ]
+            print("...done")
         # print(samples)
         all_samples.append(samples)
         params_set.append(params)
@@ -381,13 +435,13 @@ if __name__ == "__main__":
     verbose = False
     if testset_name == "og":
         test_aris = [np.zeros((20, T)) for T in test_params["T"]]
-    elif testset_name == "default":
+    elif testset_name in ["default", "scaling"]:
         test_aris = np.zeros((len(all_samples), 20, 5))
     test_times = np.zeros((len(all_samples), 19))
     for test_no, (samples, params) in enumerate(zip(all_samples, params_set)):
         # if test_no < 5:
         print()
-        print("*" * 15, f"Test {test_no}", "*" * 15)
+        print("*" * 15, f"Test {test_no+1}", "*" * 15)
         for samp_no, sample in enumerate(samples):
             if samp_no < len(samples):  # can limit num samples considered
                 if samp_no > 0:
@@ -396,7 +450,7 @@ if __name__ == "__main__":
                 if verbose:
                     print("true params:", params)
                 print()
-                print("$" * 12, "At sample", samp_no, "$" * 12)
+                print("$" * 12, "At sample", samp_no + 1, "$" * 12)
                 sample.update(params)
                 # present = calc_present(sample["A"])
                 # trans_present = calc_trans_present(present)
@@ -417,15 +471,18 @@ if __name__ == "__main__":
                         axis=1,
                     )  # done for fixing labels over time
                 else:
-                    kmeans_mat = np.concatenate(
-                        [sample["A"][:, :, t] for t in range(sample["T"])], axis=1
-                    )  # done for fixing labels over time
+                    if testset_name != "scaling":
+                        kmeans_mat = np.concatenate(
+                            [sample["A"][:, :, t] for t in range(sample["T"])], axis=1
+                        )  # done for fixing labels over time
+                    else:
+                        kmeans_mat = sparse.hstack(sample["A"])
                 if sample["N"] > 1e5:
                     kmeans_labels = (
                         MiniBatchKMeans(
                             n_clusters=params["Q"],
                             #   random_state=0, # TODO: consider allowing fixing this for reproducibility
-                            batch_size=20,
+                            batch_size=100,
                             max_iter=10,
                         )
                         .fit_predict(kmeans_mat)
@@ -460,7 +517,10 @@ if __name__ == "__main__":
                     raise ValueError("Wrong partition shape")
                 sample["Z"] = init_Z
                 ## Initialise
-                em = EM(sample, verbose=verbose)
+                if testset_name != "scaling":
+                    em = EM(sample, verbose=verbose)
+                else:
+                    em = EM(sample, sparse=True, verbose=verbose)
                 ## Score from K means
                 print("Before fitting model, K-means init partition has")
                 if verbose:
