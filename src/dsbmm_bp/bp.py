@@ -41,7 +41,7 @@ twopoint_e_type = typeof(
 TOL = 1e-50  # min value permitted for msgs etc (for numerical stability)
 LARGE_DEG_THR = 20  # threshold of node degree above which log msgs calculated
 # (for numerical stability)
-RANDOM_ONLINE_UPDATE_MSG = False  # if true then update messages online (always using most recent vals), otherwise update all messages simultaneously
+RANDOM_ONLINE_UPDATE_MSG = True  # if true then update messages online (always using most recent vals), otherwise update all messages simultaneously
 
 
 @jitclass

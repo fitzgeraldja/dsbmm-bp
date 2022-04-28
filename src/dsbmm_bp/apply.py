@@ -19,23 +19,47 @@ faulthandler.enable()
 
 import matplotlib.pyplot as plt
 
-plt.ion()
+# plt.ion()
 
 import pickle
+import yaml  # for reading config file
+from pathlib import Path
 
-MAX_MSG_ITER = 5
-MSG_CONV_TOL = 1e-4
-MAX_ITER = 10
-CONV_TOL = 1e-4
+with open("config.yaml") as f:
+    config = yaml.load(f, Loader=yaml.FullLoader)
+
+MAX_MSG_ITER = config["max_msg_iter"]
+MSG_CONV_TOL = config["msg_conv_tol"]
+MAX_ITER = config["max_iter"]
+CONV_TOL = config["conv_tol"]
 
 
 class EM:
-    def __init__(self, data, msg_init_mode="planted", sparse=False, verbose=True):
+    def __init__(
+        self,
+        data,
+        init_Z_mode="A",
+        msg_init_mode="planted",
+        sparse_adj=False,
+        n_runs=5,
+        tuning_param=1.0,
+        deg_corr=False,
+        verbose=True,
+    ):
         self.verbose = verbose
+        self.msg_init_mode = msg_init_mode
         self.A = data["A"]
-        self.sparse = sparse
+        self.tuning_param = tuning_param
+        self.deg_corr = deg_corr
+        self.n_runs = n_runs
+        self.run_idx = 0
         try:
-            if not sparse:
+            self.Q = data["Q"]
+        except:
+            raise ValueError("Must specify Q in data")
+        self.sparse = sparse_adj
+        try:
+            if not sparse_adj:
                 assert np.allclose(self.A, self.A.transpose(1, 0, 2))
             else:
                 # TODO: fix properly - currently just force symmetrising and binarising
@@ -57,26 +81,73 @@ class EM:
             self.N = self.A[0].shape[0]
             self.T = len(self.A)
         self.X = data["X"]
-        self.X_poisson = np.ascontiguousarray(self.X["poisson"].transpose(1, 2, 0))
-        self.X_ib = np.ascontiguousarray(self.X["indep bernoulli"].transpose(1, 2, 0))
-        # self.X_poisson = data["X_poisson"]
-        # self.X_ib = data["X_ib"]
-        try:
-            self.init_Z = data["Z"]
-            # print("Z:")
-            # print(Z.flags)
-        except:
-            if self.verbose:
-                print("No init partition passed")
-        try:
-            self.Q = data["Q"]
-        except:
-            if self.verbose:
-                print(
-                    "Inferring Q from given Z:",
-                    "\nTaking as max(Z) + 1, so -1 may be used for missing data",
+        if type(self.X) == dict:
+            try:
+                self.X_poisson = np.ascontiguousarray(
+                    self.X["poisson"].transpose(1, 2, 0)
                 )
-            self.Q = self.init_Z.max() + 1
+                self.X_ib = np.ascontiguousarray(
+                    self.X["indep bernoulli"].transpose(1, 2, 0)
+                )
+                self.X = None
+            except:
+                print(self.X)
+                raise ValueError(
+                    "X given as dict - expected test run with keys 'poisson' and 'indep bernoulli'"
+                )
+        else:
+            self.X_poisson = None
+            self.X_ib = None
+
+        ## Sort init partition
+        if init_Z_mode in ["AX", "XA"]:
+            kmeans_mat = np.concatenate(
+                [
+                    *[self.A[:, :, t] for t in range(self.T)],
+                    *[
+                        Xs.transpose(1, 2, 0).reshape(self.N, -1)
+                        for Xs in self.X.values()
+                    ],
+                ],
+                axis=1,
+            )  # done for fixing labels over time
+        else:
+            if not self.sparse:
+                kmeans_mat = np.concatenate(
+                    [self.A[:, :, t] for t in range(self.T)], axis=1
+                )  # done for fixing labels over time
+            else:
+                kmeans_mat = sparse.hstack(self.A)
+        if self.N > 1e5:
+            kmeans_labels = (
+                MiniBatchKMeans(
+                    n_clusters=self.Q,
+                    #   random_state=0, # TODO: consider allowing fixing this for reproducibility
+                    batch_size=100,
+                    max_iter=10,
+                )
+                .fit_predict(kmeans_mat)
+                .reshape(-1, 1)
+            )
+        else:
+            kmeans_labels = (
+                KMeans(
+                    n_clusters=self.Q,
+                    #   random_state=0, # TODO: consider allowing fixing this for reproducibility
+                    max_iter=10,
+                )
+                .fit_predict(kmeans_mat)
+                .reshape(-1, 1)
+            )
+        self.k_means_init_Z = np.tile(kmeans_labels, (1, self.T))
+        try:
+            assert self.k_means_init_Z.shape == (self.N, self.T)
+        except:
+            print(self.k_means_init_Z.shape)
+            print((self.N, self.T))
+            raise ValueError("Wrong partition shape")
+        self.perturb_init_Z()
+
         try:
             self.meta_types = List()
             for mt in data["meta_types"]:
@@ -112,13 +183,18 @@ class EM:
             if self.verbose:
                 print("No p_in / p_out provided")
         if sparse:
+            # TODO: make abstract wrapper with separate dense / sparse impl
+            # so can remove redundant code below
             self.dsbmm = dsbmm_sparse.DSBMMSparse(
                 A=self.A,
+                X=self.X,
                 X_poisson=self.X_poisson,
                 X_ib=self.X_ib,
                 Z=self.init_Z.copy(),
                 Q=self.Q,
+                deg_corr=self.deg_corr,
                 meta_types=self.meta_types,
+                tuning_param=self.tuning_param,
                 verbose=self.verbose,
             )  # X=X,
             if self.verbose:
@@ -129,11 +205,14 @@ class EM:
         else:
             self.dsbmm = dsbmm.DSBMM(
                 A=self.A,
+                X=self.X,
                 X_poisson=self.X_poisson,
                 X_ib=self.X_ib,
                 Z=self.init_Z.copy(),
                 Q=self.Q,
+                deg_corr=self.deg_corr,
                 meta_types=self.meta_types,
+                tuning_param=self.tuning_param,
                 verbose=self.verbose,
             )  # X=X,
             if self.verbose:
@@ -166,6 +245,85 @@ class EM:
             # Other stuff
             self.ax.grid()
             # ...
+        self.best_Z = None
+
+    def perturb_init_Z(self, pert_prop=0.1):
+        # add some noise to init clustering
+        # prop = 0.1  # proportion of noise to add
+        mask = np.random.rand(*self.k_means_init_Z.shape) < pert_prop
+        init_Z = self.k_means_init_Z.copy()
+        init_Z[mask] += np.random.randint(
+            -self.Q // 2, self.Q // 2 + 1, size=(self.N, self.T),
+        )[mask]
+        init_Z[init_Z < 0] = 0
+        init_Z[init_Z > self.Q - 1] = self.Q - 1
+        self.init_Z = init_Z
+        self.best_val = 0.0
+
+    def reinit(self, set_Z=None):
+        self.perturb_init_Z()
+        if sparse:
+            self.dsbmm = dsbmm_sparse.DSBMMSparse(
+                A=self.A,
+                X=self.X,
+                X_poisson=self.X_poisson,
+                X_ib=self.X_ib,
+                Z=self.init_Z.copy() if set_Z is None else set_Z,
+                Q=self.Q,
+                deg_corr=self.deg_corr,
+                meta_types=self.meta_types,
+                tuning_param=self.tuning_param,
+                verbose=self.verbose,
+            )  # X=X,
+            if self.verbose:
+                print("Successfully reinstantiated DSBMM...")
+            self.bp = bp_sparse.BPSparse(self.dsbmm)
+            if self.verbose:
+                print("Successfully reinstantiated BP system...")
+        else:
+            self.dsbmm = dsbmm.DSBMM(
+                A=self.A,
+                X=self.X,
+                X_poisson=self.X_poisson,
+                X_ib=self.X_ib,
+                Z=self.init_Z.copy() if set_Z is None else set_Z,
+                Q=self.Q,
+                deg_corr=self.deg_corr,
+                meta_types=self.meta_types,
+                tuning_param=self.tuning_param,
+                verbose=self.verbose,
+            )  # X=X,
+            if self.verbose:
+                print("Successfully reinstantiated DSBMM...")
+            self.bp = bp.BP(self.dsbmm)
+            if self.verbose:
+                print("Successfully reinstantiated BP system...")
+        ## Initialise model params
+        if self.verbose:
+            print("Now reinitialising model:")
+        self.bp.model.update_params(init=True)
+        if self.verbose:
+            print("\tReinitialised all DSBMM params!")
+        self.bp.init_messages(mode=self.msg_init_mode)
+        if self.verbose:
+            print(f"\tReinitialised messages and marginals ({self.msg_init_mode})")
+        self.bp.init_h()
+        if self.verbose:
+            print("\tReinitialised corresponding external fields")
+        if self.verbose:
+            print("Done, can now run updates again")
+        if self.verbose:
+            # make updating plot of average score (e.g. ARI) if ground truth known
+            self.xdata, self.ydata = [], []
+            self.figure, self.ax = plt.subplots(dpi=200)
+            (self.lines,) = self.ax.plot([], [], "o")
+            # Autoscale on unknown axis and known lims on the other
+            self.ax.set_autoscaley_on(True)
+            self.ax.set_xlim(0, MAX_ITER)
+            # Other stuff
+            self.ax.grid()
+            # ...
+        self.run_idx += 1
 
     def fit(
         self,
@@ -176,6 +334,22 @@ class EM:
         true_Z=None,
         learning_rate=0.2,
     ):
+        self.true_Z = true_Z
+        if self.verbose:
+            print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
+        while self.run_idx < self.n_runs - 1:
+            self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
+            self.bp.model.set_Z_by_MAP()
+            self.reinit()
+        # final random init run
+        self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
+        # now reinit with best part found from these runs
+        if self.best_Z is None:
+            self.best_Z = self.bp.model.Z
+        self.reinit(set_Z=self.best_Z)
+        self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
+
+    def do_run(self, max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate):
         for n_iter in range(max_iter):
             if self.verbose:
                 print(f"\n##### At iteration {n_iter+1} #####")
@@ -211,30 +385,38 @@ class EM:
                     print("~~~~~~ CONVERGED ~~~~~~")
                 break
             self.bp.model.zero_diff()
+            if self.true_Z is None:
+                time.sleep(0.25)
+            # TODO: fix to use free energy rather than ARIs directly (cheating)
+            else:
+                self.bp.model.set_Z_by_MAP()
+                current_score = self.ari_score(self.true_Z)
+                if current_score.mean() >= self.best_val:
+                    self.best_val = current_score.mean()
+                    self.best_Z = self.bp.model.Z
             if self.verbose:
                 self.bp.model.set_Z_by_MAP()
-                if true_Z is not None:
-                    current_score = self.ari_score(true_Z)
+                if self.true_Z is not None:
+                    current_score = self.ari_score(self.true_Z)
                     self.ydata.append(current_score.mean())
                     self.update_score_plot()
                     print()
-        self.bp.model.set_Z_by_MAP()
 
     def ari_score(self, true_Z, pred_Z=None):
         # wait for a second to execute in case of parallelisation issues
-        time.sleep(1)
+        time.sleep(0.5)
         if pred_Z is None:
             try:
                 # could try and replace with numba again but seemed
                 # to cause issues
                 aris = np.array(
                     [
-                        ari(true, pred)
+                        ari(true[pred > -1], pred[pred > -1])
                         for true, pred in zip(self.bp.model.jit_model.Z.T, true_Z.T)
                     ]
                 )
                 if self.verbose:
-                    print("ARIs:", aris)
+                    print("ARIs:", np.round_(aris, 3))
                 return aris
             except:
                 print(
@@ -243,9 +425,14 @@ class EM:
                     "and have called fit",
                 )
         else:
-            aris = np.array([ari(true, pred) for true, pred in zip(pred_Z.T, true_Z.T)])
+            aris = np.array(
+                [
+                    ari(true[pred > -1], pred[pred > -1])
+                    for true, pred in zip(pred_Z.T, true_Z.T)
+                ]
+            )
             if self.verbose:
-                print("ARIs:", aris)
+                print("ARIs:", np.round_(aris, 3))
             return aris
 
     def update_score_plot(self):
@@ -336,8 +523,8 @@ if __name__ == "__main__":
     default_test_params = simulation.default_test_params
     og_test_params = simulation.og_test_params
     scaling_test_params = simulation.scaling_test_params
-    testset_names = ["og", "default", "scaling"]
-    testset_name = testset_names[2]
+    testset_names = ["og", "default", "scaling", "scopus"]
+    testset_name = testset_names[3]
     # choose which set of tests to run
     if testset_name == "og":
         test_params = og_test_params
@@ -345,62 +532,67 @@ if __name__ == "__main__":
         test_params = default_test_params
     elif testset_name == "scaling":
         test_params = scaling_test_params
-
+    else:
+        test_params = None
     # NB n_samps, p_out, T, meta_types, L, meta_dims all fixed
     # in default test set - all other params change over 12 tests
-    all_samples = []
-    params_set = []
-    chosen_test_idx = 10
-    # print(test_params)
-    for i, testno in enumerate(test_params["test_no"]):
-        # if i == chosen_test_idx:
-        if testset_name in ["default", "scaling"]:
-            params = {
-                "test_no": testno,
-                "N": test_params["N"][i],
-                "Q": test_params["Q"][i],
-                "p_in": test_params["p_in"][i],
-                "p_stay": test_params["p_stay"][i],
-                "n_samps": test_params["n_samps"],
-                "p_out": test_params["p_out"][i],
-                "T": test_params["T"],
-                "meta_types": test_params["meta_types"],
-                "L": test_params["L"],
-                "meta_dims": test_params["meta_dims"],
-                "pois_params": test_params["meta_params"][i][0],
-                "indep_bern_params": test_params["meta_params"][i][1],
-                "meta_aligned": test_params["meta_align"][i],
-            }
-        elif testset_name == "og":
-            params = {
-                "test_no": testno,
-                "N": test_params["N"],
-                "Q": test_params["Q"],
-                "beta_mat": test_params["beta_mat"][i],
-                "trans_mat": test_params["trans_mat"][i],
-                "n_samps": test_params["n_samps"],
-                "T": test_params["T"][i],
-                "meta_types": test_params["meta_types"],
-                "L": test_params["L"],
-                "meta_dims": test_params["meta_dims"],
-                # "pois_params": og_test_params["meta_params"][i][0],
-                # "indep_bern_params": og_test_params["meta_params"][i][1],
-                "sample_meta_params": test_params["sample_meta_params"],
-            }
-        # print(params)
-        samples = simulation.gen_test_data(**params)
-        if testset_name == "scaling":
-            print()
-            print(f"Simulated test {testno}")
-            for i, sample in enumerate(samples):
-                print(f"...converting sample {i+1} to sparse format")
-                sample["A"] = [
-                    sparse.csr_matrix(sample["A"][:, :, t]) for t in range(params["T"])
-                ]
-            print("...done")
-        # print(samples)
-        all_samples.append(samples)
-        params_set.append(params)
+    if test_params is not None:
+        all_samples = []
+        params_set = []
+        chosen_test_idx = 10
+        # print(test_params)
+        for i, testno in enumerate(test_params["test_no"]):
+            # if i == chosen_test_idx:
+            if i < 3:  # just take first 3 tests for example to start
+                if testset_name in ["default", "scaling"]:
+                    params = {
+                        "test_no": testno,
+                        "N": test_params["N"][i],
+                        "Q": test_params["Q"][i],
+                        "p_in": test_params["p_in"][i],
+                        "p_stay": test_params["p_stay"][i],
+                        "n_samps": test_params["n_samps"],
+                        "p_out": test_params["p_out"][i],
+                        "T": test_params["T"],
+                        "meta_types": test_params["meta_types"],
+                        "L": test_params["L"],
+                        "meta_dims": test_params["meta_dims"],
+                        "pois_params": test_params["meta_params"][i][0],
+                        "indep_bern_params": test_params["meta_params"][i][1],
+                        "meta_aligned": test_params["meta_align"][i],
+                    }
+                elif testset_name == "og":
+                    params = {
+                        "test_no": testno,
+                        "N": test_params["N"],
+                        "Q": test_params["Q"],
+                        "beta_mat": test_params["beta_mat"][i],
+                        "trans_mat": test_params["trans_mat"][i],
+                        "n_samps": test_params["n_samps"],
+                        "T": test_params["T"][i],
+                        "meta_types": test_params["meta_types"],
+                        "L": test_params["L"],
+                        "meta_dims": test_params["meta_dims"],
+                        # "pois_params": og_test_params["meta_params"][i][0],
+                        # "indep_bern_params": og_test_params["meta_params"][i][1],
+                        "sample_meta_params": test_params["sample_meta_params"],
+                    }
+                # print(params)
+                samples = simulation.gen_test_data(**params)
+                if testset_name == "scaling":
+                    print()
+                    print(f"Simulated test {testno}")
+                    for i, sample in enumerate(samples):
+                        print(f"...converting sample {i+1} to sparse format")
+                        sample["A"] = [
+                            sparse.csr_matrix(sample["A"][:, :, t])
+                            for t in range(params["T"])
+                        ]
+                    print("...done")
+                # print(samples)
+                all_samples.append(samples)
+                params_set.append(params)
+        print("Successfully simulated data, now initialising model...")
     # Example of specifying own params for simulating data:
     # N = 500
     # Q = 20
@@ -426,177 +618,152 @@ if __name__ == "__main__":
     #     meta_types=meta_types,
     #     meta_params=meta_params,
     # )
-    print("Successfully simulated data, now initialising model...")
 
-    ## Process empirical data
-    pass  # not needed as simulating directly in form needed
+    ## Load empirical data
+    if testset_name == "scopus":
+        data = {}
+        DATA_PATH = Path("../../tests/data/scopus")
+        with open(DATA_PATH / "col_A.pkl", "rb") as f:
+            data["A"] = [sparse.csr_matrix(A) for A in pickle.load(f)]
+        with open(DATA_PATH / "col_ages.pkl", "rb") as f:
+            # given as full time series so only take 4 most recent as done
+            # for A
+            data["X_ages"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+        with open(DATA_PATH / "col_insts.pkl", "rb") as f:
+            data["X_insts"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+        with open(DATA_PATH / "col_subjs.pkl", "rb") as f:
+            data["X_subjs"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+        # data['X'] = [v for k,v in data.items() if 'X' in k]
+        tmp = List()
+        tmp.append(np.ascontiguousarray(data["X_ages"]))
+        tmp.append(np.ascontiguousarray(data["X_insts"]))
+        tmp.append(np.ascontiguousarray(data["X_subjs"]))
+        data["X"] = tmp
+        data["meta_types"] = ["poisson", "indep bernoulli", "indep bernoulli"]
+        data["Q"] = 20
 
     use_X_init = False
-    verbose = False
-    if testset_name == "og":
-        test_aris = [np.zeros((20, T)) for T in test_params["T"]]
-    elif testset_name in ["default", "scaling"]:
-        test_aris = np.zeros((len(all_samples), 20, 5))
-    test_times = np.zeros((len(all_samples), 19))
-    for test_no, (samples, params) in enumerate(zip(all_samples, params_set)):
-        # if test_no < 5:
-        print()
-        print("*" * 15, f"Test {test_no+1}", "*" * 15)
-        for samp_no, sample in enumerate(samples):
-            if samp_no < len(samples):  # can limit num samples considered
-                if samp_no > 0:
-                    # drop first run as compiling
-                    start_time = time.time()
-                if verbose:
-                    print("true params:", params)
-                print()
-                print("$" * 12, "At sample", samp_no + 1, "$" * 12)
-                sample.update(params)
-                # present = calc_present(sample["A"])
-                # trans_present = calc_trans_present(present)
-                # print(present)
-                # print(trans_present)+
-                ## Initialise model
-                true_Z = sample["Z"]
-
-                if use_X_init:
-                    kmeans_mat = np.concatenate(
-                        [
-                            *[sample["A"][:, :, t] for t in range(sample["T"])],
-                            *[
-                                Xs.transpose(1, 2, 0).reshape(params["N"], -1)
-                                for Xs in sample["X"].values()
-                            ],
-                        ],
-                        axis=1,
-                    )  # done for fixing labels over time
-                else:
+    verbose = True
+    if testset_name != "scopus":
+        if testset_name == "og":
+            test_aris = [np.zeros((20, T)) for T in test_params["T"]]
+        elif testset_name in ["default", "scaling"]:
+            test_aris = np.zeros((len(all_samples), 20, 5))
+        test_times = np.zeros((len(all_samples), 19))
+        for test_no, (samples, params) in enumerate(zip(all_samples, params_set)):
+            # if test_no < 5:
+            print()
+            print("*" * 15, f"Test {test_no+1}", "*" * 15)
+            for samp_no, sample in enumerate(samples):
+                if samp_no < len(samples):  # can limit num samples considered
+                    if samp_no > 0:
+                        # drop first run as compiling
+                        start_time = time.time()
+                    if verbose:
+                        print("true params:", params)
+                    print()
+                    print("$" * 12, "At sample", samp_no + 1, "$" * 12)
+                    sample.update(params)
+                    # present = calc_present(sample["A"])
+                    # trans_present = calc_trans_present(present)
+                    # print(present)
+                    # print(trans_present)+
+                    ## Initialise model
+                    true_Z = sample.pop("Z")
+                    ## Initialise
                     if testset_name != "scaling":
-                        kmeans_mat = np.concatenate(
-                            [sample["A"][:, :, t] for t in range(sample["T"])], axis=1
-                        )  # done for fixing labels over time
+                        em = EM(sample, verbose=verbose)
                     else:
-                        kmeans_mat = sparse.hstack(sample["A"])
-                if sample["N"] > 1e5:
-                    kmeans_labels = (
-                        MiniBatchKMeans(
-                            n_clusters=params["Q"],
-                            #   random_state=0, # TODO: consider allowing fixing this for reproducibility
-                            batch_size=100,
-                            max_iter=10,
-                        )
-                        .fit_predict(kmeans_mat)
-                        .reshape(-1, 1)
-                    )
-                else:
-                    kmeans_labels = (
-                        KMeans(
-                            n_clusters=params["Q"],
-                            #   random_state=0, # TODO: consider allowing fixing this for reproducibility
-                            max_iter=10,
-                        )
-                        .fit_predict(kmeans_mat)
-                        .reshape(-1, 1)
-                    )
-                init_Z = np.tile(kmeans_labels, (1, params["T"]))
-                # add some noise to init clustering
-                prop = 0.1  # proportion of noise to add
-                mask = np.random.rand(*init_Z.shape) < prop
-                init_Z[mask] += np.random.randint(
-                    -sample["Q"] // 2,
-                    sample["Q"] // 2 + 1,
-                    size=(sample["N"], sample["T"]),
-                )[mask]
-                init_Z[init_Z < 0] = 0
-                init_Z[init_Z > sample["Q"] - 1] = sample["Q"] - 1
-                try:
-                    assert init_Z.shape == sample["Z"].shape
-                except:
-                    print(init_Z.shape)
-                    print(sample["Z"].shape)
-                    raise ValueError("Wrong partition shape")
-                sample["Z"] = init_Z
-                ## Initialise
-                if testset_name != "scaling":
-                    em = EM(sample, verbose=verbose)
-                else:
-                    em = EM(sample, sparse=True, verbose=verbose)
-                ## Score from K means
-                print("Before fitting model, K-means init partition has")
-                if verbose:
-                    em.ari_score(true_Z)
-                else:
-                    print(em.ari_score(true_Z))
-                ## Fit to given data
-                em.fit(true_Z=true_Z, learning_rate=0.2)
-                ## Score after fit
-                try:
-                    test_aris[test_no, samp_no, :] = 0.0
-                    print("BP Z ARI:")
-                    test_aris[test_no, samp_no, :] = em.ari_score(true_Z)
-                    if not verbose:
-                        print(test_aris[test_no, samp_no, :])
-                    print("Init Z ARI:")
+                        em = EM(sample, sparse_adj=True, verbose=verbose)
+                    ## Score from K means
+                    print("Before fitting model, K-means init partition has")
                     if verbose:
-                        em.ari_score(true_Z, pred_Z=em.init_Z)
+                        em.ari_score(true_Z)
                     else:
-                        print(em.ari_score(true_Z, pred_Z=em.init_Z))
-                except:
-                    print("BP Z ARI:")
-                    test_aris[test_no][samp_no, :] = em.ari_score(true_Z)
-                    if not verbose:
-                        print(test_aris[test_no][samp_no, :])
-                    print("Init Z ARI:")
-                    if verbose:
-                        em.ari_score(true_Z, pred_Z=em.init_Z)
-                    else:
-                        print(em.ari_score(true_Z, pred_Z=em.init_Z))
-                # print("Z inferred:", em.bp.model.jit_model.Z)
-                if verbose:
-                    ## Show transition matrix inferred
-                    print("Pi inferred:", em.bp.trans_prob)
+                        print(np.round_(em.ari_score(true_Z), 3))
+                    ## Fit to given data
+                    em.fit(true_Z=true_Z, learning_rate=0.2)
+                    ## Score after fit
                     try:
-                        print("Versus true pi:", params["trans_mat"])
+                        test_aris[test_no, samp_no, :] = 0.0
+                        print("BP Z ARI:")
+                        test_aris[test_no, samp_no, :] = em.ari_score(true_Z)
+                        if not verbose:
+                            print(np.round_(test_aris[test_no, samp_no, :]))
+                        print("Init Z ARI:")
+                        if verbose:
+                            em.ari_score(true_Z, pred_Z=em.init_Z)
+                        else:
+                            print(np.round_(em.ari_score(true_Z, pred_Z=em.init_Z)))
                     except:
+                        print("BP Z ARI:")
+                        test_aris[test_no][samp_no, :] = em.ari_score(true_Z)
+                        if not verbose:
+                            print(np.round_(test_aris[test_no][samp_no, :]))
+                        print("Init Z ARI:")
+                        if verbose:
+                            em.ari_score(true_Z, pred_Z=em.init_Z)
+                        else:
+                            print(np.round_(em.ari_score(true_Z, pred_Z=em.init_Z)))
+                    # print("Z inferred:", em.bp.model.jit_model.Z)
+                    if verbose:
+                        ## Show transition matrix inferred
+                        print("Pi inferred:", em.bp.trans_prob)
+                        try:
+                            print("Versus true pi:", params["trans_mat"])
+                        except:
+                            print(
+                                "Versus true pi:",
+                                simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
+                            )
+                        print("True effective pi:", effective_pi(true_Z))
                         print(
-                            "Versus true pi:",
-                            simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
+                            "Effective pi from partition inferred:",
+                            effective_pi(em.bp.model.jit_model.Z),
                         )
-                    print("True effective pi:", effective_pi(true_Z))
-                    print(
-                        "Effective pi from partition inferred:",
-                        effective_pi(em.bp.model.jit_model.Z),
-                    )
-                    print(
-                        "True effective beta:",
-                        effective_beta(em.bp.model.jit_model.A, true_Z).transpose(
-                            2, 0, 1
-                        ),
-                    )
-                    print(
-                        "Pred effective beta:",
-                        effective_beta(
-                            em.bp.model.jit_model.A, em.bp.model.jit_model.Z
-                        ).transpose(2, 0, 1),
-                    )
-                if samp_no > 0:
-                    test_times[test_no, samp_no - 1] = time.time() - start_time
-                time.sleep(
-                    1
-                )  # sleep a second to allow threads to complete, TODO: properly sort this
-        print(f"Finished test {test_no} for true params:")
-        print(params)
-        print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
-    print()
-    print("Mean ARIs inferred for each test:")
-    try:
-        print(test_aris.mean(axis=(1, 2)))
-    except:
-        print(np.array([aris.mean() for aris in test_aris]))
-    print("Mean times for each test:")
-    print(test_times.mean(axis=1))
+                        print(
+                            "True effective beta:",
+                            effective_beta(em.bp.model.jit_model.A, true_Z).transpose(
+                                2, 0, 1
+                            ),
+                        )
+                        print(
+                            "Pred effective beta:",
+                            effective_beta(
+                                em.bp.model.jit_model.A, em.bp.model.jit_model.Z
+                            ).transpose(2, 0, 1),
+                        )
+                    if samp_no > 0:
+                        test_times[test_no, samp_no - 1] = time.time() - start_time
+                    time.sleep(
+                        0.5
+                    )  # sleep a bit to allow threads to complete, TODO: properly sort this
+            print(f"Finished test {test_no} for true params:")
+            print(params)
+            print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
+        print()
+        print("Mean ARIs inferred for each test:")
+        try:
+            print(test_aris.mean(axis=(1, 2)))
+        except:
+            print(np.array([aris.mean() for aris in test_aris]))
+        print("Mean times for each test:")
+        print(test_times.mean(axis=1))
+        with open(f"../../results/{testset_name}_test_aris.pkl", "wb") as f:
+            pickle.dump(test_aris, f)
+        with open(f"../../results/{testset_name}_test_times.pkl", "wb") as f:
+            pickle.dump(test_times, f)
+    else:
+        T = len(data["A"])
+        N = data["A"][0].shape[0]
+        n_runs = 1
+        test_Z = np.zeros((n_runs, N, T))
+        print("*" * 15, f"Running Scopus data", "*" * 15)
+        ## Initialise
+        em = EM(data, sparse_adj=True, n_runs = n_runs, verbose=verbose)
+        ## Fit to given data
+        em.fit(learning_rate=0.2)
+        pred_Z = em.bp.model.jit_model.Z
+        with open(f"../../results/{testset_name}_Z.pkl", "wb") as f:
+            pickle.dump(pred_Z, f)
 
-    with open(f"../../results/{testset_name}_test_aris.pkl", "wb") as f:
-        pickle.dump(test_aris, f)
-    with open(f"../../results/{testset_name}_test_times.pkl", "wb") as f:
-        pickle.dump(test_times, f)

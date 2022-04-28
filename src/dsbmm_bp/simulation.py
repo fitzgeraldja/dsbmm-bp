@@ -748,6 +748,18 @@ for bn, beta_mat in enumerate(beta_mats):
             og_test_params["beta_mat"].append(beta_mat)
 
 # scaling tests
+def calc_det_limit(p_stay, c_in, c_out, Q, tol=1e-1):
+    c = (c_in + (Q - 1) * c_out) / Q
+    lam = (c_in - c_out) / (Q * c)
+    bdd_up = c * lam * lam
+    bdd_down = (1 - p_stay * p_stay) / (1 + p_stay * p_stay)
+    if np.any(bdd_up - tol < bdd_down):
+        print(
+            "Warning: Q for scaling test given params is close to theoretical det. limit (in no meta case)"
+        )
+        print(f"For test idxs {np.where(bdd_up - tol < bdd_down)[0]}")
+
+
 scaling_test_params = {}
 n_tests = 10
 n_samps = 20
@@ -766,6 +778,9 @@ p_out = [c_out / ni for ni in N]
 scaling_test_params["p_out"] = p_out
 p_stay = 0.8 * np.ones_like(N)
 scaling_test_params["p_stay"] = p_stay
+
+calc_det_limit(p_stay, c_in, c_out, Q)
+
 T = 5
 scaling_test_params["T"] = T
 meta_types = ["poisson", "indep bernoulli"]

@@ -83,6 +83,7 @@ class DSBMMBase:
     # meta_types: list[str]
     meta_types: meta_types_type
     meta_dims: int32[::1]
+    tuning_param: float64
     deg_corr: bool
     directed: bool
     use_meta: bool
@@ -119,6 +120,7 @@ class DSBMMBase:
         directed,
         use_meta,
         meta_types,
+        tuning_param,
         verbose,
     ):
         # if data is not None:
@@ -169,6 +171,7 @@ class DSBMMBase:
         self.deg_entropy = -(self.degs * np.log(self.degs)).sum()
 
         self.meta_types = meta_types
+        self.tuning_param = tuning_param
         tmp = List()
         for t in range(self.T):
             tmp2 = List()
@@ -400,6 +403,7 @@ class DSBMMBase:
         for i in range(self.N):
             for t in range(self.T):
                 for q in range(self.Q):
+                    self.meta_lkl[i, t, q] = self.meta_lkl[i, t, q] ** self.tuning_param
                     if self.meta_lkl[i, t, q] < TOL:
                         self.meta_lkl[i, t, q] = TOL
                     elif self.meta_lkl[i, t, q] > 1 - TOL:
@@ -995,6 +999,7 @@ class DSBMM:
         directed=False,
         use_meta=True,  # control use of metadata or not (for debug)
         meta_types=["poisson", "indep bernoulli"],
+        tuning_param=1.0,
         verbose=False,
     ):
         # if data is not None:
@@ -1013,6 +1018,7 @@ class DSBMM:
             directed,
             use_meta,
             meta_types,
+            tuning_param,
             verbose,
         )
         self.directed = directed

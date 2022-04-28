@@ -24,13 +24,15 @@ from utils import numba_ix, nb_poisson_lkl_int, nb_ib_lkl
 
 from scipy import sparse
 import csr
+import yaml
 
 # import utils
 
 # from sklearn.cluster import MiniBatchKMeans
 
-# TODO: don't hardcode these
-TOL = 1e-50  # min value permitted for msgs etc (for numerical stability)
+with open("config.yaml") as f:
+    config = yaml.load(f, Loader=yaml.FullLoader)
+TOL = config["tol"]  # min value permitted for msgs etc (for numerical stability)
 
 # NB for numba, syntax of defining an array like e.g. float32[:,:,:]
 # defines array types with no particular layout
@@ -76,9 +78,13 @@ sparse_A_type = typeof(sparse_A_ex)
 class DSBMMSparseBase:
     # A: np.ndarray  # assume N x N x T array s.t. (i,j,t)th position confers information about connection from i to j at time t
     A: sparse_A_type
+    _pres_nodes: bool_[:, ::1]
+    _pres_trans: bool_[:, ::1]
+    _tot_N_pres: int64
     X: X_type
     X_poisson: float64[:, :, ::1]
     X_ib: float64[:, :, ::1]
+    S: int
     # X: list
     # [
     #     np.ndarray
@@ -95,6 +101,7 @@ class DSBMMSparseBase:
     deg_corr: bool
     directed: bool
     use_meta: bool
+    tuning_param: float64
     degs: float64[:, :, ::1]  # N x T x [in,out]
     kappa: float64[:, :, ::1]  # Q x T x [in,out]
     deg_entropy: float
@@ -127,6 +134,7 @@ class DSBMMSparseBase:
         directed,
         use_meta,
         meta_types,
+        tuning_param,
         verbose,
     ):
         # if data is not None:
@@ -138,6 +146,17 @@ class DSBMMSparseBase:
         self.N = A[0].nrows
         self.E = np.array([A_t.nnz for A_t in self.A])
         self.T = len(A)
+        self._pres_nodes = np.zeros(
+            (self.N, self.T), dtype=bool_
+        )  # N x T boolean array w i,t True if i present in net at time t
+        for t in range(self.T):
+            for i in range(self.N):
+                # TODO: fix for directed (only counting out-edges here)
+                self._pres_nodes[self.A[t].row_cs(i), t] = True
+        self._tot_N_pres = self._pres_nodes.sum()
+        self._pres_trans = (
+            self._pres_nodes[:, :-1] * self._pres_nodes[:, 1:]
+        )  # returns N x T-1 array w i,t true if i
         # TODO: consider making this unique if undirected (i.e. so
         # don't loop over both i and j each time)
         # Make edge_vals E x 4 array w rows [i,j,t,val] where A[i,j,t]==val != 0
@@ -154,38 +173,67 @@ class DSBMMSparseBase:
             pos += A_t.nnz
 
         self.Z = Z
+        for i in range(self.N):
+            for t in range(self.T):
+                if not self._pres_nodes[i, t]:
+                    self.Z[i, t] = -1
         self.Q = (
             Q if Q is not None else len(np.unique(self.Z))
         )  # will return 0 if both Q and Z None
-        if X_poisson is not None and X_ib is not None:
-            tmp = List()
-            self.X_poisson = X_poisson
-            self.X_ib = X_ib
-            tmp.append(self.X_poisson)
-            tmp.append(self.X_ib)
-            # TODO: generalise meta_dims
-            self.meta_dims = np.array(
-                [X_poisson.shape[-1], X_ib.shape[-1]], dtype=np.int32
-            )
-            self.X = tmp
-            tmp2 = List()
-            tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[0])))
-            tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[1])))
-            self._meta_params = tmp2
-        # else: # TODO: fix for loading general X
-        #     self.X = X
-
+        self.use_meta = use_meta
+        if self.use_meta:
+            self.meta_types = meta_types
+            if X is not None:
+                tmp = List()
+                tmp2 = List()
+                self.S = len(X)
+                assert len(self.meta_types) == self.S
+                self.meta_dims = np.array([X_s.shape[-1] for X_s in X], dtype=np.int32)
+                for s, mt in enumerate(self.meta_types):
+                    tmp.append(X[s])  # assume X[s] is N x T x Ds array
+                    # s.t. (s)(i,t,ds) posn is info
+                    # about ds dim of sth type metadata
+                    # of i at time t
+                    tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[s])))
+                self.X = tmp
+                self._meta_params = tmp2
+            elif X is None and X_poisson is not None and X_ib is not None:
+                tmp = List()
+                self.X_poisson = X_poisson
+                self.X_ib = X_ib
+                tmp.append(self.X_poisson)
+                tmp.append(self.X_ib)
+                # TODO: generalise meta_dims
+                self.meta_dims = np.array(
+                    [X_poisson.shape[-1], X_ib.shape[-1]], dtype=np.int32
+                )
+                self.X = tmp
+                tmp2 = List()
+                tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[0])))
+                tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[1])))
+                self._meta_params = tmp2
+            else:
+                self.use_meta = False
+                try:
+                    assert self.use_meta == use_meta
+                except:
+                    print(
+                        "!" * 10,
+                        "WARNING: no metadata passed but use_meta=True,",
+                        "assuming want to use network alone",
+                        "!" * 10,
+                    )
         assert self.A is not None
-        assert self.X is not None
+        if self.use_meta:
+            assert self.X is not None
         self.deg_corr = deg_corr
         self.directed = directed
-        self.use_meta = use_meta
+        self.tuning_param = tuning_param
         self._n_qt = self.compute_group_counts()
         self.degs = self.compute_degs(self.A)
         self.kappa = self.compute_group_degs()
         self.deg_entropy = -(self.degs * np.log(self.degs)).sum()
 
-        self.meta_types = meta_types
         tmp = List()
         for t in range(self.T):
             tmp2 = List()
@@ -371,13 +419,14 @@ class DSBMMSparseBase:
                 pois_params = self._meta_params[s]  # shape (Q x T x 1)
                 # recall X[s] has shape (N x T x Ds), w Ds = 1 here
                 for t in range(self.T):
-                    for q in range(self.Q):
-                        for i in range(self.N):
-                            # potentially could speed up further but
-                            # loops still v efficient in numba
-                            self.meta_lkl[i, t, q] *= nb_poisson_lkl_int(
-                                self.X[s][i, t, 0], pois_params[q, t, 0]
-                            )
+                    for i in range(self.N):
+                        if self._pres_nodes[i, t]:
+                            for q in range(self.Q):
+                                # potentially could speed up further but
+                                # loops still v efficient in numba
+                                self.meta_lkl[i, t, q] *= nb_poisson_lkl_int(
+                                    self.X[s][i, t, 0], pois_params[q, t, 0]
+                                )
                 if self.verbose:
                     print("\tUpdated Poisson lkl contribution")
             elif mt == "indep bernoulli":
@@ -385,11 +434,12 @@ class DSBMMSparseBase:
                 ib_params = self._meta_params[s]  # shape (Q x T x L)
                 # recall X[s] has shape (N x T x Ds), w Ds = L here
                 for t in range(self.T):
-                    for q in range(self.Q):
-                        for i in range(self.N):
-                            self.meta_lkl[i, t, q] *= nb_ib_lkl(
-                                self.X[s][i, t, :], ib_params[q, t, :]
-                            )
+                    for i in range(self.N):
+                        if self._pres_nodes[i, t]:
+                            for q in range(self.Q):
+                                self.meta_lkl[i, t, q] *= nb_ib_lkl(
+                                    self.X[s][i, t, :], ib_params[q, t, :]
+                                )
                 if self.verbose:
                     print("\tUpdated IB lkl contribution")
             else:
@@ -398,11 +448,15 @@ class DSBMMSparseBase:
                 )  # NB can't use string formatting for print in numba
         for i in range(self.N):
             for t in range(self.T):
-                for q in range(self.Q):
-                    if self.meta_lkl[i, t, q] < TOL:
-                        self.meta_lkl[i, t, q] = TOL
-                    elif self.meta_lkl[i, t, q] > 1 - TOL:
-                        self.meta_lkl[i, t, q] = 1 - TOL
+                if self._pres_nodes[i, t]:
+                    for q in range(self.Q):
+                        self.meta_lkl[i, t, q] = (
+                            self.meta_lkl[i, t, q] ** self.tuning_param
+                        )
+                        if self.meta_lkl[i, t, q] < TOL:
+                            self.meta_lkl[i, t, q] = TOL
+                        elif self.meta_lkl[i, t, q] > 1 - TOL:
+                            self.meta_lkl[i, t, q] = 1 - TOL
 
     def set_node_marg(self, values):
         self.node_marg = values
@@ -413,30 +467,14 @@ class DSBMMSparseBase:
     def set_twopoint_edge_marg(self, values):
         self.twopoint_edge_marg = values
 
-    def calc_free_energy(self):
-        f_site = 0.0
-        for i in range(self.N):
-            for t in range(self.T):
-                nbrs = self.nbrs[t][i]
-                for q in range(self.Q):
-                    a = 0.0
-                    for j_idx, j in enumerate(nbrs):
-                        b = 0.0
-                        for r in range(self.Q):
-                            b += (
-                                self._beta[r, q, t] * self._psi_e[t][i][j_idx, r]
-                            )  # * deg_i*deg_j if DC
-                        a += np.log(b)
-                        # ... basically f_site = 1/N \sum_i log(Z_i) for Z_i the norm factors of marginals
-                        # similarly then calc f_link = 1/2N \sum_ij log(Z_ij) for the twopoint marg norms (for us these will included time margs)
-                        # then final term is something like \sum_qr p_qr * alpha_q * alpha_r  (CHECK)
-                        # Total free energy is then -f_site + f_link - final term, and smaller better (?)
-
     def update_alpha(self, init, learning_rate):
         if init:
             # case of no marginals / true partition provided to calculate most likely params
-            self._alpha = np.array([(self.Z == q).mean() for q in range(self.Q)])
-            self._alpha /= self._alpha.sum()
+            self._alpha = np.array(
+                [(self.Z == q).sum() / self._tot_N_pres for q in range(self.Q)]
+            )
+            if self._alpha.sum() > 0:
+                self._alpha /= self._alpha.sum()
             self._alpha[self._alpha < TOL] = TOL
             self._alpha /= self._alpha.sum()
             # self._alpha[self._alpha > 1 - TOL] = 1 - TOL
@@ -446,11 +484,9 @@ class DSBMMSparseBase:
             # print("Updating alpha")
             #
             for q in range(self.Q):
-                tmp[q] = self.node_marg[
-                    :, :, q
-                ].mean()  # NB mean w axis argument not supported by numba beyond single integer
-
-            tmp /= tmp.sum()
+                tmp[q] = self.node_marg[:, :, q].sum() / self._tot_N_pres
+            if tmp.sum() > 0:
+                tmp /= tmp.sum()
             tmp[tmp < TOL] = TOL
             tmp /= tmp.sum()
             # tmp[tmp > 1 - TOL] = 1 - TOL
@@ -467,22 +503,28 @@ class DSBMMSparseBase:
     def update_pi(self, init, learning_rate):
         qqprime_trans = np.zeros((self.Q, self.Q))
         if init:
-            for q in range(self.Q):
-                for qprime in range(self.Q):
-                    for t in range(1, self.T):
-                        tm1_idxs = self.Z[:, t - 1] == q
-                        t_idxs = self.Z[:, t] == qprime
-                        qqprime_trans[q, qprime] += (tm1_idxs & t_idxs).sum()
-            qqprime_trans /= np.expand_dims(qqprime_trans.sum(axis=1), 1)
+            for i in range(self.N):
+                for t in range(self.T - 1):
+                    if self._pres_trans[i, t]:
+                        q1 = self.Z[i, t]
+                        q2 = self.Z[i, t + 1]
+                        qqprime_trans[q1, q2] += 1
+
             # TODO: provide different cases for non-uniform init clustering
             # NB for uniform init clustering this provides too homogeneous pi, and is more important now
+            trans_sums = qqprime_trans.sum(axis=1)
+            for q in range(self.Q):
+                if trans_sums[q] > 0:
+                    qqprime_trans[q, :] /= trans_sums[q]
             p = 0.8
             qqprime_trans = p * qqprime_trans + (1 - p) * np.random.rand(
                 *qqprime_trans.shape
             )
-
         else:
-            qqprime_trans = self.twopoint_time_marg.sum(axis=0).sum(axis=0)
+            for i in range(self.N):
+                for t in range(self.T - 1):
+                    if self._pres_trans[i, t]:
+                        qqprime_trans += self.twopoint_time_marg[i, t, :, :]
             # qqprime_trans /= np.expand_dims(
             #     self.node_marg[:, :-1, :].sum(axis=0).sum(axis=0), 1
             # )  # need to do sums twice as numba axis argument
@@ -500,15 +542,17 @@ class DSBMMSparseBase:
             #         raise RuntimeError("Problem with node marginals")
             # qqprime_trans[q, :] = TOL
             # self.correct_pi()
-        qqprime_trans = qqprime_trans / np.expand_dims(
-            qqprime_trans.sum(axis=1), 1
-        )  # normalise rows
+        trans_sums = qqprime_trans.sum(axis=1)
+        for q in range(self.Q):
+            if trans_sums[q] > 0:
+                qqprime_trans[q, :] /= trans_sums[q]
         for q in range(self.Q):
             for qprime in range(self.Q):
                 if qqprime_trans[q, qprime] < TOL:
                     qqprime_trans[q, qprime] = TOL
-                if qqprime_trans[q, qprime] > 1 - TOL:
-                    qqprime_trans[q, qprime] = 1 - TOL
+        qqprime_trans = qqprime_trans / np.expand_dims(
+            qqprime_trans.sum(axis=1), 1
+        )  # normalise rows
         if not init:
             tmp = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
             tmp_diff = np.abs(tmp - self._pi).mean()
@@ -519,6 +563,7 @@ class DSBMMSparseBase:
             self.diff += tmp_diff
             self._pi = tmp
         else:
+
             self._pi = qqprime_trans
 
     def correct_pi(self):
@@ -867,10 +912,12 @@ class DSBMMSparseBase:
             #         for q in range(self.Q)
             #     ]
             # )
-            for q in range(self.Q):
-                for t in range(self.T):
-                    xi[q, t, 0] = (self.Z[:, t] == q).sum()
-                    zeta[q, t, 0] = self.X[s][self.Z[:, t] == q, t, 0].sum()
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        xi[self.Z[i, t], t, 0] += 1
+                        zeta[self.Z[i, t], t, 0] += self.X[s][i, t, 0]
+                for q in range(self.Q):
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
                     if zeta[q, t, 0] < TOL:
@@ -883,11 +930,20 @@ class DSBMMSparseBase:
             # )
             # gdb()
         else:
-            xi[:, :, 0] = self.node_marg.sum(axis=0).transpose(1, 0)
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        for q in range(self.Q):
+                            xi[q, t, 0] += self.node_marg[i, t, q]
             # zeta = np.einsum("itq,itd->qt", self.node_marg, self.X[s])
-            for q in range(self.Q):
-                for t in range(self.T):
-                    zeta[q, t, 0] = (self.node_marg[:, t, q] * self.X[s][:, t, 0]).sum()
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        for q in range(self.Q):
+                            zeta[q, t, 0] += (
+                                self.node_marg[i, t, q] * self.X[s][i, t, 0]
+                            )
+                for q in range(self.Q):
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
                     if zeta[q, t, 0] < TOL:
@@ -921,10 +977,12 @@ class DSBMMSparseBase:
             #         for q in range(self.Q)
             #     ]
             # )
-            for q in range(self.Q):
-                for t in range(self.T):
-                    xi[q, t, 0] = (self.Z[:, t] == q).sum()
-                    rho[q, t, :] = self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        xi[self.Z[i, t], t, 0] += 1
+                        rho[self.Z[i, t], t, :] += self.X[s][i, t, :]
+                for q in range(self.Q):
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
                     for l in range(L):
@@ -941,18 +999,23 @@ class DSBMMSparseBase:
             #     ]
             # )
         else:
-            xi[:, :, 0] = self.node_marg.sum(axis=0).transpose(1, 0)
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        for q in range(self.Q):
+                            xi[q, t, 0] += self.node_marg[i, t, q]
             # rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s])
-            for q in range(self.Q):
-                for t in range(self.T):
-                    rho[q, t, :] = (
-                        np.expand_dims(self.node_marg[:, t, q], 1) * self.X[s][:, t, :]
-                    ).sum(axis=0)
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        for q in range(self.Q):
+                            rho[q, t, :] += self.node_marg[i, t, q] * self.X[s][i, t, :]
+                for q in range(self.Q):
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
-                    # for l in range(L):
-                    #     if rho[q, t, l] < TOL:
-                    #         rho[q, t, l] = TOL
+                    for l in range(L):
+                        if rho[q, t, l] < TOL:
+                            rho[q, t, l] = TOL
         # TODO: fix for xi very small (just use logs)
         tmp = rho / xi
         for q in range(self.Q):
@@ -980,7 +1043,10 @@ class DSBMMSparseBase:
     def set_Z_by_MAP(self):
         for i in range(self.N):
             for t in range(self.T):
-                self.Z[i, t] = np.argmax(self.node_marg[i, t, :])
+                if self._pres_nodes[i, t]:
+                    self.Z[i, t] = np.argmax(self.node_marg[i, t, :])
+                else:
+                    self.Z[i, t] = -1
 
 
 class DSBMMSparse:
@@ -1000,6 +1066,7 @@ class DSBMMSparse:
         directed=False,
         use_meta=True,  # control use of metadata or not (for debug)
         meta_types=["poisson", "indep bernoulli"],
+        tuning_param=1.0,
         verbose=False,
     ):
         # if data is not None:
@@ -1024,6 +1091,7 @@ class DSBMMSparse:
             directed,
             use_meta,
             meta_types,
+            tuning_param,
             verbose,
         )
         self.directed = directed
