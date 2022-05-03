@@ -49,7 +49,11 @@ class EM:
         self.verbose = verbose
         self.msg_init_mode = msg_init_mode
         self.A = data["A"]
-        self.tuning_param = tuning_param
+        if type(tuning_param) == float:
+            self.tuning_params = [tuning_param]
+        else:
+            # assume passing list of values to try
+            self.tuning_params = tuning_param
         self.deg_corr = deg_corr
         self.n_runs = n_runs
         self.run_idx = 0
@@ -89,7 +93,9 @@ class EM:
                 self.X_ib = np.ascontiguousarray(
                     self.X["indep bernoulli"].transpose(1, 2, 0)
                 )
-                self.X = None
+                self.X = List()
+                self.X.append(self.X_poisson)
+                self.X.append(self.X_ib)
             except:
                 print(self.X)
                 raise ValueError(
@@ -194,7 +200,7 @@ class EM:
                 Q=self.Q,
                 deg_corr=self.deg_corr,
                 meta_types=self.meta_types,
-                tuning_param=self.tuning_param,
+                tuning_param=self.tuning_params[0],
                 verbose=self.verbose,
             )  # X=X,
             if self.verbose:
@@ -212,7 +218,7 @@ class EM:
                 Q=self.Q,
                 deg_corr=self.deg_corr,
                 meta_types=self.meta_types,
-                tuning_param=self.tuning_param,
+                tuning_param=self.tuning_params[0],
                 verbose=self.verbose,
             )  # X=X,
             if self.verbose:
@@ -246,6 +252,7 @@ class EM:
             self.ax.grid()
             # ...
         self.best_Z = None
+        self.best_val = 0.0
 
     def perturb_init_Z(self, pert_prop=0.1):
         # add some noise to init clustering
@@ -258,9 +265,8 @@ class EM:
         init_Z[init_Z < 0] = 0
         init_Z[init_Z > self.Q - 1] = self.Q - 1
         self.init_Z = init_Z
-        self.best_val = 0.0
 
-    def reinit(self, set_Z=None):
+    def reinit(self, tuning_param=1.0, set_Z=None):
         self.perturb_init_Z()
         if sparse:
             self.dsbmm = dsbmm_sparse.DSBMMSparse(
@@ -272,7 +278,7 @@ class EM:
                 Q=self.Q,
                 deg_corr=self.deg_corr,
                 meta_types=self.meta_types,
-                tuning_param=self.tuning_param,
+                tuning_param=tuning_param,
                 verbose=self.verbose,
             )  # X=X,
             if self.verbose:
@@ -290,7 +296,7 @@ class EM:
                 Q=self.Q,
                 deg_corr=self.deg_corr,
                 meta_types=self.meta_types,
-                tuning_param=self.tuning_param,
+                tuning_param=tuning_param,
                 verbose=self.verbose,
             )  # X=X,
             if self.verbose:
@@ -336,17 +342,42 @@ class EM:
     ):
         self.true_Z = true_Z
         if self.verbose:
-            print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
+            print("#" * 15, f"Using tuning_param {self.tuning_params[0]}", "#" * 15)
         while self.run_idx < self.n_runs - 1:
+            if self.verbose:
+                print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
             self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
             self.bp.model.set_Z_by_MAP()
             self.reinit()
+        if self.verbose:
+            print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
         # final random init run
         self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
+        if len(self.tuning_params) > 1:
+            for tuning_param in self.tuning_params[1:]:
+                if self.verbose:
+                    print("#" * 15, f"Using tuning_param {tuning_param}", "#" * 15)
+                    time.sleep(1)
+                self.run_idx = 0
+                self.reinit(tuning_param=tuning_param)
+                while self.run_idx < self.n_runs - 1:
+                    self.do_run(
+                        max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+                    )
+                    self.bp.model.set_Z_by_MAP()
+                    self.reinit(tuning_param=tuning_param)
+                # final random init run
+                self.do_run(
+                    max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+                )
         # now reinit with best part found from these runs
         if self.best_Z is None:
             self.best_Z = self.bp.model.Z
-        self.reinit(set_Z=self.best_Z)
+        try:
+            self.reinit(tuning_param=self.best_tun_param, set_Z=self.best_Z)
+        except:
+            # no tuning param used
+            self.reinit(set_Z=self.best_Z)
         self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
 
     def do_run(self, max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate):
@@ -386,8 +417,19 @@ class EM:
                 break
             self.bp.model.zero_diff()
             if self.true_Z is None:
-                time.sleep(0.25)
-            # TODO: fix to use free energy rather than ARIs directly (cheating)
+                current_energy = self.bp.compute_free_energy()
+                if self.best_val == 0.0:
+                    # first iter, first run
+                    self.best_val = current_energy
+                    self.bp.model.set_Z_by_MAP()
+                    self.best_Z = self.bp.model.Z
+                    self.best_tun_param = self.dsbmm.tuning_param
+                elif current_energy < self.best_val:
+                    # new best
+                    self.best_val = current_energy
+                    self.bp.model.set_Z_by_MAP()
+                    self.best_Z = self.bp.model.Z
+                    self.best_tun_param = self.dsbmm.tuning_param
             else:
                 self.bp.model.set_Z_by_MAP()
                 current_score = self.ari_score(self.true_Z)
@@ -524,7 +566,7 @@ if __name__ == "__main__":
     og_test_params = simulation.og_test_params
     scaling_test_params = simulation.scaling_test_params
     testset_names = ["og", "default", "scaling", "scopus"]
-    testset_name = testset_names[3]
+    testset_name = testset_names[2]
     # choose which set of tests to run
     if testset_name == "og":
         test_params = og_test_params
@@ -543,43 +585,49 @@ if __name__ == "__main__":
         # print(test_params)
         for i, testno in enumerate(test_params["test_no"]):
             # if i == chosen_test_idx:
-            if i < 3:  # just take first 3 tests for example to start
-                if testset_name in ["default", "scaling"]:
-                    params = {
-                        "test_no": testno,
-                        "N": test_params["N"][i],
-                        "Q": test_params["Q"][i],
-                        "p_in": test_params["p_in"][i],
-                        "p_stay": test_params["p_stay"][i],
-                        "n_samps": test_params["n_samps"],
-                        "p_out": test_params["p_out"][i],
-                        "T": test_params["T"],
-                        "meta_types": test_params["meta_types"],
-                        "L": test_params["L"],
-                        "meta_dims": test_params["meta_dims"],
-                        "pois_params": test_params["meta_params"][i][0],
-                        "indep_bern_params": test_params["meta_params"][i][1],
-                        "meta_aligned": test_params["meta_align"][i],
-                    }
-                elif testset_name == "og":
-                    params = {
-                        "test_no": testno,
-                        "N": test_params["N"],
-                        "Q": test_params["Q"],
-                        "beta_mat": test_params["beta_mat"][i],
-                        "trans_mat": test_params["trans_mat"][i],
-                        "n_samps": test_params["n_samps"],
-                        "T": test_params["T"][i],
-                        "meta_types": test_params["meta_types"],
-                        "L": test_params["L"],
-                        "meta_dims": test_params["meta_dims"],
-                        # "pois_params": og_test_params["meta_params"][i][0],
-                        # "indep_bern_params": og_test_params["meta_params"][i][1],
-                        "sample_meta_params": test_params["sample_meta_params"],
-                    }
-                # print(params)
-                samples = simulation.gen_test_data(**params)
-                if testset_name == "scaling":
+            # if i < 3:  # just take first 3 tests for example to start
+            if testset_name in ["default", "scaling"]:
+                params = {
+                    "test_no": testno,
+                    "N": test_params["N"][i],
+                    "Q": test_params["Q"][i],
+                    "p_in": test_params["p_in"][i],
+                    "p_stay": test_params["p_stay"][i],
+                    "n_samps": test_params["n_samps"],
+                    "p_out": test_params["p_out"][i],
+                    "T": test_params["T"],
+                    "meta_types": test_params["meta_types"],
+                    "L": test_params["L"],
+                    "meta_dims": test_params["meta_dims"],
+                    "pois_params": test_params["meta_params"][i][0],
+                    "indep_bern_params": test_params["meta_params"][i][1],
+                    "meta_aligned": test_params["meta_align"][i],
+                }
+            elif testset_name == "og":
+                params = {
+                    "test_no": testno,
+                    "N": test_params["N"],
+                    "Q": test_params["Q"],
+                    "beta_mat": test_params["beta_mat"][i],
+                    "trans_mat": test_params["trans_mat"][i],
+                    "n_samps": test_params["n_samps"],
+                    "T": test_params["T"][i],
+                    "meta_types": test_params["meta_types"],
+                    "L": test_params["L"],
+                    "meta_dims": test_params["meta_dims"],
+                    # "pois_params": og_test_params["meta_params"][i][0],
+                    # "indep_bern_params": og_test_params["meta_params"][i][1],
+                    "sample_meta_params": test_params["sample_meta_params"],
+                }
+            # print(params)
+            if testset_name == "scaling":
+                try:
+                    with open(
+                        f"../../results/{testset_name}_{testno}_samples.pkl", "rb"
+                    ) as f:
+                        samples = pickle.load(f)
+                except FileNotFoundError:
+                    samples = simulation.gen_test_data(**params)
                     print()
                     print(f"Simulated test {testno}")
                     for i, sample in enumerate(samples):
@@ -589,9 +637,13 @@ if __name__ == "__main__":
                             for t in range(params["T"])
                         ]
                     print("...done")
-                # print(samples)
-                all_samples.append(samples)
-                params_set.append(params)
+                    with open(
+                        f"../../results/{testset_name}_{testno}_samples.pkl", "wb"
+                    ) as f:
+                        pickle.dump(samples, f)
+            # print(samples)
+            all_samples.append(samples)
+            params_set.append(params)
         print("Successfully simulated data, now initialising model...")
     # Example of specifying own params for simulating data:
     # N = 500
@@ -623,16 +675,31 @@ if __name__ == "__main__":
     if testset_name == "scopus":
         data = {}
         DATA_PATH = Path("../../tests/data/scopus")
-        with open(DATA_PATH / "col_A.pkl", "rb") as f:
-            data["A"] = [sparse.csr_matrix(A) for A in pickle.load(f)]
-        with open(DATA_PATH / "col_ages.pkl", "rb") as f:
-            # given as full time series so only take 4 most recent as done
-            # for A
-            data["X_ages"] = pickle.load(f)[-4:].transpose(1, 0, 2)
-        with open(DATA_PATH / "col_insts.pkl", "rb") as f:
-            data["X_insts"] = pickle.load(f)[-4:].transpose(1, 0, 2)
-        with open(DATA_PATH / "col_subjs.pkl", "rb") as f:
-            data["X_subjs"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+        link_choice = "ref"  # 'ref' or 'au'
+        if link_choice == "au":
+            with open(DATA_PATH / "col_A.pkl", "rb") as f:
+                data["A"] = [sparse.csr_matrix(A) for A in pickle.load(f)]
+            with open(DATA_PATH / "col_ages.pkl", "rb") as f:
+                # given as full time series so only take 4 most recent as done
+                # for A
+                data["X_ages"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+            with open(DATA_PATH / "col_insts.pkl", "rb") as f:
+                data["X_insts"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+            with open(DATA_PATH / "col_subjs.pkl", "rb") as f:
+                data["X_subjs"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+        elif link_choice == "ref":
+            with open(DATA_PATH / "col_ref_A.pkl", "rb") as f:
+                data["A"] = [sparse.csr_matrix(A) for A in pickle.load(f)]
+            with open(DATA_PATH / "col_ref_ages.pkl", "rb") as f:
+                # given as full time series so only take 4 most recent as done
+                # for A
+                data["X_ages"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+            with open(DATA_PATH / "col_ref_insts.pkl", "rb") as f:
+                data["X_insts"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+            with open(DATA_PATH / "col_ref_subjs.pkl", "rb") as f:
+                data["X_subjs"] = pickle.load(f)[-4:].transpose(1, 0, 2)
+        else:
+            raise ValueError("Unknown link choice passed")
         # data['X'] = [v for k,v in data.items() if 'X' in k]
         tmp = List()
         tmp.append(np.ascontiguousarray(data["X_ages"]))
@@ -640,16 +707,23 @@ if __name__ == "__main__":
         tmp.append(np.ascontiguousarray(data["X_subjs"]))
         data["X"] = tmp
         data["meta_types"] = ["poisson", "indep bernoulli", "indep bernoulli"]
-        data["Q"] = 20
+        data["Q"] = 22 if link_choice == "au" else 19 if link_choice == "ref" else None
 
     use_X_init = False
-    verbose = True
+    verbose = False
     if testset_name != "scopus":
         if testset_name == "og":
             test_aris = [np.zeros((20, T)) for T in test_params["T"]]
         elif testset_name in ["default", "scaling"]:
-            test_aris = np.zeros((len(all_samples), 20, 5))
-        test_times = np.zeros((len(all_samples), 19))
+            test_aris = np.zeros(
+                (len(all_samples), test_params["n_samps"], test_params["T"])
+            )
+        test_times = np.zeros((len(all_samples), test_params["n_samps"] - 1))
+        init_times = np.zeros_like(test_times)
+        if testset_name == "scaling":
+            test_Ns = [param["N"] for param in params_set]
+            with open(f"../../results/{testset_name}_N.pkl", "wb") as f:
+                pickle.dump(test_Ns, f)
         for test_no, (samples, params) in enumerate(zip(all_samples, params_set)):
             # if test_no < 5:
             print()
@@ -675,6 +749,8 @@ if __name__ == "__main__":
                         em = EM(sample, verbose=verbose)
                     else:
                         em = EM(sample, sparse_adj=True, verbose=verbose)
+                    if samp_no > 0:
+                        init_times[test_no, samp_no - 1] = time.time() - start_time
                     ## Score from K means
                     print("Before fitting model, K-means init partition has")
                     if verbose:
@@ -738,7 +814,18 @@ if __name__ == "__main__":
                     time.sleep(
                         0.5
                     )  # sleep a bit to allow threads to complete, TODO: properly sort this
-            print(f"Finished test {test_no} for true params:")
+                    # save after every sample in case of crash
+                    with open(f"../../results/{testset_name}_test_aris.pkl", "wb") as f:
+                        pickle.dump(test_aris, f)
+                    with open(
+                        f"../../results/{testset_name}_test_times.pkl", "wb"
+                    ) as f:
+                        pickle.dump(test_times, f)
+                    with open(
+                        f"../../results/{testset_name}_init_times.pkl", "wb"
+                    ) as f:
+                        pickle.dump(init_times, f)
+            print(f"Finished test {test_no+1} for true params:")
             print(params)
             print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
         print()
@@ -749,21 +836,25 @@ if __name__ == "__main__":
             print(np.array([aris.mean() for aris in test_aris]))
         print("Mean times for each test:")
         print(test_times.mean(axis=1))
-        with open(f"../../results/{testset_name}_test_aris.pkl", "wb") as f:
-            pickle.dump(test_aris, f)
-        with open(f"../../results/{testset_name}_test_times.pkl", "wb") as f:
-            pickle.dump(test_times, f)
     else:
         T = len(data["A"])
         N = data["A"][0].shape[0]
-        n_runs = 1
+        n_runs = 5
         test_Z = np.zeros((n_runs, N, T))
         print("*" * 15, f"Running Scopus data", "*" * 15)
         ## Initialise
-        em = EM(data, sparse_adj=True, n_runs = n_runs, verbose=verbose)
+        em = EM(
+            data,
+            sparse_adj=True,
+            tuning_param=np.linspace(0.8, 1.8, 11),
+            n_runs=n_runs,
+            deg_corr=True,
+            verbose=verbose,
+        )
         ## Fit to given data
         em.fit(learning_rate=0.2)
         pred_Z = em.bp.model.jit_model.Z
-        with open(f"../../results/{testset_name}_Z.pkl", "wb") as f:
+        print(f"Best tuning param: {em.best_tun_param}")
+        with open(f"../../results/{testset_name}_{link_choice}_Z.pkl", "wb") as f:
             pickle.dump(pred_Z, f)
 

@@ -490,7 +490,9 @@ def gen_test_data(
         base_bern_params (_type_, optional): _description_. Defaults to None.
         indep_bern_params (_type_, optional): _description_. Defaults to None.
         sample_meta_params (bool,optional): _description_. Defaults to False.
-        meta_aligned (bool, optional): _description_. Defaults to True.
+        meta_aligned (bool or float, optional): Whether metadata is perfectly aligned or not (bool), 
+                                                or rough ARI between net and meta partition at each 
+                                                step. Defaults to True.
         save (bool, optional): _description_. Defaults to False.
         export_dir (str, optional): _description_. Defaults to ".".
 
@@ -574,17 +576,21 @@ def gen_test_data(
         for q in range(1, Q):
             Z_1[cum_size[q - 1] : cum_size[q]] = q
 
-        if meta_aligned:
+        if meta_aligned==True:
             meta_part = None
         else:
             if meta_Q is None:
                 meta_Q = Q
-            meta_part = evolve_Z(
-                np.random.randint(0, high=meta_Q, size=(N,)),
-                gen_trans_mat(p_stay, meta_Q),
-                T,
-            )  # TODO: allow to pass more general transitions for metadata
-            # meta_parts.append(meta_part)
+            if meta_aligned==False:
+                meta_part = evolve_Z(
+                    np.random.randint(0, high=meta_Q, size=(N,)),
+                    gen_trans_mat(p_stay, meta_Q),
+                    T,
+                )  # TODO: allow to pass more general transitions for metadata
+                # meta_parts.append(meta_part)
+            else: 
+                # passed float target alignment - assume use ari as measure (TODO: allow passing score fn) 
+                
 
         if not sample_meta_params:
             test = sample_dynsbm_meta(
@@ -761,8 +767,8 @@ def calc_det_limit(p_stay, c_in, c_out, Q, tol=1e-1):
 
 
 scaling_test_params = {}
-n_tests = 10
-n_samps = 20
+n_tests = 20
+n_samps = 5
 scaling_test_params["n_samps"] = n_samps
 test_no = np.arange(400, 400 + n_tests)
 scaling_test_params["test_no"] = test_no
@@ -807,3 +813,24 @@ scaling_test_params["meta_params"] = meta_params
 meta_align = np.ones_like(N, dtype=bool)
 scaling_test_params["meta_align"] = meta_align
 
+# alignment tests
+from sklearn.metrics import normalized_mutual_info_score as nmi
+from sklearn.metrics import adjusted_rand_score as ari
+
+target_nmi = 0.6
+mask_prop = 0.01
+zalt = tz.copy()
+while True:
+    mask = np.random.rand(len(tz)) < mask_prop
+    zalt[mask] = np.random.randint(0, high=tz.max() + 1, size=mask.sum())
+    if nmi(tz, zalt) < target_nmi:
+        break
+
+target_ari = 0.6
+mask_prop = 0.01
+zalt2 = tz.copy()
+while True:
+    mask = np.random.rand(len(tz)) < mask_prop
+    zalt2[mask] = np.random.randint(0, high=tz.max() + 1, size=mask.sum())
+    if ari(tz, zalt2) < target_ari:
+        break

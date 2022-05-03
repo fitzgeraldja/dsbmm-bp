@@ -489,11 +489,21 @@ class BPSparseBase:
             # print("jtoi_msg:", jtoi_msgs.shape)
             # tmp = np.ascontiguousarray(beta.T) @ np.ascontiguousarray(
             #     jtoi_msgs
-            # )  # should have * deg_i * deg_j if DC
+            # )
             tmp = np.zeros(self.Q)
-            for q in range(self.Q):
-                for r in range(self.Q):
-                    tmp[q] += beta[r, q] * jtoi_msgs[r]
+            if self.deg_corr:
+                for q in range(self.Q):
+                    for r in range(self.Q):
+                        tmp[q] += (
+                            self.model.compute_DC_lkl(
+                                i, j, t, r, q, self.A[t].row_vs(i)[nbr_idx],
+                            )
+                            * jtoi_msgs[r]
+                        )
+            else:
+                for q in range(self.Q):
+                    for r in range(self.Q):
+                        tmp[q] += beta[r, q] * jtoi_msgs[r]
             # for q in range(self.Q):
             #     if tmp[q] < TOL:
             #         tmp[q] = TOL
@@ -524,7 +534,10 @@ class BPSparseBase:
             #     print("tmp:", tmp)
             #     print("spatial msg term:", msg)
             #     raise RuntimeError("Problem vanishing spatial msg term")
-        msg *= np.exp(-1.0 * self._h[:, t])  # should be exp(-h * deg_i) if DC
+        if self.deg_corr:
+            msg *= np.exp(-self.model.degs[i, t, 1] * self._h[:, t])
+        else:
+            msg *= np.exp(-1.0 * self._h[:, t])
         msg *= self.meta_prob(i, t)
         try:
             assert not np.isinf(msg).sum() > 0
@@ -572,11 +585,21 @@ class BPSparseBase:
             # print("jtoi_msg:", jtoi_msgs.shape)
             # tmp = np.log(
             #     np.ascontiguousarray(beta.T) @ np.ascontiguousarray(jtoi_msgs)
-            # )  # * deg_i * deg_j if DC
+            # )
             tmp = np.zeros(self.Q)
-            for q in range(self.Q):
-                for r in range(self.Q):
-                    tmp[q] += beta[r, q] * jtoi_msgs[r]
+            if self.deg_corr:
+                for q in range(self.Q):
+                    for r in range(self.Q):
+                        tmp[q] += (
+                            self.model.compute_DC_lkl(
+                                i, j, t, r, q, self.A[t].row_vs(i)[nbr_idx]
+                            )
+                            * jtoi_msgs[r]
+                        )
+            else:
+                for q in range(self.Q):
+                    for r in range(self.Q):
+                        tmp[q] += beta[r, q] * jtoi_msgs[r]
             tmp = np.log(tmp)
 
             try:
@@ -592,9 +615,12 @@ class BPSparseBase:
             max_msg_log = msg.max()
             if max_msg_log > max_log_msg:
                 max_log_msg = max_msg_log
-        msg -= self._h[
-            :, t
-        ]  # NB don't need / self.N as using p_ab to calc, not c_ab. Should be * deg_i if DC
+        if self.deg_corr:
+            msg -= self._h[:, t] * self.model.degs[i, t, 1]
+        else:
+            msg -= self._h[
+                :, t
+            ]  # NB don't need / self.N as using p_ab to calc, not c_ab
         msg += np.log(self.meta_prob(i, t))
         return msg, max_log_msg, log_field_iter
 
@@ -625,9 +651,12 @@ class BPSparseBase:
 
     @property
     def block_edge_prob(self):
-        # return beta_{qr}^t as Q x Q x T array
-        # TODO: alter suitably for DC case
-        return self.model._beta
+        if self.deg_corr:
+            # will refer to as beta, but really omega or lambda (DC edge factor)
+            return self.model._lam
+        else:
+            # return beta_{qr}^t as Q x Q x T array
+            return self.model._beta
 
     def init_h(self):
         # update within each timestep is unchanged from static case,
@@ -637,13 +666,24 @@ class BPSparseBase:
         #     self.block_edge_prob.transpose(1, 0, 2) * self.node_marg.sum(axis=0).T
         # ).sum(axis=1)
         self._h = np.zeros((self.Q, self.T))
-        for q in range(self.Q):
-            for t in range(self.T):
-                for i in range(self.N):
-                    for r in range(self.Q):
-                        self._h[q, t] += (
-                            self.block_edge_prob[r, q, t] * self.node_marg[i, t, r]
-                        )  # * deg_i if DC
+        if self.deg_corr:
+            for q in range(self.Q):
+                for t in range(self.T):
+                    for i in range(self.N):
+                        for r in range(self.Q):
+                            self._h[q, t] += (
+                                self.block_edge_prob[r, q, t]
+                                * self.node_marg[i, t, r]
+                                * self.model.degs[i, t, 1]
+                            )
+        else:
+            for q in range(self.Q):
+                for t in range(self.T):
+                    for i in range(self.N):
+                        for r in range(self.Q):
+                            self._h[q, t] += (
+                                self.block_edge_prob[r, q, t] * self.node_marg[i, t, r]
+                            )
         # print("h after init:", self._h)
 
     def update_h(self, i, t, sign):
@@ -652,35 +692,179 @@ class BPSparseBase:
         #     * np.ascontiguousarray(self.block_edge_prob[:, :, t].T)
         #     @ np.ascontiguousarray(self.node_marg[i, t, :])
         # )
-        for q in range(self.Q):
-            for r in range(self.Q):
-                self._h[q, t] += (
-                    sign
-                    * self.block_edge_prob[r, q, t]
-                    * self.node_marg[i, t, r]  # * deg_i if DC
-                )
+        if self.deg_corr:
+            for q in range(self.Q):
+                for r in range(self.Q):
+                    self._h[q, t] += (
+                        sign
+                        * self.block_edge_prob[r, q, t]
+                        * self.node_marg[i, t, r]
+                        * self.model.degs[i, t, 1]
+                    )
+        else:
+            for q in range(self.Q):
+                for r in range(self.Q):
+                    self._h[q, t] += (
+                        sign * self.block_edge_prob[r, q, t] * self.node_marg[i, t, r]
+                    )
 
     def convergence(self):
         pass
 
     def compute_free_energy(self):
         f_site = 0.0
+        f_link = 0.0
+        last_term = 0.0  # something like average degree, but why?
         for i in range(self.N):
             for t in range(self.T):
-                nbrs = self.nbrs[t][i]
-                for q in range(self.Q):
-                    a = 0.0
-                    for j_idx, j in enumerate(nbrs):
-                        b = 0.0
-                        for r in range(self.Q):
-                            b += (
-                                self._beta[r, q, t] * self._psi_e[t][i][j_idx, r]
-                            )  # * deg_i*deg_j if DC
-                        a += np.log(b)
-                        # ... basically f_site = 1/N \sum_i log(Z_i) for Z_i the norm factors of marginals
-                        # similarly then calc f_link = 1/2N \sum_ij log(Z_ij) for the twopoint marg norms (for us these will include time margs)
-                        # then final term is something like \sum_qr p_qr * alpha_q * alpha_r  (CHECK)
-                        # Total free energy is then -f_site + f_link - final term, and smaller better (?)
+                if self._pres_nodes[i, t]:
+                    nbrs = self.nbrs[t][i]
+                    deg_i = len(nbrs)
+                    if deg_i > 0:
+                        if deg_i < LARGE_DEG_THR:
+                            (
+                                spatial_msg_term,
+                                field_iter,
+                            ) = self.spatial_msg_term_small_deg(i, t, nbrs)
+                            tmp = spatial_msg_term.copy()
+                            if t == 0:
+                                tmp *= self.model._alpha
+                            back_term = np.ones(self.Q)
+                            if t < self.T - 1:
+                                if self._pres_trans[i, t]:
+                                    back_term = self.backward_temp_msg_term(i, t)
+                                    # REMOVE CHECK AFTER FIX
+                                    if np.isnan(back_term).sum() > 0:
+                                        print("i,t:", i, t)
+                                        print("back:", back_term)
+                                        raise RuntimeError("Problem w back term")
+                                    tmp *= back_term
+                            forward_term = np.ones(self.Q)
+                            if t > 0:
+                                if self._pres_trans[i, t - 1]:
+                                    # add back message to f_link
+                                    f_link += tmp.sum()
+                                    forward_term = self.forward_temp_msg_term(i, t)
+                                else:
+                                    # node present at t but not t-1, use alpha instead
+                                    forward_term = self.model._alpha
+                                tmp *= forward_term
+                            tmp_spatial_msg = np.ones((deg_i, self.Q))
+                            for nbr_idx in range(deg_i):
+                                for q in range(self.Q):
+                                    if field_iter[nbr_idx, q] > TOL:
+                                        tmp_spatial_msg[nbr_idx, q] = (
+                                            tmp[q] / field_iter[nbr_idx, q]
+                                        )
+                                    else:
+                                        # too small for stable div, construct
+                                        # directly instead
+                                        tmp_loc = back_term[q] * forward_term[q]
+                                        alt_nbrs = np.arange(deg_i)
+                                        alt_nbrs = alt_nbrs[alt_nbrs != nbr_idx]
+                                        for k in alt_nbrs:
+                                            tmp_loc *= field_iter[k, q]
+                                        tmp_spatial_msg[nbr_idx, q] = tmp_loc
+                            tmp_spat_sums = tmp_spatial_msg.sum(axis=1)
+                            for nbr_idx in range(deg_i):
+                                # add spatial messages to f_link
+                                f_link += tmp_spat_sums[nbr_idx]
+                            if t < self.T - 1 and self._pres_trans[i, t]:
+                                # add forwards messages to f_link
+                                tmp_forwards_msg = spatial_msg_term
+                                if t > 0:
+                                    tmp_forwards_msg *= forward_term
+                                f_link += tmp_forwards_msg.sum()
+                            # add marg to f_site
+                            f_site += tmp.sum()
+                        else:
+                            (
+                                spatial_msg_term,
+                                max_log_spatial_msg_term,
+                                log_field_iter,
+                            ) = self.spatial_msg_term_large_deg(i, t, nbrs)
+                            if t == 0:
+                                tmp += np.log(self.model._alpha)
+                            tmp = spatial_msg_term
+                            back_term = np.zeros(self.Q)
+                            if t < self.T - 1:
+                                if self._pres_trans[i, t]:
+                                    back_term = np.log(
+                                        self.backward_temp_msg_term(i, t)
+                                    )
+                                tmp += back_term
+                            forward_term = np.zeros(self.Q)
+                            if t > 0:
+                                if self._pres_trans[i, t - 1]:
+                                    tmp_backwards_msg = np.exp(
+                                        tmp - max_log_spatial_msg_term
+                                    )
+                                    # add backwards msg to f_link
+                                    f_link += tmp_backwards_msg.sum()
+
+                                    forward_term = np.log(
+                                        self.forward_temp_msg_term(i, t)
+                                    )
+                                else:
+                                    # node present at t but not t-1, so use alpha instead
+                                    forward_term = np.log(self.model._alpha)
+                                tmp += forward_term
+                            tmp_spatial_msg = np.expand_dims(tmp, 0) - log_field_iter
+                            log_field_iter_max = np.array(
+                                [nbr_fld.max() for nbr_fld in tmp_spatial_msg]
+                            )
+                            tmp_spatial_msg = np.exp(
+                                tmp_spatial_msg - np.expand_dims(log_field_iter_max, 1)
+                            )
+                            tmp_spat_sums = tmp_spatial_msg.sum(axis=1)
+                            # add spatial msgs to f_link
+                            for nbr_idx in range(deg_i):
+                                f_link += tmp_spat_sums[nbr_idx]
+
+                            # add forwards msg to f_link
+                            if t < self.T - 1:
+                                if self._pres_trans[i, t]:
+                                    tmp_forwards_msg = np.exp(
+                                        tmp - max_log_spatial_msg_term - back_term
+                                    )
+                                    f_link += tmp_forwards_msg.sum()
+                            # add marg to f_site
+                            tmp_marg = np.exp(tmp - max_log_spatial_msg_term)
+                            f_site += tmp_marg.sum()
+                    else:
+                        # print("WARNING: disconnected nodes not yet handled properly")
+                        # print("i,t:", i, t)
+                        raise RuntimeError(
+                            "Problem with measuring presence - deg = 0 but saying present"
+                        )
+
+        # ... basically in static case, f_site = 1/N \sum_i log(Z_i) for Z_i the norm factors of marginals
+        # similarly then calc f_link = 1/2N \sum_{ij} log(Z_{ij}) for the twopoint marg norms (for us these will include time margs)
+        # then final term is something like 1/2 \sum_{qr} p_{qr} * alpha_q * alpha_r  (average degree)
+        # and free energy approx F_{bethe} = f_link - f_site - last_term, and lower better
+
+        # Assuming now instead f_site = 1/NT \sum_{it} log(Z_i), f_link = 1/NT \sum_{ijt} log(Z_{ij}), and still want av deg
+        # TODO: derive rigorously - presumably last term may well include something from metadata also
+        f_site /= self.N * self.T
+        f_link /= self.N * self.T
+        tmp_alpha = np.ones(self.Q)
+        for q in range(self.Q):
+            tmp_alpha[q] = self.model._alpha[q]
+            for r in range(self.Q):
+                last_term += tmp_alpha[q] * tmp_alpha[r] * self.model._beta[q, r, 0]
+        for t in range(self.T - 1):
+            tmp_alphaqm1 = tmp_alpha.copy()
+            tmp_alpha = np.zeros(self.Q)
+            for q in range(self.Q):
+                for qprime in range(self.Q):
+                    tmp_alpha[q] += self.model._pi[qprime, q] * tmp_alphaqm1[qprime]
+            for q in range(self.Q):
+                for r in range(self.Q):
+                    last_term += (
+                        tmp_alpha[q] * tmp_alpha[r] * self.model._beta[q, r, t + 1]
+                    )
+        last_term /= 2 * self.T
+        return f_link - f_site - last_term
 
     def compute_entropy(self):
         pass
@@ -1029,7 +1213,7 @@ class BPSparseBase:
         # p_qrt = block_edge_prob
         # psi_e in shape [t][i][j_idx in nbrs[t][i],q] (list(list(2d array)))
         for i, j, t, a_ijt in self._edge_vals:
-            i, j, t = int(i), int(j), int(t)
+            i, j, t, a_ijt = int(i), int(j), int(t), float(a_ijt)
             # print(i, j, t)
             j_idx = (
                 self.nbrs[t][i] == j
@@ -1060,8 +1244,18 @@ class BPSparseBase:
                         tmp[q, r] += (
                             self._psi_e[t][i][j_idx, q] * self._psi_e[t][j][i_idx, r]
                         )[0]
-
-            tmp *= self.block_edge_prob[:, :, t]
+            if self.deg_corr:
+                for q in range(self.Q):
+                    tmp[q, q] *= self.model.compute_DC_lkl(i, j, t, q, q, a_ijt)
+                    for r in range(q + 1, self.Q):
+                        tmp[q, r] *= self.model.compute_DC_lkl(i, j, t, q, r, a_ijt)
+                        if not self.directed:
+                            tmp[r, q] = tmp[q, r]
+                    if self.directed:
+                        for r in range(q):
+                            tmp[q, r] *= self.model.compute_DC_lkl(i, j, t, q, r, a_ijt)
+            else:
+                tmp *= self.block_edge_prob[:, :, t]
             if tmp.sum() > 0:
                 tmp /= tmp.sum()
             for q in range(self.Q):
@@ -1188,9 +1382,12 @@ class BPSparse:
         pass
 
     def block_edge_prob(self):
-        # return beta_{qr}^t as Q x Q x T array
-        # TODO: alter suitably for DC case
-        pass
+        if self.deg_corr:
+            # will refer to as beta, but really omega or lambda (DC edge factor)
+            return self.model.jit_model._lam
+        else:
+            # return beta_{qr}^t as Q x Q x T array
+            return self.model.jit_model._beta
 
     def init_h(self):
         # update within each timestep is unchanged from static case,

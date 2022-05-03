@@ -1,4 +1,5 @@
 from numba import njit, prange
+from numba.typed import List
 import numpy as np
 
 
@@ -353,3 +354,31 @@ def nb_ari_local(labels_true, labels_pred):
     T = labels_true.shape[1]
     aris = np.array([nb_ari(labels_true[:, t], labels_pred[:, t]) for t in range(T)])
     return aris
+
+
+@njit
+def nb_cc_merge(parent: np.ndarray, x: int):
+    if parent[x] == x:
+        return x
+    return nb_cc_merge(parent, parent[x])
+
+
+@njit
+def nb_connected_components(N: int, edges: np.ndarray):
+    parent = np.arange(N)
+    for source, target in edges:
+        parent[nb_cc_merge(parent, source)] = nb_cc_merge(parent, target)
+
+    n_cc = 0
+    for i in range(N):
+        n_cc += parent[i] == i
+
+    for i in range(N):
+        parent[i] = nb_cc_merge(parent, parent[i])
+
+    comps = List()
+    nodes = np.arange(N)
+    for val in np.unique(parent):
+        comp = nodes[parent == val]
+        comps.append(comp)
+    return n_cc, comps

@@ -33,6 +33,9 @@ import yaml
 with open("config.yaml") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 TOL = config["tol"]  # min value permitted for msgs etc (for numerical stability)
+NON_INFORMATIVE_INIT = config[
+    "non_informative_init"
+]  # initialise alpha, pi as uniform (True), or according to init part passed (False)
 
 # NB for numba, syntax of defining an array like e.g. float32[:,:,:]
 # defines array types with no particular layout
@@ -381,6 +384,10 @@ class DSBMMSparseBase:
         """
         pass
 
+    def compute_DC_lkl(self, i, j, t, q, r, a_ijt):
+        dclam = self.degs[i, t, 1] * self.degs[j, t, 0] * self._lam[q, r, t]
+        return nb_poisson_lkl_int(a_ijt, dclam)
+
     def update_params(self, init, learning_rate):
         """Given marginals, update parameters suitably
 
@@ -469,15 +476,18 @@ class DSBMMSparseBase:
 
     def update_alpha(self, init, learning_rate):
         if init:
-            # case of no marginals / true partition provided to calculate most likely params
-            self._alpha = np.array(
-                [(self.Z == q).sum() / self._tot_N_pres for q in range(self.Q)]
-            )
-            if self._alpha.sum() > 0:
+            if NON_INFORMATIVE_INIT:
+                self._alpha = np.ones(self.Q) / self.Q
+            else:
+                # case of no marginals / true partition provided to calculate most likely params
+                self._alpha = np.array(
+                    [(self.Z == q).sum() / self._tot_N_pres for q in range(self.Q)]
+                )
+                if self._alpha.sum() > 0:
+                    self._alpha /= self._alpha.sum()
+                self._alpha[self._alpha < TOL] = TOL
                 self._alpha /= self._alpha.sum()
-            self._alpha[self._alpha < TOL] = TOL
-            self._alpha /= self._alpha.sum()
-            # self._alpha[self._alpha > 1 - TOL] = 1 - TOL
+                # self._alpha[self._alpha > 1 - TOL] = 1 - TOL
         else:
             # if DC, seems like should multiply marg by degree prior to sum - unseen for directed case but can calculate
             tmp = np.zeros(self.Q)
@@ -503,23 +513,26 @@ class DSBMMSparseBase:
     def update_pi(self, init, learning_rate):
         qqprime_trans = np.zeros((self.Q, self.Q))
         if init:
-            for i in range(self.N):
-                for t in range(self.T - 1):
-                    if self._pres_trans[i, t]:
-                        q1 = self.Z[i, t]
-                        q2 = self.Z[i, t + 1]
-                        qqprime_trans[q1, q2] += 1
+            if NON_INFORMATIVE_INIT:
+                qqprime_trans = np.ones((self.Q, self.Q))
+            else:
+                for i in range(self.N):
+                    for t in range(self.T - 1):
+                        if self._pres_trans[i, t]:
+                            q1 = self.Z[i, t]
+                            q2 = self.Z[i, t + 1]
+                            qqprime_trans[q1, q2] += 1
 
-            # TODO: provide different cases for non-uniform init clustering
-            # NB for uniform init clustering this provides too homogeneous pi, and is more important now
-            trans_sums = qqprime_trans.sum(axis=1)
-            for q in range(self.Q):
-                if trans_sums[q] > 0:
-                    qqprime_trans[q, :] /= trans_sums[q]
-            p = 0.8
-            qqprime_trans = p * qqprime_trans + (1 - p) * np.random.rand(
-                *qqprime_trans.shape
-            )
+                # TODO: provide different cases for non-uniform init clustering
+                # NB for uniform init clustering this provides too homogeneous pi, and is more important now
+                trans_sums = qqprime_trans.sum(axis=1)
+                for q in range(self.Q):
+                    if trans_sums[q] > 0:
+                        qqprime_trans[q, :] /= trans_sums[q]
+                p = 0.8
+                qqprime_trans = p * qqprime_trans + (1 - p) * np.random.rand(
+                    *qqprime_trans.shape
+                )
         else:
             for i in range(self.N):
                 for t in range(self.T - 1):
@@ -563,7 +576,6 @@ class DSBMMSparseBase:
             self.diff += tmp_diff
             self._pi = tmp
         else:
-
             self._pi = qqprime_trans
 
     def correct_pi(self):
@@ -718,8 +730,26 @@ class DSBMMSparseBase:
 
     def update_beta(self, init, learning_rate):
         beta_num = np.zeros((self.Q, self.Q, self.T))
-        beta_den = np.zeros((self.Q, self.Q, self.T))
+        beta_den = np.ones((self.Q, self.Q, self.T))
         if init:
+            # TODO: consider alt init as random / uniform (both options considered in OG BP SBM code, random seems used in practice)
+            if NON_INFORMATIVE_INIT:
+                # assign as near uniform - just assume edges twice as likely in comms as out,
+                # and that all groups have same average out-degree at each timestep
+                Ns = self._pres_nodes.sum(axis=0)
+                av_degs = self.degs.sum(axis=0)[:, 1] / Ns
+                # beta_in = 2*beta_out
+                # N*(beta_in + (Q - 1)*beta_out) = av_degs
+                # = (Q + 1)*beta_out*N
+                beta_out = av_degs / (Ns * (self.Q + 1))
+                beta_in = 2 * beta_out
+                for t in range(self.T):
+                    for q in range(self.Q):
+                        for r in range(self.Q):
+                            if r == q:
+                                beta_num[q, r, t] = beta_in[t]
+                            else:
+                                beta_num[q, r, t] = beta_out[t]
             # beta_num = np.array(
             #     [
             #         [
@@ -732,58 +762,58 @@ class DSBMMSparseBase:
             #         for t in range(self.T)
             #     ]
             # )
-            for i, j, t, _ in self._edge_vals:
-                i, j, t = int(i), int(j), int(t)
-                beta_num[self.Z[i, t], self.Z[j, t], t] += 1
-            for q in range(self.Q):
-                # enforce uniformity for identifiability
-                tmp = 0.0
-                for t in range(self.T):
-                    tmp += beta_num[q, q, t]
-                for t in range(self.T):
-                    beta_num[q, q, t] = tmp
-            # beta_den = np.array(
-            #     [
-            #         [self.degs[self.Z[:, t] == q].sum() for q in range(self.Q)]
-            #         for t in range(self.T)
-            #     ]
-            # )
-            # beta_den = np.einsum("tq,tr->tqr", beta_den, beta_den)
-            # print("beta_num:", beta_num.transpose(2, 0, 1))
-            # print("kappa:", self.kappa)
-            for q in range(self.Q):
-                for t in range(self.T):
-                    for r in range(q, self.Q):
-                        beta_den[q, r, t] = (
-                            self._n_qt[q, t] * self._n_qt[r, t]
-                        )  # TODO: check right in directed case, and if r==q
-                        # if beta_num[q, r, t] < TOL:
-                        #     beta_num[q, r, t] = TOL
-                        if beta_den[q, r, t] < TOL:
-                            beta_den[
-                                q, r, t
-                            ] = 1.0  # this is same as how prev people have handled (effectively just don't do division if will cause problems, as num will
-                            # be v. small anyway)
-                        if not self.directed and r != q:
-                            beta_den[r, q, t] = beta_den[q, r, t]
-                            beta_num[
-                                q, r, t
-                            ] /= 2.0  # done elsewhere, TODO: check basis
-                            beta_num[r, q, t] = beta_num[q, r, t]
-                    if self.directed:
-                        for r in range(q):
-                            beta_den[q, r, t] = self._n_qt[q, t] * self._n_qt[r, t]
+            else:
+                for i, j, t, _ in self._edge_vals:
+                    i, j, t = int(i), int(j), int(t)
+                    beta_num[self.Z[i, t], self.Z[j, t], t] += 1
+                for q in range(self.Q):
+                    # enforce uniformity for identifiability
+                    tmp = 0.0
+                    for t in range(self.T):
+                        tmp += beta_num[q, q, t]
+                    for t in range(self.T):
+                        beta_num[q, q, t] = tmp
+                # beta_den = np.array(
+                #     [
+                #         [self.degs[self.Z[:, t] == q].sum() for q in range(self.Q)]
+                #         for t in range(self.T)
+                #     ]
+                # )
+                # beta_den = np.einsum("tq,tr->tqr", beta_den, beta_den)
+                # print("beta_num:", beta_num.transpose(2, 0, 1))
+                # print("kappa:", self.kappa)
+                for q in range(self.Q):
+                    for t in range(self.T):
+                        for r in range(q, self.Q):
+                            beta_den[q, r, t] = (
+                                self._n_qt[q, t] * self._n_qt[r, t]
+                            )  # TODO: check right in directed case, and if r==q
+                            # if beta_num[q, r, t] < TOL:
+                            #     beta_num[q, r, t] = TOL
                             if beta_den[q, r, t] < TOL:
-                                beta_den[q, r, t] = 1.0
-            for q in range(self.Q):
-                # enforce uniformity for identifiability
-                tmp = 0.0
-                for t in range(self.T):
-                    tmp += beta_den[q, q, t]
-                for t in range(self.T):
-                    beta_den[q, q, t] = tmp
-            # print("beta_den:", beta_den)
-
+                                beta_den[
+                                    q, r, t
+                                ] = 1.0  # this is same as how prev people have handled (effectively just don't do division if will cause problems, as num will
+                                # be v. small anyway)
+                            if not self.directed and r != q:
+                                beta_den[r, q, t] = beta_den[q, r, t]
+                                beta_num[
+                                    q, r, t
+                                ] /= 2.0  # done elsewhere, TODO: check basis
+                                beta_num[r, q, t] = beta_num[q, r, t]
+                        if self.directed:
+                            for r in range(q):
+                                beta_den[q, r, t] = self._n_qt[q, t] * self._n_qt[r, t]
+                                if beta_den[q, r, t] < TOL:
+                                    beta_den[q, r, t] = 1.0
+                for q in range(self.Q):
+                    # enforce uniformity for identifiability
+                    tmp = 0.0
+                    for t in range(self.T):
+                        tmp += beta_den[q, q, t]
+                    for t in range(self.T):
+                        beta_den[q, q, t] = tmp
+                # print("beta_den:", beta_den)
         else:
             # beta_num = np.einsum(
             #     "ijtqr,ijt->qrt", self.twopoint_edge_marg, (self.A > 0)
@@ -1080,6 +1110,7 @@ class DSBMMSparse:
             tmp.append(csr.CSR.from_scipy(A_t))
         A = tmp
         self.A = A
+        self.tuning_param = tuning_param
         self.jit_model = DSBMMSparseBase(
             A,
             X,
