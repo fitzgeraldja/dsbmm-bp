@@ -3,7 +3,7 @@ name: Lint and make TODO issues
 on: [push, pull_request]
 
 jobs:
-  lint and issue:
+  lint_and_issue:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
