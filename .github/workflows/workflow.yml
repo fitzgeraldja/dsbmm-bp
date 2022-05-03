@@ -16,5 +16,5 @@ jobs:
       - name: Run black --check .
         run: black .
       - name: TODO to Issue
-            uses: alstr/todo-to-issue-action@v4.6.3
-            id: todo
+        uses: alstr/todo-to-issue-action@v4.6.3
+        id: todo
