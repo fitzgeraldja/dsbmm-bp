@@ -590,6 +590,7 @@ def gen_test_data(
                 # meta_parts.append(meta_part)
             else:
                 # passed float target alignment - assume use ari as measure (TODO: allow passing score fn)
+                # TODO: allow controlled alignment sims
                 pass
 
         if not sample_meta_params:
