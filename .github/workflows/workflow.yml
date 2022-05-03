@@ -1,4 +1,4 @@
-name: Lint
+name: Lint and make TODO issues
 
 on: [push, pull_request]
 

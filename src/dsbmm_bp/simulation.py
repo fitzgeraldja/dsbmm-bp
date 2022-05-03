@@ -576,21 +576,21 @@ def gen_test_data(
         for q in range(1, Q):
             Z_1[cum_size[q - 1] : cum_size[q]] = q
 
-        if meta_aligned==True:
+        if meta_aligned == True:
             meta_part = None
         else:
             if meta_Q is None:
                 meta_Q = Q
-            if meta_aligned==False:
+            if meta_aligned == False:
                 meta_part = evolve_Z(
                     np.random.randint(0, high=meta_Q, size=(N,)),
                     gen_trans_mat(p_stay, meta_Q),
                     T,
                 )  # TODO: allow to pass more general transitions for metadata
                 # meta_parts.append(meta_part)
-            else: 
-                # passed float target alignment - assume use ari as measure (TODO: allow passing score fn) 
-                
+            else:
+                # passed float target alignment - assume use ari as measure (TODO: allow passing score fn)
+                pass
 
         if not sample_meta_params:
             test = sample_dynsbm_meta(
