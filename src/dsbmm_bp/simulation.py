@@ -4,6 +4,9 @@ from scipy import sparse
 from scipy.stats import norm, poisson, nbinom, bernoulli
 import pickle
 
+from sklearn.metrics import normalized_mutual_info_score as nmi
+from sklearn.metrics import adjusted_rand_score as ari
+
 
 @njit
 def numba_ix(arr, rows, cols):
@@ -188,6 +191,58 @@ def evolve_Z(Z_1, trans_prob, T):
     return Z.astype(np.int32)
 
 
+def ari_meta_aligned(Z, target_ari, mask_prop=0.01):
+    """
+    Generate new series of partitions, where at each timestep (so locally), the 
+    ARI between the new partition and the old partition is roughly equal to the 
+    target ARI. 
+
+    Args:
+        Z (_type_): Base (temporal) partition, shape N x T
+        target_ari (float): target ARI
+        mask_prop (float, optional): Proportion of partition at each timestep to mask each loop - smaller 
+                                     gives finer control (so closer to target ARI), but is slower. 
+                                     Defaults to 0.01.
+    """
+    Zalt = Z.copy()
+    for t in range(Z.shape[1]):
+        while True:
+            mask = np.random.rand(Z.shape[0]) < mask_prop
+            Zalt[mask, t] = np.random.randint(
+                0, high=Z[:, t].max() + 1, size=mask.sum()
+            )
+            if ari(Z[:, t], Zalt[:, t]) < target_ari:
+                break
+
+    return Zalt
+
+
+def nmi_meta_aligned(Z, target_nmi, mask_prop=0.01):
+    """
+    Generate new series of partitions, where at each timestep (so locally), the 
+    NMI between the new partition and the old partition is roughly equal to the 
+    target NMI. 
+
+    Args:
+        Z (_type_): Base (temporal) partition, shape N x T
+        target_nmi (float): target NMI
+        mask_prop (float, optional): Proportion of partition at each timestep to mask each loop - smaller 
+                                     gives finer control (so closer to target NMI), but is slower. 
+                                     Defaults to 0.01.
+    """
+    Zalt = Z.copy()
+    for t in range(Z.shape[1]):
+        while True:
+            mask = np.random.rand(Z.shape[0]) < mask_prop
+            Zalt[mask, t] = np.random.randint(
+                0, high=Z[:, t].max() + 1, size=mask.sum()
+            )
+            if nmi(Z[:, t], Zalt[:, t]) < target_nmi:
+                break
+
+    return Zalt
+
+
 def get_edge_prob(zi, zj, p_in, p_out):
     if zi == zj:
         return p_in
@@ -311,7 +366,8 @@ def sample_dynsbm_meta(
         meta_types (list, optional): _description_. Defaults to ["normal", "poisson", "nbinom", "indep bernoulli", "categorical"].
         meta_dims (_type_, optional): _description_. Defaults to None.
         meta_params (_type_, optional): _description_. Defaults to None.
-        meta_part (_type_, optional): _description_. Defaults to None.
+        meta_part (np.array or float, optional): either specified partition for metadata, or float defining score of alignment. 
+                                                 Defaults to None.
     """
     A, Z = sample_dynsbm_A(
         Z_1=Z_1,
@@ -336,6 +392,8 @@ def sample_dynsbm_meta(
     if meta_part is None:
         meta_sizes = sizes
     else:
+        if type(meta_part) == float:
+            meta_part = ari_meta_aligned(Z, meta_part)
         meta_sizes = np.array(
             [
                 [len([i for i in meta_part[:, t] if i == q]) for q in range(Q)]
@@ -589,10 +647,7 @@ def gen_test_data(
                 )  # TODO: allow to pass more general transitions for metadata
                 # meta_parts.append(meta_part)
             else:
-                # passed float target alignment - assume use ari as measure (TODO: allow passing score fn)
-                # TODO: allow controlled alignment sims
-                # TODO: allow controlled alignment sims
-                pass
+                meta_part = meta_aligned
 
         if not sample_meta_params:
             test = sample_dynsbm_meta(
@@ -816,23 +871,51 @@ meta_align = np.ones_like(N, dtype=bool)
 scaling_test_params["meta_align"] = meta_align
 
 # alignment tests
-from sklearn.metrics import normalized_mutual_info_score as nmi
-from sklearn.metrics import adjusted_rand_score as ari
+align_test_params = {}
 
-target_nmi = 0.6
-mask_prop = 0.01
-zalt = tz.copy()
-while True:
-    mask = np.random.rand(len(tz)) < mask_prop
-    zalt[mask] = np.random.randint(0, high=tz.max() + 1, size=mask.sum())
-    if nmi(tz, zalt) < target_nmi:
-        break
-
-target_ari = 0.6
-mask_prop = 0.01
-zalt2 = tz.copy()
-while True:
-    mask = np.random.rand(len(tz)) < mask_prop
-    zalt2[mask] = np.random.randint(0, high=tz.max() + 1, size=mask.sum())
-    if ari(tz, zalt2) < target_ari:
-        break
+n_samps = 20
+n_tests = 40
+align_test_params["n_samps"] = n_samps
+test_no = np.arange(500, 500 + n_tests)
+align_test_params["test_no"] = test_no
+N = 100 * np.ones_like(test_no)
+align_test_params["N"] = N
+Q = 4 * np.ones_like(test_no)
+align_test_params["Q"] = Q
+c_in = np.concatenate([10 * np.ones(n_tests // 2), 6 * np.ones(n_tests - n_tests // 2)])
+p_in = [ci / ni for ci, ni in zip(c_in, N)]
+align_test_params["p_in"] = p_in
+c_out = 2
+p_out = [c_out / ni for ni in N]
+align_test_params["p_out"] = p_out
+p_stay = 0.8 * np.ones_like(test_no)
+p_stay[::2] = 0.6
+align_test_params["p_stay"] = p_stay
+T = 5
+align_test_params["T"] = T
+meta_types = ["poisson", "indep bernoulli"]
+align_test_params["meta_types"] = meta_types
+L = 4
+align_test_params["L"] = L
+meta_dims = [1, L]
+align_test_params["meta_dims"] = meta_dims
+pois_params = [
+    np.array(
+        [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
+    ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
+    for Q_i in Q
+]
+base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
+indep_bern_params = [
+    np.concatenate(
+        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)], axis=1
+    )
+    for Q_i in Q
+]
+meta_params = list(zip(pois_params, indep_bern_params))
+align_test_params["meta_params"] = meta_params
+tmp = np.linspace(0.1, 1.0, n_tests // 2)
+meta_align = np.zeros(n_tests)
+meta_align[::2] = tmp
+meta_align[1::2] = tmp
+align_test_params["meta_align"] = meta_align

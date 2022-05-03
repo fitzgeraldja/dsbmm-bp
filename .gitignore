@@ -27,6 +27,9 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# VSCode artifacts 
+.vscode/
+
 # Data 
 scopus/
 scopus*

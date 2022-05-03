@@ -382,3 +382,70 @@ def nb_connected_components(N: int, edges: np.ndarray):
         comp = nodes[parent == val]
         comps.append(comp)
     return n_cc, comps
+
+
+def calc_present(A):
+    """Calculate whether nodes present at each time period given adjacency
+    (i.e. either send or receive a link)
+
+    Args:
+        A (_type_): N x N x T adjacency (assume sparse)
+    """
+    if type(A) == np.ndarray:
+        present = (A.sum(axis=0) > 0) | (A.sum(axis=1) > 0)
+    elif type(A) == list:
+        present = np.vstack(
+            [(A[t].sum(axis=0) > 0) | (A[t].sum(axis=1) > 0) for t in range(len(A))]
+        )
+    return present
+
+
+def calc_trans_present(present):
+    """Calculate whether nodes present in adjacent time periods and so should be
+    counted in transitions
+
+    Args:
+        present (_type_): N x T boolean for presence of node i at time t 
+    """
+    return present[:, :-1] & present[:, 1:]
+
+
+def effective_pi(Z):
+    Q = len(np.unique(Z))
+    z_vals = np.unique(Z)
+    print("Unique Z vals:", z_vals)
+    print(f"Q inferred as {Q}")
+    T = Z.shape[1]
+    print(f"T inferred as {T}")
+    qqprime_trans = np.zeros((Q, Q))
+    for q in np.unique(Z):
+        for qprime in np.unique(Z):
+            for t in range(1, T):
+                tm1_idxs = Z[:, t - 1] == q
+                t_idxs = Z[:, t] == qprime
+                qqprime_trans[z_vals == q, z_vals == qprime] += (
+                    tm1_idxs * t_idxs
+                ).sum()
+    print("Num. trans. inferred:", qqprime_trans)
+    qqprime_trans /= np.expand_dims(qqprime_trans.sum(axis=1), 1)
+    return qqprime_trans
+
+
+def effective_beta(A, Z):
+    Q = len(np.unique(Z))
+    z_vals = np.unique(Z)
+    T = Z.shape[1]
+    beta = np.zeros((Q, Q, T))
+    if type(A) == np.ndarray:
+        for q in z_vals:
+            for r in z_vals:
+                for t in range(T):
+                    beta[q, r, t] = A[:, :, t][
+                        np.ix_(Z[:, t] == q, Z[:, t] == r)
+                    ].mean()
+    elif type(A) == list:
+        for q in z_vals:
+            for r in z_vals:
+                for t in range(T):
+                    beta[q, r, t] = A[t][np.ix_(Z[:, t] == q, Z[:, t] == r)].mean()
+    return beta / 2
