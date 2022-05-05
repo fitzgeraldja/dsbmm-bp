@@ -1,20 +1,10 @@
 # numba reimplementation of all methods for BP class that reasonably stand to gain from doing so (would allow parallelisation + GPU usage)
 # - simply prepend method name with nb_
-from numba import njit, prange
+from numba import njit
 
 
 @njit(parallel=True)
-def nb_update_messages():
-    pass
-
-
-@njit(parallel=True)
-def nb_update_spatial_message():
-    pass
-
-
-@njit(parallel=True)
-def nb_cavity_spatial_message():
+def nb_init_msgs():
     pass
 
 
@@ -29,22 +19,12 @@ def nb_backward_temp_msg_term():
 
 
 @njit(parallel=True)
-def nb_update_temporal_messages():
+def nb_spatial_msg_term_small_deg():
     pass
 
 
 @njit(parallel=True)
-def nb_update_forward_temporal_message():
-    pass
-
-
-@njit(parallel=True)
-def nb_update_backward_temporal_message():
-    pass
-
-
-@njit(parallel=True)
-def nb_spatial_message_term():
+def nb_spatial_msg_term_large_deg():
     pass
 
 
@@ -64,5 +44,21 @@ def nb_update_node_marg():
 
 
 @njit(parallel=True)
+def nb_compute_free_energy():
+    pass
+
+
+@njit(parallel=True)
 def nb_update_twopoint_marginals():
     pass
+
+
+@njit(parallel=True)
+def nb_update_twopoint_temp_marg():
+    pass
+
+
+@njit(parallel=True)
+def nb_update_twopoint_spatial_marg():
+    pass
+

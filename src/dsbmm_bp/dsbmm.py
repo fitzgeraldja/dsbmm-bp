@@ -180,7 +180,6 @@ class DSBMMBase:
                 self.X_ib = X_ib
                 tmp.append(self.X_poisson)
                 tmp.append(self.X_ib)
-                # TODO: generalise meta_dims
                 self.meta_dims = np.array(
                     [X_poisson.shape[-1], X_ib.shape[-1]], dtype=np.int32
                 )

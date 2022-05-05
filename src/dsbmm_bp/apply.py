@@ -203,6 +203,8 @@ if __name__ == "__main__":
                     true_Z = sample.pop("Z")
                     ## Initialise
                     if testset_name != "scaling":
+                        if testset_name == "align":
+                            print(f"alignment = {params['meta_align']}")
                         model = em.EM(sample, verbose=verbose)
                     else:
                         print(f"N = {params['N']}")
