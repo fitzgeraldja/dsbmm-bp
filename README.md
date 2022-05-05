@@ -5,8 +5,9 @@ To implement purely in Python, with relatively high performance and parallelisat
 
 Roadmap:
 - [DONE] Simulation module
-- Base model class module
-- Data loader and application module
-- Processor module
-- Subsequent model class modules
-- Tests
+- [DONE] Base model class module
+- [Consider later] Data loader module
+- [DONE] Application module
+- [DONE] Processor module
+- [In progress] Subsequent model class modules
+- [In progress] Tests
