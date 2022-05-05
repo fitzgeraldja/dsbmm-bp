@@ -61,7 +61,7 @@ class EM:
             raise ValueError("Must specify Q in data")
         self.sparse = sparse_adj
         try:
-            if not sparse_adj:
+            if not self.sparse:
                 assert np.allclose(self.A, self.A.transpose(1, 0, 2))
             else:
                 # TODO: fix properly - currently just force symmetrising and binarising
@@ -76,7 +76,7 @@ class EM:
             )
             self.A = ((self.A + self.A.transpose(1, 0, 2)) > 0) * 1.0
         # NB expecting A in shape N x N x T
-        if not sparse:
+        if not self.sparse:
             self.N = self.A.shape[0]
             self.T = self.A.shape[2]
         else:
@@ -116,12 +116,16 @@ class EM:
                 axis=1,
             )  # done for fixing labels over time
         else:
-            if not self.sparse:
-                kmeans_mat = np.concatenate(
-                    [self.A[:, :, t] for t in range(self.T)], axis=1
-                )  # done for fixing labels over time
-            else:
-                kmeans_mat = sparse.hstack(self.A)
+            try:
+                if not self.sparse:
+                    kmeans_mat = np.concatenate(
+                        [self.A[:, :, t] for t in range(self.T)], axis=1
+                    )  # done for fixing labels over time
+                else:
+                    kmeans_mat = sparse.hstack(self.A)
+            except:
+                print("A:", self.A.shape, "T:", self.T)
+                raise ValueError("Problem with A passed")
         if self.N > 1e5:
             kmeans_labels = (
                 MiniBatchKMeans(
@@ -186,7 +190,7 @@ class EM:
         except:
             if self.verbose:
                 print("No p_in / p_out provided")
-        if sparse:
+        if self.sparse:
             # TODO: make abstract wrapper with separate dense / sparse impl
             # so can remove redundant code below
             self.dsbmm = dsbmm_sparse.DSBMMSparse(
@@ -266,7 +270,7 @@ class EM:
 
     def reinit(self, tuning_param=1.0, set_Z=None):
         self.perturb_init_Z()
-        if sparse:
+        if self.sparse:
             self.dsbmm = dsbmm_sparse.DSBMMSparse(
                 A=self.A,
                 X=self.X,

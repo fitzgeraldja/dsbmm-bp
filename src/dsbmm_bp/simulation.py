@@ -191,7 +191,7 @@ def evolve_Z(Z_1, trans_prob, T):
     return Z.astype(np.int32)
 
 
-def ari_meta_aligned(Z, target_ari, mask_prop=0.01):
+def ari_meta_aligned(Z, target_ari, mask_prop=0.01, max_trials=100):
     """
     Generate new series of partitions, where at each timestep (so locally), the 
     ARI between the new partition and the old partition is roughly equal to the 
@@ -203,10 +203,11 @@ def ari_meta_aligned(Z, target_ari, mask_prop=0.01):
         mask_prop (float, optional): Proportion of partition at each timestep to mask each loop - smaller 
                                      gives finer control (so closer to target ARI), but is slower. 
                                      Defaults to 0.01.
+        max_trials (int, optional): maximum number of trials to get roughly correct 
     """
     Zalt = Z.copy()
     for t in range(Z.shape[1]):
-        while True:
+        for trial_no in range(max_trials):
             mask = np.random.rand(Z.shape[0]) < mask_prop
             Zalt[mask, t] = np.random.randint(
                 0, high=Z[:, t].max() + 1, size=mask.sum()
@@ -217,7 +218,7 @@ def ari_meta_aligned(Z, target_ari, mask_prop=0.01):
     return Zalt
 
 
-def nmi_meta_aligned(Z, target_nmi, mask_prop=0.01):
+def nmi_meta_aligned(Z, target_nmi, mask_prop=0.01, max_trials=1000):
     """
     Generate new series of partitions, where at each timestep (so locally), the 
     NMI between the new partition and the old partition is roughly equal to the 
@@ -229,10 +230,11 @@ def nmi_meta_aligned(Z, target_nmi, mask_prop=0.01):
         mask_prop (float, optional): Proportion of partition at each timestep to mask each loop - smaller 
                                      gives finer control (so closer to target NMI), but is slower. 
                                      Defaults to 0.01.
+        max_trials (int, optional): maximum number of trials to get roughly correct
     """
     Zalt = Z.copy()
     for t in range(Z.shape[1]):
-        while True:
+        for trial_no in range(max_trials):
             mask = np.random.rand(Z.shape[0]) < mask_prop
             Zalt[mask, t] = np.random.randint(
                 0, high=Z[:, t].max() + 1, size=mask.sum()
@@ -392,7 +394,7 @@ def sample_dynsbm_meta(
     if meta_part is None:
         meta_sizes = sizes
     else:
-        if type(meta_part) == float:
+        if type(meta_part) != np.ndarray:
             meta_part = ari_meta_aligned(Z, meta_part)
         meta_sizes = np.array(
             [

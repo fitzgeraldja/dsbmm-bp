@@ -18,7 +18,7 @@ if __name__ == "__main__":
     scaling_test_params = simulation.scaling_test_params
     align_test_params = simulation.align_test_params
     testset_names = ["og", "default", "scaling", "align", "scopus"]
-    testset_name = testset_names[2]
+    testset_name = testset_names[3]
     # choose which set of tests to run
     if testset_name == "og":
         test_params = og_test_params
@@ -40,7 +40,7 @@ if __name__ == "__main__":
         for i, testno in enumerate(test_params["test_no"]):
             # if i == chosen_test_idx:
             # if i < 3:  # just take first 3 tests for example to start
-            if testset_name in ["default", "scaling"]:
+            if testset_name in ["default", "scaling", "align"]:
                 params = {
                     "test_no": testno,
                     "N": test_params["N"][i],
@@ -74,7 +74,7 @@ if __name__ == "__main__":
                     "sample_meta_params": test_params["sample_meta_params"],
                 }
             # print(params)
-            if testset_name == "scaling":
+            if testset_name in ["scaling", "align"]:
                 try:
                     with open(
                         f"../../results/{testset_name}_{testno}_samples.pkl", "rb"
@@ -84,17 +84,20 @@ if __name__ == "__main__":
                     samples = simulation.gen_test_data(**params)
                     print()
                     print(f"Simulated test {testno}")
-                    for i, sample in enumerate(samples):
-                        print(f"...converting sample {i+1} to sparse format")
-                        sample["A"] = [
-                            sparse.csr_matrix(sample["A"][:, :, t])
-                            for t in range(params["T"])
-                        ]
-                    print("...done")
+                    if testset_name == "scaling":
+                        for i, sample in enumerate(samples):
+                            print(f"...converting sample {i+1} to sparse format")
+                            sample["A"] = [
+                                sparse.csr_matrix(sample["A"][:, :, t])
+                                for t in range(params["T"])
+                            ]
+                        print("...done")
                     with open(
                         f"../../results/{testset_name}_{testno}_samples.pkl", "wb"
                     ) as f:
                         pickle.dump(samples, f)
+            else:
+                samples = simulation.gen_test_data(**params)
             # print(samples)
             all_samples.append(samples)
             params_set.append(params)
@@ -168,7 +171,7 @@ if __name__ == "__main__":
     if testset_name != "scopus":
         if testset_name == "og":
             test_aris = [np.zeros((20, T)) for T in test_params["T"]]
-        elif testset_name in ["default", "scaling"]:
+        elif testset_name in ["default", "scaling", "align"]:
             test_aris = np.zeros(
                 (len(all_samples), test_params["n_samps"], test_params["T"])
             )
@@ -202,6 +205,7 @@ if __name__ == "__main__":
                     if testset_name != "scaling":
                         model = em.EM(sample, verbose=verbose)
                     else:
+                        print(f"N = {params['N']}")
                         model = em.EM(sample, sparse_adj=True, verbose=verbose)
                     if samp_no > 0:
                         init_times[test_no, samp_no - 1] = time.time() - start_time
@@ -269,6 +273,8 @@ if __name__ == "__main__":
                         )
                     if samp_no > 0:
                         test_times[test_no, samp_no - 1] = time.time() - start_time
+                        if testset_name == "scaling":
+                            print(f"Sample took ~{test_times[test_no,samp_no-1]:.2f}s")
                     time.sleep(
                         0.5
                     )  # sleep a bit to allow threads to complete, TODO: properly sort this

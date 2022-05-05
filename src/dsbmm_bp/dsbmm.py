@@ -14,7 +14,8 @@ from numba.types import unicode_type, ListType, bool_, Array
 from numba.typed import List, Dict
 from numba.experimental import jitclass
 
-# from numba_dsbmm_methods import * # TODO: implement separately to allow parallelisation + GPU usage
+# TODO: implement separately to allow parallelisation + GPU usage
+# from numba_dsbmm_methods import *
 # from numba_bp_methods import *
 import numpy as np
 
@@ -24,7 +25,8 @@ from utils import numba_ix, nb_poisson_lkl_int, nb_ib_lkl
 
 # from sklearn.cluster import MiniBatchKMeans
 
-# TODO: don't hardcode these
+# TODO: Copy over fixed inference from sparse version
+
 TOL = 1e-50  # min value permitted for msgs etc (for numerical stability)
 
 # NB for numba, syntax of defining an array like e.g. float32[:,:,:]

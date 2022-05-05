@@ -46,8 +46,9 @@
 # No immediately obvious way of sparsifying these, with the exception of X for categorical data
 # with many categories (currently one-hot encoded (OHE)) - plan to deal with in future
 
-# TODO: Allow X to be ordinal categorical encoding rather than OHE for memory efficiency
-# TODO: think about how could allow batching
+
+# TODO: Allow X to be ordinal categorical encoding rather than OHE for memory efficiency,
+# TODO: think about how could allow batching.
 
 from numba import (
     jit,
@@ -87,12 +88,11 @@ psi_e_type = typeof(psi_e_ex)
 nbrs_ex = List.empty_list(ListType(Array(int32, ndim=1, layout="C")))
 nbrs_type = typeof(nbrs_ex)
 twopoint_e_ex = List.empty_list(ListType(Array(float64, ndim=3, layout="C")))
-twopoint_e_type = typeof(
-    twopoint_e_ex
-)  # TODO: replace as array type of size (Q^2 sum_t E_t), along w lookup table for idx of i,j,t as this should be sufficient
+# TODO: replace as array type of size (Q^2 sum_t E_t), along w lookup table for idx of i,j,t as this should be sufficient
 # given implementation below - would this actually result in speedup over lru cache implementation?
 # twopoint_t_ex = List.empty_list(ListType(float64[:,:])) # unnecessary for t marg, as memory size O(NTQ^2) at most O(Q^2\sum_t E_t) size of constrained formulation
 # of e marg (for sparse networks w E_t approx N for each t), and arrays generally preferable structure if significant overall savings not possible
+twopoint_e_type = typeof(twopoint_e_ex)
 
 with open("config.yaml") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
@@ -163,9 +163,7 @@ class BPSparseBase:
         self.node_marg = np.zeros((self.N, self.T, self.Q))
         self._zero_twopoint_e_marg()
         self.msg_diff = 0.0
-        self.twopoint_t_marg = np.zeros(
-            (self.N, self.T - 1, self.Q, self.Q)
-        )  # TODO: move instantiation to init
+        self.twopoint_t_marg = np.zeros((self.N, self.T - 1, self.Q, self.Q))
 
     @property
     def n_timesteps(self):
@@ -187,13 +185,13 @@ class BPSparseBase:
 
     def get_neighbours(self):
         # initially assuming undirected
-        # TODO: directed version
+        # TODO: directed version!
         self._pres_nodes = np.zeros(
             (self.N, self.T), dtype=bool_
         )  # N x T boolean array w i,t True if i present in net at time t
         for t in range(self.T):
             for i in range(self.N):
-                # TODO: fix for directed (only counting out-edges here)
+                # TODO: fix for directed - only counting out-edges here
                 self._pres_nodes[self.A[t].row_cs(i), t] = True
         self._pres_trans = (
             self._pres_nodes[:, :-1] * self._pres_nodes[:, 1:]
@@ -216,7 +214,7 @@ class BPSparseBase:
         # ]  # so self.nbrs[t][i] gives
         self.nbrs = tmp
         # nbrs of i at t (possibly none)
-        # TODO: make inverse lookup also:
+        # TODO: make inverse lookup for nbrs:
         # void blockmodel:: graph_build_neis_inv()
         # {
         #     //build graph_neis_inv
@@ -251,7 +249,8 @@ class BPSparseBase:
         # then structure such that just loop over all in random order - nonzeros should give these
         # Key is that when consider a known message from i to j, can recover idxs for
 
-    # TODO: implement lru cached nbr and inverse nbr lookup functions - should basically be same efficiency as putting in memory
+    # TODO: implement lru cached nbr and inverse nbr lookup functions
+    # - should basically be same efficiency as putting in memory
 
     def init_messages(self, mode):
         if mode == "random":
@@ -287,8 +286,7 @@ class BPSparseBase:
                         msg /= np.expand_dims(msg.sum(axis=1), 1)
                     else:
                         msg = np.empty((1, self.Q), dtype=np.float64)
-                    # TODO: remove after fix
-                    assert np.isnan(msg).sum() == 0
+                    # assert np.isnan(msg).sum() == 0
                     tmp2.append(msg)
                 # print("Trying to update psi_e")
                 tmp.append(tmp2)
@@ -307,8 +305,7 @@ class BPSparseBase:
             self._psi_t /= np.expand_dims(
                 self._psi_t.sum(axis=2), 2
             )  # msgs from i at t forwards/backwards
-            # TODO: remove after fix
-            assert np.isnan(self._psi_t).sum() == 0
+            # assert np.isnan(self._psi_t).sum() == 0
             # about being in group q,
             # so again 4d
             # assert np.all((self._psi_t.sum(axis=3) - 1) ** 2 < 1e-14)
@@ -324,7 +321,8 @@ class BPSparseBase:
             # specified by plant_strength (shortened to ps below)
             # i.e. if z_0(i,t) = r,
             # \psi^{it}_q = \delta_{qr}(ps + (1 - ps)*rand) + (1 - \delta_{qr})*(1 - ps)*rand
-            p = 0.8  # TODO: don't hardcode
+            # TODO: don't hardcode
+            p = 0.8  
             ## INIT MARGINALS ##
             one_hot_Z = np.zeros((self.N, self.T, self.Q))
             for i in range(self.N):
@@ -350,8 +348,7 @@ class BPSparseBase:
                     else:
                         # print("WARNING: empty nodes not properly handled yet")
                         msg = np.empty((1, self.Q), dtype=np.float64)
-                    # TODO: remove after fix
-                    assert np.isnan(msg).sum() == 0
+                    # assert np.isnan(msg).sum() == 0
                     tmp2.append(msg)
                 # print("Trying to update psi_e")
                 tmp.append(tmp2)
@@ -400,25 +397,24 @@ class BPSparseBase:
         # sum_qprime(self.trans_prob(q,qprime)*self._psi_t[i,t,qprime,0])
         # from t+1 to t
         try:
-            # TODO: remove pushes to contiguous array and just write out multiplication
+            # TODO: remove pushes to contiguous array and just write out multiplication!
             out = np.ascontiguousarray(self.trans_prob) @ np.ascontiguousarray(
                 self._psi_t[i, t, :, 0]
             )
             for q in range(self.Q):
                 if out[q] < TOL:
                     out[q] = TOL
-            try:
-                # TODO: remove after fix
-                assert not np.all(out < TOL)
-                assert np.isnan(out).sum() == 0
-                assert np.all(out >= 0)
-            except:
-                print("(i,t):", i, t)
-                print("Trans:", self.trans_prob)
-                print("Psi_t back:", self._psi_t[i, t, :, 0])
-                print("psi_t shape:", self._psi_t.shape)
-                print("backward out:", out)
-                raise RuntimeError("Problem with backward msg term")
+            # try:
+            #     assert not np.all(out < TOL)
+            #     assert np.isnan(out).sum() == 0
+            #     assert np.all(out >= 0)
+            # except:
+            #     print("(i,t):", i, t)
+            #     print("Trans:", self.trans_prob)
+            #     print("Psi_t back:", self._psi_t[i, t, :, 0])
+            #     print("psi_t shape:", self._psi_t.shape)
+            #     print("backward out:", out)
+            #     raise RuntimeError("Problem with backward msg term")
         except:
             # t=T outside of range, so no backward message
             assert t == self.T - 1
@@ -507,23 +503,22 @@ class BPSparseBase:
             # for q in range(self.Q):
             #     if tmp[q] < TOL:
             #         tmp[q] = TOL
-            try:
-                assert not np.isnan(tmp).sum() > 0
-                assert not np.isinf(tmp).sum() > 0
-            except:
-                # print("A[t]:", self.A[t])
-                print("(i,j,t):", i, j, t)
-                print("deg[i,t]:", len(nbrs))
-                print("jtoi:", jtoi_msgs)
-                print("full j msgs:", self._psi_e[t][j])
-                print("Beta:", beta)
-                print("tmp:", tmp)
-                print("spatial msg term:", msg)
-                raise RuntimeError("Problem with field iter term")
+            # try:
+            #     assert not np.isnan(tmp).sum() > 0
+            #     assert not np.isinf(tmp).sum() > 0
+            # except:
+            #     # print("A[t]:", self.A[t])
+            #     print("(i,j,t):", i, j, t)
+            #     print("deg[i,t]:", len(nbrs))
+            #     print("jtoi:", jtoi_msgs)
+            #     print("full j msgs:", self._psi_e[t][j])
+            #     print("Beta:", beta)
+            #     print("tmp:", tmp)
+            #     print("spatial msg term:", msg)
+            #     raise RuntimeError("Problem with field iter term")
             field_iter[nbr_idx, :] = tmp
             # print("summed:", tmp.shape)
             msg *= tmp
-            # TODO: consider if this check still necessary
             # try:
             #     assert not np.all(msg < TOL)
             # except:
@@ -539,16 +534,16 @@ class BPSparseBase:
         else:
             msg *= np.exp(-1.0 * self._h[:, t])
         msg *= self.meta_prob(i, t)
-        try:
-            assert not np.isinf(msg).sum() > 0
-        except:
-            print("(i,t):", i, t)
-            print("deg[i,t]:", len(nbrs))
-            print("beta:", beta)
-            print("meta:", self.meta_prob(i, t))
-            print("exp(-h):", np.exp(-1.0 * self._h[:, t]))
-            print("spatial msg term:", msg)
-            raise RuntimeError("Problem with either meta or external field terms")
+        # try:
+        #     assert not np.isinf(msg).sum() > 0
+        # except:
+        #     print("(i,t):", i, t)
+        #     print("deg[i,t]:", len(nbrs))
+        #     print("beta:", beta)
+        #     print("meta:", self.meta_prob(i, t))
+        #     print("exp(-h):", np.exp(-1.0 * self._h[:, t]))
+        #     print("spatial msg term:", msg)
+        #     raise RuntimeError("Problem with either meta or external field terms")
         # msg[msg < TOL] = TOL
         return msg, field_iter
 
@@ -600,15 +595,18 @@ class BPSparseBase:
                 for q in range(self.Q):
                     for r in range(self.Q):
                         tmp[q] += beta[r, q] * jtoi_msgs[r]
+                    if tmp[q] < TOL:
+                        tmp[q] = TOL
+
             tmp = np.log(tmp)
 
-            try:
-                assert np.isinf(tmp).sum() == 0
-            except:
-                print("jtoi msgs:", jtoi_msgs)
-                print("i,j,t:", i, j, t)
-                print("beta:", beta)
-                raise RuntimeError("Problem w large deg spatial msg")
+            # try:
+            #     assert np.isinf(tmp).sum() == 0
+            # except:
+            #     print("jtoi msgs:", jtoi_msgs)
+            #     print("i,j,t:", i, j, t)
+            #     print("beta:", beta)
+            #     raise RuntimeError("Problem w large deg spatial msg")
             log_field_iter[nbr_idx, :] = tmp
             # print("summed:", tmp.shape)
             msg += tmp
@@ -702,6 +700,12 @@ class BPSparseBase:
                         * self.model.degs[i, t, 1]
                     )
         else:
+            # try:
+            #     assert np.isnan(self.node_marg[i, t, :]).sum() == 0
+            # except:
+            #     print("i, t:", i, t)
+            #     print("node_marg:", self.node_marg[i, t, :])
+            #     raise ValueError("Problem with node marg")
             for q in range(self.Q):
                 for r in range(self.Q):
                     self._h[q, t] += (
@@ -998,18 +1002,17 @@ class BPSparseBase:
                                 * deg_i
                                 / self.n_msgs
                             )  # NB need to mult by deg_i so weighted correctly
-                            # TODO: remove after fix
-                            try:
-                                assert np.isnan(tmp_spatial_msg).sum() == 0
-                                assert np.isinf(tmp_spatial_msg).sum() == 0
-                            except:
-                                print("(i,t):", i, t)
-                                print("tmp_spatial:", tmp_spatial_msg)
-                                print("back_term:", back_term)
-                                print("forward_term:", forward_term)
-                                print("unnorm spatial:", spatial_msg_term)
-                                print("field iters:", field_iter)
-                                raise RuntimeError("Problem with spatial msg")
+                            # try:
+                            #     assert np.isnan(tmp_spatial_msg).sum() == 0
+                            #     assert np.isinf(tmp_spatial_msg).sum() == 0
+                            # except:
+                            #     print("(i,t):", i, t)
+                            #     print("tmp_spatial:", tmp_spatial_msg)
+                            #     print("back_term:", back_term)
+                            #     print("forward_term:", forward_term)
+                            #     print("unnorm spatial:", spatial_msg_term)
+                            #     print("field iters:", field_iter)
+                            #     raise RuntimeError("Problem with spatial msg")
                             self._psi_e[t][i] = tmp_spatial_msg
                             ## UPDATE FORWARDS MESSAGES FROM i AT t ##
                             if t < self.T - 1 and self._pres_trans[i, t]:
@@ -1028,16 +1031,16 @@ class BPSparseBase:
                                 tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
                                 tmp_forwards_msg /= tmp_forwards_msg.sum()
                                 # tmp_forwards_msg[tmp_forwards_msg > 1 - TOL] = 1 - TOL
-                                try:
-                                    assert np.isnan(tmp_forwards_msg).sum() == 0
-                                    assert np.isinf(tmp_forwards_msg).sum() == 0
-                                except:
-                                    print("(i,t):", i, t)
-                                    print("tmp_forwards:", tmp_forwards_msg)
-                                    print("back_term:", back_term)
-                                    print("forward_term:", forward_term)
-                                    print("unnorm spatial:", spatial_msg_term)
-                                    raise RuntimeError("Problem with forward msg")
+                                # try:
+                                #     assert np.isnan(tmp_forwards_msg).sum() == 0
+                                #     assert np.isinf(tmp_forwards_msg).sum() == 0
+                                # except:
+                                #     print("(i,t):", i, t)
+                                #     print("tmp_forwards:", tmp_forwards_msg)
+                                #     print("back_term:", back_term)
+                                #     print("forward_term:", forward_term)
+                                #     print("unnorm spatial:", spatial_msg_term)
+                                #     raise RuntimeError("Problem with forward msg")
                                 self.msg_diff += (
                                     np.abs(
                                         tmp_forwards_msg - self._psi_t[i, t, :, 1]
@@ -1114,18 +1117,17 @@ class BPSparseBase:
                             tmp_spatial_msg /= np.expand_dims(
                                 tmp_spatial_msg.sum(axis=1), 1
                             )
-                            # TODO: remove after fix
-                            try:
-                                assert np.isnan(tmp_spatial_msg).sum() == 0
-                                assert np.isinf(tmp_spatial_msg).sum() == 0
-                            except:
-                                print("i,t", i, t)
-                                print("tmp_spatial:", tmp_spatial_msg)
-                                print("back_term:", back_term)
-                                print("forward_term:", forward_term)
-                                print("unnorm spatial:", spatial_msg_term)
-                                print("field iters:", field_iter)
-                                raise RuntimeError("Problem with spatial msg")
+                            # try:
+                            #     assert np.isnan(tmp_spatial_msg).sum() == 0
+                            #     assert np.isinf(tmp_spatial_msg).sum() == 0
+                            # except:
+                            #     print("i,t", i, t)
+                            #     print("tmp_spatial:", tmp_spatial_msg)
+                            #     print("back_term:", back_term)
+                            #     print("forward_term:", forward_term)
+                            #     print("unnorm spatial:", spatial_msg_term)
+                            #     print("field iters:", field_iter)
+                            #     raise RuntimeError("Problem with spatial msg")
                             self._psi_e[t][i] = tmp_spatial_msg
                             ## UPDATE FORWARDS MESSAGES FROM i AT t ##
                             if t < self.T - 1:
@@ -1138,16 +1140,16 @@ class BPSparseBase:
                                     tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
                                     # tmp_forwards_msg[tmp_forwards_msg > 1 - TOL] = 1 - TOL
                                     tmp_forwards_msg /= tmp_forwards_msg.sum()
-                                    try:
-                                        assert np.isnan(tmp_forwards_msg).sum() == 0
-                                        assert np.isinf(tmp_forwards_msg).sum() == 0
-                                    except:
-                                        print("(i,t):", i, t)
-                                        print("tmp_forwards:", tmp_forwards_msg)
-                                        print("back_term:", back_term)
-                                        print("forward_term:", forward_term)
-                                        print("unnorm spatial:", spatial_msg_term)
-                                        raise RuntimeError("Problem with forward msg")
+                                    # try:
+                                    #     assert np.isnan(tmp_forwards_msg).sum() == 0
+                                    #     assert np.isinf(tmp_forwards_msg).sum() == 0
+                                    # except:
+                                    #     print("(i,t):", i, t)
+                                    #     print("tmp_forwards:", tmp_forwards_msg)
+                                    #     print("back_term:", back_term)
+                                    #     print("forward_term:", forward_term)
+                                    #     print("unnorm spatial:", spatial_msg_term)
+                                    #     raise RuntimeError("Problem with forward msg")
                                     self._psi_t[i, t, :, 1] = tmp_forwards_msg
                             ## UPDATE MARGINAL OF i AT t ##
                             tmp_marg = np.exp(tmp - max_log_spatial_msg_term)
@@ -1215,9 +1217,8 @@ class BPSparseBase:
         for i, j, t, a_ijt in self._edge_vals:
             i, j, t, a_ijt = int(i), int(j), int(t), float(a_ijt)
             # print(i, j, t)
-            j_idx = (
-                self.nbrs[t][i] == j
-            )  # TODO: create inverse array that holds these values
+            j_idx = self.nbrs[t][i] == j
+            # TODO: create inverse array that holds these values
             #       in memory rather than calc on the fly each time
             i_idx = self.nbrs[t][j] == i
             # tmp = np.outer(self._psi_e[t][i][j_idx, :], self._psi_e[t][j][i_idx, :])
@@ -1280,7 +1281,8 @@ class BPSparseBase:
                             )
                     # tmp = np.outer(
                     #     self._psi_t[i, t, :, 1], self._psi_t[i, t, :, 0]
-                    # )  # TODO: check this
+                    # )
+                    # TODO: check this
                     # tmp += np.outer(self._psi_t[i, t, :, 0], self._psi_t[i, t, :, 1])
                     # tmp *= self.trans_prob
                     if tmp.sum() > 0:
