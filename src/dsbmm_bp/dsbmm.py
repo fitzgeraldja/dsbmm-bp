@@ -1,17 +1,13 @@
 from numba import (
-    jit,
-    njit,
-    prange,
     int32,
     float32,
     int64,
     float64,
     # unicode_type,
     typeof,
-    gdb,
 )
 from numba.types import unicode_type, ListType, bool_, Array
-from numba.typed import List, Dict
+from numba.typed import List
 from numba.experimental import jitclass
 
 # TODO: implement separately to allow parallelisation + GPU usage
@@ -21,13 +17,14 @@ import numpy as np
 
 from utils import numba_ix, nb_poisson_lkl_int, nb_ib_lkl
 
-# import utils
+import yaml
 
-# from sklearn.cluster import MiniBatchKMeans
-
-# TODO: Copy over fixed inference from sparse version
-
-TOL = 1e-50  # min value permitted for msgs etc (for numerical stability)
+with open("config.yaml") as f:
+    config = yaml.load(f, Loader=yaml.FullLoader)
+TOL = config["tol"]  # min value permitted for msgs etc (for numerical stability)
+NON_INFORMATIVE_INIT = config[
+    "non_informative_init"
+]  # initialise alpha, pi as uniform (True), or according to init part passed (False)
 
 # NB for numba, syntax of defining an array like e.g. float32[:,:,:]
 # defines array types with no particular layout
@@ -61,17 +58,22 @@ tp_e_marg_ex = List.empty_list(ListType(Array(float64, ndim=3, layout="C")))
 # NB Array(dtype,ndim=k,layout="C") is equiv to dtype[:,...(k - 1 times),::1]
 # if want Fortran layout then place ::1 in first loc rather than last
 tp_e_marg_type = typeof(tp_e_marg_ex)
-nbrs_ex = List.empty_list(ListType(Array(int64, ndim=1, layout="C")))
+nbrs_ex = List.empty_list(ListType(Array(int32, ndim=1, layout="C")))
 nbrs_type = typeof(nbrs_ex)
+
 # this decorator ensures types of each base field, and means all methods are compiled into nopython fns
 # further types are inferred from type annotations
 @jitclass  # (base_spec)
 class DSBMMBase:
     # A: np.ndarray  # assume N x N x T array s.t. (i,j,t)th position confers information about connection from i to j at time t
     A: float64[:, :, ::1]
+    _pres_nodes: bool_[:, ::1]
+    _pres_trans: bool_[:, ::1]
+    _tot_N_pres: int64
     X: X_type
     X_poisson: float64[:, :, ::1]
     X_ib: float64[:, :, ::1]
+    S: int
     # X: list
     # [
     #     np.ndarray
@@ -85,13 +87,12 @@ class DSBMMBase:
     # meta_types: list[str]
     meta_types: meta_types_type
     meta_dims: int32[::1]
-    tuning_param: float64
     deg_corr: bool
     directed: bool
     use_meta: bool
+    tuning_param: float64
     degs: float64[:, :, ::1]  # N x T x [in,out]
     kappa: float64[:, :, ::1]  # Q x T x [in,out]
-    edgemat: float64[:, :, ::1]
     deg_entropy: float
     _alpha: float64[::1]  # init group probs
     _pi: Array(float64, ndim=2, layout="C")  # group transition mat
@@ -105,7 +106,7 @@ class DSBMMBase:
     twopoint_edge_marg: tp_e_marg_type  # [t][i][j_idx,q,r] where j_idx is idx where nbrs[t][i]==j
     meta_lkl: float64[:, :, ::1]  # N x T x Q array of meta lkl term for i at t in q
     nbrs: nbrs_type
-    _edge_locs: int64[:, ::1]
+    _edge_vals: float64[:, ::1]
     diff: float64
     verbose: bool
 
@@ -130,55 +131,91 @@ class DSBMMBase:
         #     self.X = data["X"]
         #     self.Z = data.get("Z", None)
         # else:
-        self.A = A
-        self.N = self.A.shape[0]
-        self.E = np.array(list(map(np.count_nonzero, self.A.transpose(2, 0, 1))))
-        self.T = self.A.shape[-1]
+        self.A = A  # assuming dense N x N x T temporal adjacency matrix
+        self.N = A.shape[0]
+        self.T = A.shape[-1]
+        self.E = np.array([np.count_nonzero(A[:, :, t]) for t in range(self.T)])
+        self._pres_nodes = (A.sum(axis=0) > 0) | (
+            A.sum(axis=1) > 0
+        )  # N x T boolean array w i,t True if i present in net at time t
+        self._tot_N_pres = self._pres_nodes.sum()
+        self._pres_trans = (
+            self._pres_nodes[:, :-1] * self._pres_nodes[:, 1:]
+        )  # returns N x T-1 array w i,t true if i
         # TODO: consider making this unique if undirected (i.e. so
         # don't loop over both i and j each time)
-        self._edge_locs = np.array(
-            list(zip(*self.A.nonzero()))
-        )  # E x 3 array w rows [i,j,t] where A[i,j,t]!=0
+        # Make edge_vals E x 4 array w rows [i,j,t,val] where A[i,j,t]==val != 0
+        # (i.e. just COO format - easier to translate prev loops over)
+        self._edge_vals = np.array(list(zip(*self.A.nonzero()))).astype(float64)
+        vals = self.A.flatten()[self.A.flatten() != 0]
+        self._edge_vals = np.hstack((self._edge_vals, np.expand_dims(vals, 1)))
         self.Z = Z
+        for i in range(self.N):
+            for t in range(self.T):
+                if not self._pres_nodes[i, t]:
+                    self.Z[i, t] = -1
         self.Q = (
             Q if Q is not None else len(np.unique(self.Z))
         )  # will return 0 if both Q and Z None
-        if X_poisson is not None and X_ib is not None:
-            tmp = List()
-            self.X_poisson = X_poisson
-            self.X_ib = X_ib
-            tmp.append(self.X_poisson)
-            tmp.append(self.X_ib)
-            # TODO: generalise meta_dims
-            self.meta_dims = np.array(
-                [X_poisson.shape[-1], X_ib.shape[-1]], dtype=np.int32
-            )
-            self.X = tmp
-            tmp2 = List()
-            tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[0])))
-            tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[1])))
-            self._meta_params = tmp2
-        # else: # TODO: fix for loading general X
-        #     self.X = X
-
+        self.use_meta = use_meta
+        if self.use_meta:
+            self.meta_types = meta_types
+            if X is not None:
+                tmp = List()
+                tmp2 = List()
+                self.S = len(X)
+                assert len(self.meta_types) == self.S
+                self.meta_dims = np.array([X_s.shape[-1] for X_s in X], dtype=np.int32)
+                for s, mt in enumerate(self.meta_types):
+                    tmp.append(X[s])  # assume X[s] is N x T x Ds array
+                    # s.t. (s)(i,t,ds) posn is info
+                    # about ds dim of sth type metadata
+                    # of i at time t
+                    tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[s])))
+                self.X = tmp
+                self._meta_params = tmp2
+            elif X is None and X_poisson is not None and X_ib is not None:
+                tmp = List()
+                self.X_poisson = X_poisson
+                self.X_ib = X_ib
+                tmp.append(self.X_poisson)
+                tmp.append(self.X_ib)
+                # TODO: generalise meta_dims
+                self.meta_dims = np.array(
+                    [X_poisson.shape[-1], X_ib.shape[-1]], dtype=np.int32
+                )
+                self.X = tmp
+                tmp2 = List()
+                tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[0])))
+                tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[1])))
+                self._meta_params = tmp2
+            else:
+                self.use_meta = False
+                try:
+                    assert self.use_meta == use_meta
+                except:
+                    print(
+                        "!" * 10,
+                        "WARNING: no metadata passed but use_meta=True,",
+                        "assuming want to use network alone",
+                        "!" * 10,
+                    )
         assert self.A is not None
-        assert self.X is not None
+        if self.use_meta:
+            assert self.X is not None
         self.deg_corr = deg_corr
         self.directed = directed
-        self.use_meta = use_meta
+        self.tuning_param = tuning_param
         self._n_qt = self.compute_group_counts()
         self.degs = self.compute_degs(self.A)
         self.kappa = self.compute_group_degs()
-        self.edgemat = self.compute_block_edgemat()
         self.deg_entropy = -(self.degs * np.log(self.degs)).sum()
 
-        self.meta_types = meta_types
-        self.tuning_param = tuning_param
         tmp = List()
         for t in range(self.T):
             tmp2 = List()
             for i in range(self.N):
-                tmp2.append(self.A[i, :, t].nonzero()[0])
+                tmp2.append(np.nonzero(self.A[i, :, t])[0].astype(np.int32))
             tmp.append(tmp2)
         self.nbrs = tmp
 
@@ -290,7 +327,10 @@ class DSBMMBase:
         Returns:
             _type_: _description_
         """
-        return np.dstack((A.sum(axis=1), A.sum(axis=0)))
+        in_degs = self.A.sum(axis=0)
+        out_degs = self.A.sum(axis=1)
+
+        return np.dstack((in_degs, out_degs))
 
     def compute_group_degs(self):
         """Compute group in- and out-degrees for current node memberships
@@ -300,32 +340,6 @@ class DSBMMBase:
             for t in range(self.T):
                 kappa[q, t, :] = self.degs[self.Z[:, t] == q, t, :].sum(axis=0)
         return kappa
-
-    def compute_block_edgemat(self):
-        """Compute number of edges between each pair of blocks given Z
-
-        Returns:
-            _type_: _description_
-        """
-        edgemat = np.zeros((self.Q, self.Q, self.T))
-        for q in range(self.Q):
-            for r in range(self.Q):
-                for t in range(self.T):
-                    i_idxs = (self.Z[:, t] == q).nonzero()[0]
-                    j_idxs = (self.Z[:, t] == r).nonzero()[0]
-                    for i in i_idxs:
-                        for j in j_idxs:
-                            edgemat[q, r, t] += self.A[i, j, t]
-                    # if len(row_idxs) > 0 and len(col_idxs > 0):
-                    #     tmp = numba_ix(self.A[:, :, t], row_idxs, col_idxs,)
-                    #     edgemat[q, r, t] = tmp.sum()
-
-        # numpy impl
-        # self.edgemat = np.array([[[self.A[np.ix_(self.Z[:,t]==q,self.Z[:,t]==r),t].sum() for t in range(self.T)]
-        #                           for r in range(self.Q)]
-        #                          for q in range(self.Q)])
-
-        return edgemat
 
     def compute_log_likelihood(self):
         """Compute log likelihood of model for given memberships 
@@ -339,6 +353,10 @@ class DSBMMBase:
         """
         pass
 
+    def compute_DC_lkl(self, i, j, t, q, r, a_ijt):
+        dclam = self.degs[i, t, 1] * self.degs[j, t, 0] * self._lam[q, r, t]
+        return nb_poisson_lkl_int(a_ijt, dclam)
+
     def update_params(self, init, learning_rate):
         """Given marginals, update parameters suitably
 
@@ -346,7 +364,6 @@ class DSBMMBase:
             messages (_type_): _description_
         """
         # first init of parameters given initial groups if init=True, else use provided marginals
-        # TODO: remove prints after fix
         self.update_alpha(init, learning_rate)
         if self.verbose:
             print(self._alpha)
@@ -377,13 +394,14 @@ class DSBMMBase:
                 pois_params = self._meta_params[s]  # shape (Q x T x 1)
                 # recall X[s] has shape (N x T x Ds), w Ds = 1 here
                 for t in range(self.T):
-                    for q in range(self.Q):
-                        for i in range(self.N):
-                            # potentially could speed up further but
-                            # loops still v efficient in numba
-                            self.meta_lkl[i, t, q] *= nb_poisson_lkl_int(
-                                self.X[s][i, t, 0], pois_params[q, t, 0]
-                            )
+                    for i in range(self.N):
+                        if self._pres_nodes[i, t]:
+                            for q in range(self.Q):
+                                # potentially could speed up further but
+                                # loops still v efficient in numba
+                                self.meta_lkl[i, t, q] *= nb_poisson_lkl_int(
+                                    self.X[s][i, t, 0], pois_params[q, t, 0]
+                                )
                 if self.verbose:
                     print("\tUpdated Poisson lkl contribution")
             elif mt == "indep bernoulli":
@@ -391,11 +409,12 @@ class DSBMMBase:
                 ib_params = self._meta_params[s]  # shape (Q x T x L)
                 # recall X[s] has shape (N x T x Ds), w Ds = L here
                 for t in range(self.T):
-                    for q in range(self.Q):
-                        for i in range(self.N):
-                            self.meta_lkl[i, t, q] *= nb_ib_lkl(
-                                self.X[s][i, t, :], ib_params[q, t, :]
-                            )
+                    for i in range(self.N):
+                        if self._pres_nodes[i, t]:
+                            for q in range(self.Q):
+                                self.meta_lkl[i, t, q] *= nb_ib_lkl(
+                                    self.X[s][i, t, :], ib_params[q, t, :]
+                                )
                 if self.verbose:
                     print("\tUpdated IB lkl contribution")
             else:
@@ -404,12 +423,15 @@ class DSBMMBase:
                 )  # NB can't use string formatting for print in numba
         for i in range(self.N):
             for t in range(self.T):
-                for q in range(self.Q):
-                    self.meta_lkl[i, t, q] = self.meta_lkl[i, t, q] ** self.tuning_param
-                    if self.meta_lkl[i, t, q] < TOL:
-                        self.meta_lkl[i, t, q] = TOL
-                    elif self.meta_lkl[i, t, q] > 1 - TOL:
-                        self.meta_lkl[i, t, q] = 1 - TOL
+                if self._pres_nodes[i, t]:
+                    for q in range(self.Q):
+                        self.meta_lkl[i, t, q] = (
+                            self.meta_lkl[i, t, q] ** self.tuning_param
+                        )
+                        if self.meta_lkl[i, t, q] < TOL:
+                            self.meta_lkl[i, t, q] = TOL
+                        elif self.meta_lkl[i, t, q] > 1 - TOL:
+                            self.meta_lkl[i, t, q] = 1 - TOL
 
     def set_node_marg(self, values):
         self.node_marg = values
@@ -420,44 +442,29 @@ class DSBMMBase:
     def set_twopoint_edge_marg(self, values):
         self.twopoint_edge_marg = values
 
-    def calc_free_energy(self):
-        f_site = 0.0
-        for i in range(self.N):
-            for t in range(self.T):
-                nbrs = self.nbrs[t][i]
-                for q in range(self.Q):
-                    a = 0.0
-                    for j_idx, j in enumerate(nbrs):
-                        b = 0.0
-                        for r in range(self.Q):
-                            b += (
-                                self._beta[r, q, t] * self._psi_e[t][i][j_idx, r]
-                            )  # * deg_i*deg_j if DC
-                        a += np.log(b)
-                        # ... basically f_site = 1/N \sum_i log(Z_i) for Z_i the norm factors of marginals
-                        # similarly then calc f_link = 1/2N \sum_ij log(Z_ij) for the twopoint marg norms (for us these will included time margs)
-                        # then final term is something like \sum_qr p_qr * alpha_q * alpha_r  (CHECK)
-                        # Total free energy is then -f_site + f_link - final term, and smaller better (?)
-
     def update_alpha(self, init, learning_rate):
         if init:
-            # case of no marginals / true partition provided to calculate most likely params
-            self._alpha = np.array([(self.Z == q).mean() for q in range(self.Q)])
-            self._alpha /= self._alpha.sum()
-            self._alpha[self._alpha < TOL] = TOL
-            self._alpha /= self._alpha.sum()
-            # self._alpha[self._alpha > 1 - TOL] = 1 - TOL
+            if NON_INFORMATIVE_INIT:
+                self._alpha = np.ones(self.Q) / self.Q
+            else:
+                # case of no marginals / true partition provided to calculate most likely params
+                self._alpha = np.array(
+                    [(self.Z == q).sum() / self._tot_N_pres for q in range(self.Q)]
+                )
+                if self._alpha.sum() > 0:
+                    self._alpha /= self._alpha.sum()
+                self._alpha[self._alpha < TOL] = TOL
+                self._alpha /= self._alpha.sum()
+                # self._alpha[self._alpha > 1 - TOL] = 1 - TOL
         else:
             # if DC, seems like should multiply marg by degree prior to sum - unseen for directed case but can calculate
             tmp = np.zeros(self.Q)
             # print("Updating alpha")
             #
             for q in range(self.Q):
-                tmp[q] = self.node_marg[
-                    :, :, q
-                ].mean()  # NB mean w axis argument not supported by numba beyond single integer
-
-            tmp /= tmp.sum()
+                tmp[q] = self.node_marg[:, :, q].sum() / self._tot_N_pres
+            if tmp.sum() > 0:
+                tmp /= tmp.sum()
             tmp[tmp < TOL] = TOL
             tmp /= tmp.sum()
             # tmp[tmp > 1 - TOL] = 1 - TOL
@@ -474,22 +481,31 @@ class DSBMMBase:
     def update_pi(self, init, learning_rate):
         qqprime_trans = np.zeros((self.Q, self.Q))
         if init:
-            for q in range(self.Q):
-                for qprime in range(self.Q):
-                    for t in range(1, self.T):
-                        tm1_idxs = self.Z[:, t - 1] == q
-                        t_idxs = self.Z[:, t] == qprime
-                        qqprime_trans[q, qprime] += (tm1_idxs & t_idxs).sum()
-            qqprime_trans /= np.expand_dims(qqprime_trans.sum(axis=1), 1)
-            # TODO: provide different cases for non-uniform init clustering
-            # NB for uniform init clustering this provides too homogeneous pi, and is more important now
-            p = 0.8
-            qqprime_trans = p * qqprime_trans + (1 - p) * np.random.rand(
-                *qqprime_trans.shape
-            )
+            if NON_INFORMATIVE_INIT:
+                qqprime_trans = np.ones((self.Q, self.Q))
+            else:
+                for i in range(self.N):
+                    for t in range(self.T - 1):
+                        if self._pres_trans[i, t]:
+                            q1 = self.Z[i, t]
+                            q2 = self.Z[i, t + 1]
+                            qqprime_trans[q1, q2] += 1
 
+                # TODO: provide different cases for non-uniform init clustering
+                # NB for uniform init clustering this provides too homogeneous pi, and is more important now
+                trans_sums = qqprime_trans.sum(axis=1)
+                for q in range(self.Q):
+                    if trans_sums[q] > 0:
+                        qqprime_trans[q, :] /= trans_sums[q]
+                p = 0.8
+                qqprime_trans = p * qqprime_trans + (1 - p) * np.random.rand(
+                    *qqprime_trans.shape
+                )
         else:
-            qqprime_trans = self.twopoint_time_marg.sum(axis=0).sum(axis=0)
+            for i in range(self.N):
+                for t in range(self.T - 1):
+                    if self._pres_trans[i, t]:
+                        qqprime_trans += self.twopoint_time_marg[i, t, :, :]
             # qqprime_trans /= np.expand_dims(
             #     self.node_marg[:, :-1, :].sum(axis=0).sum(axis=0), 1
             # )  # need to do sums twice as numba axis argument
@@ -507,15 +523,17 @@ class DSBMMBase:
             #         raise RuntimeError("Problem with node marginals")
             # qqprime_trans[q, :] = TOL
             # self.correct_pi()
-        qqprime_trans = qqprime_trans / np.expand_dims(
-            qqprime_trans.sum(axis=1), 1
-        )  # normalise rows
+        trans_sums = qqprime_trans.sum(axis=1)
+        for q in range(self.Q):
+            if trans_sums[q] > 0:
+                qqprime_trans[q, :] /= trans_sums[q]
         for q in range(self.Q):
             for qprime in range(self.Q):
                 if qqprime_trans[q, qprime] < TOL:
                     qqprime_trans[q, qprime] = TOL
-                if qqprime_trans[q, qprime] > 1 - TOL:
-                    qqprime_trans[q, qprime] = 1 - TOL
+        qqprime_trans = qqprime_trans / np.expand_dims(
+            qqprime_trans.sum(axis=1), 1
+        )  # normalise rows
         if not init:
             tmp = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
             tmp_diff = np.abs(tmp - self._pi).mean()
@@ -543,8 +561,9 @@ class DSBMMBase:
         lam_num = np.zeros((self.Q, self.Q, self.T))
         lam_den = np.zeros((self.Q, self.Q, self.T))
         if init:
-            for i, j, t in self._edge_locs:
-                lam_num[self.Z[i, t], self.Z[j, t], t] += self.A[i, j, t]
+            for i, j, t, val in self._edge_vals:
+                i, j, t = int(i), int(j), int(t)
+                lam_num[self.Z[i, t], self.Z[j, t], t] += val
 
             # np.array(
             #     [
@@ -612,11 +631,12 @@ class DSBMMBase:
             # lam_num = np.einsum("ijtqr,ijt->qrt", self.twopoint_edge_marg, self.A)
             for q in range(self.Q):
                 for r in range(q, self.Q):
-                    for i, j, t in self._edge_locs:
+                    for i, j, t, val in self._edge_vals:
+                        i, j, t = int(i), int(j), int(t)
                         j_idx = self.nbrs[t][i] == j
                         # if r==q: # TODO: special treatment?
                         lam_num[q, r, t] += (
-                            self.twopoint_edge_marg[t][i][j_idx, q, r] * self.A[i, j, t]
+                            self.twopoint_edge_marg[t][i][j_idx, q, r] * val
                         )
                     for t in range(self.T):
                         if lam_num[q, r, t] < TOL:
@@ -625,12 +645,12 @@ class DSBMMBase:
                             lam_num[r, q, t] = lam_num[q, r, t]
                 if self.directed:
                     for r in range(q):
-                        for i, j, t in self._edge_locs:
+                        for i, j, t, val in self._edge_vals:
+                            i, j, t = int(i), int(j), int(t)
                             j_idx = self.nbrs[t][i] == j
                             # if r==q: # TODO: special treatment?
                             lam_num[q, r, t] += (
-                                self.twopoint_edge_marg[t][i][j_idx, q, r]
-                                * self.A[i, j, t]
+                                self.twopoint_edge_marg[t][i][j_idx, q, r] * val
                             )
 
             # lam_den = np.einsum("itq,it->qt", self.node_marg, self.degs)
@@ -678,8 +698,26 @@ class DSBMMBase:
 
     def update_beta(self, init, learning_rate):
         beta_num = np.zeros((self.Q, self.Q, self.T))
-        beta_den = np.zeros((self.Q, self.Q, self.T))
+        beta_den = np.ones((self.Q, self.Q, self.T))
         if init:
+            # TODO: consider alt init as random / uniform (both options considered in OG BP SBM code, random seems used in practice)
+            if NON_INFORMATIVE_INIT:
+                # assign as near uniform - just assume edges twice as likely in comms as out,
+                # and that all groups have same average out-degree at each timestep
+                Ns = self._pres_nodes.sum(axis=0)
+                av_degs = self.degs.sum(axis=0)[:, 1] / Ns
+                # beta_in = 2*beta_out
+                # N*(beta_in + (Q - 1)*beta_out) = av_degs
+                # = (Q + 1)*beta_out*N
+                beta_out = av_degs / (Ns * (self.Q + 1))
+                beta_in = 2 * beta_out
+                for t in range(self.T):
+                    for q in range(self.Q):
+                        for r in range(self.Q):
+                            if r == q:
+                                beta_num[q, r, t] = beta_in[t]
+                            else:
+                                beta_num[q, r, t] = beta_out[t]
             # beta_num = np.array(
             #     [
             #         [
@@ -692,57 +730,58 @@ class DSBMMBase:
             #         for t in range(self.T)
             #     ]
             # )
-            for i, j, t in self._edge_locs:
-                beta_num[self.Z[i, t], self.Z[j, t], t] += 1
-            for q in range(self.Q):
-                # enforce uniformity for identifiability
-                tmp = 0.0
-                for t in range(self.T):
-                    tmp += beta_num[q, q, t]
-                for t in range(self.T):
-                    beta_num[q, q, t] = tmp
-            # beta_den = np.array(
-            #     [
-            #         [self.degs[self.Z[:, t] == q].sum() for q in range(self.Q)]
-            #         for t in range(self.T)
-            #     ]
-            # )
-            # beta_den = np.einsum("tq,tr->tqr", beta_den, beta_den)
-            # print("beta_num:", beta_num.transpose(2, 0, 1))
-            # print("kappa:", self.kappa)
-            for q in range(self.Q):
-                for t in range(self.T):
-                    for r in range(q, self.Q):
-                        beta_den[q, r, t] = (
-                            self._n_qt[q, t] * self._n_qt[r, t]
-                        )  # TODO: check right in directed case, and if r==q
-                        # if beta_num[q, r, t] < TOL:
-                        #     beta_num[q, r, t] = TOL
-                        if beta_den[q, r, t] < TOL:
-                            beta_den[
-                                q, r, t
-                            ] = 1.0  # this is same as how prev people have handled (effectively just don't do division if will cause problems, as num will
-                            # be v. small anyway)
-                        if not self.directed and r != q:
-                            beta_den[r, q, t] = beta_den[q, r, t]
-                            beta_num[
-                                q, r, t
-                            ] /= 2.0  # done elsewhere, TODO: check basis
-                            beta_num[r, q, t] = beta_num[q, r, t]
-                    if self.directed:
-                        for r in range(q):
-                            beta_den[q, r, t] = self._n_qt[q, t] * self._n_qt[r, t]
+            else:
+                for i, j, t, _ in self._edge_vals:
+                    i, j, t = int(i), int(j), int(t)
+                    beta_num[self.Z[i, t], self.Z[j, t], t] += 1
+                for q in range(self.Q):
+                    # enforce uniformity for identifiability
+                    tmp = 0.0
+                    for t in range(self.T):
+                        tmp += beta_num[q, q, t]
+                    for t in range(self.T):
+                        beta_num[q, q, t] = tmp
+                # beta_den = np.array(
+                #     [
+                #         [self.degs[self.Z[:, t] == q].sum() for q in range(self.Q)]
+                #         for t in range(self.T)
+                #     ]
+                # )
+                # beta_den = np.einsum("tq,tr->tqr", beta_den, beta_den)
+                # print("beta_num:", beta_num.transpose(2, 0, 1))
+                # print("kappa:", self.kappa)
+                for q in range(self.Q):
+                    for t in range(self.T):
+                        for r in range(q, self.Q):
+                            beta_den[q, r, t] = (
+                                self._n_qt[q, t] * self._n_qt[r, t]
+                            )  # TODO: check right in directed case, and if r==q
+                            # if beta_num[q, r, t] < TOL:
+                            #     beta_num[q, r, t] = TOL
                             if beta_den[q, r, t] < TOL:
-                                beta_den[q, r, t] = 1.0
-            for q in range(self.Q):
-                # enforce uniformity for identifiability
-                tmp = 0.0
-                for t in range(self.T):
-                    tmp += beta_den[q, q, t]
-                for t in range(self.T):
-                    beta_den[q, q, t] = tmp
-            # print("beta_den:", beta_den)
-
+                                beta_den[
+                                    q, r, t
+                                ] = 1.0  # this is same as how prev people have handled (effectively just don't do division if will cause problems, as num will
+                                # be v. small anyway)
+                            if not self.directed and r != q:
+                                beta_den[r, q, t] = beta_den[q, r, t]
+                                beta_num[
+                                    q, r, t
+                                ] /= 2.0  # done elsewhere, TODO: check basis
+                                beta_num[r, q, t] = beta_num[q, r, t]
+                        if self.directed:
+                            for r in range(q):
+                                beta_den[q, r, t] = self._n_qt[q, t] * self._n_qt[r, t]
+                                if beta_den[q, r, t] < TOL:
+                                    beta_den[q, r, t] = 1.0
+                for q in range(self.Q):
+                    # enforce uniformity for identifiability
+                    tmp = 0.0
+                    for t in range(self.T):
+                        tmp += beta_den[q, q, t]
+                    for t in range(self.T):
+                        beta_den[q, q, t] = tmp
+                # print("beta_den:", beta_den)
         else:
             # beta_num = np.einsum(
             #     "ijtqr,ijt->qrt", self.twopoint_edge_marg, (self.A > 0)
@@ -750,7 +789,8 @@ class DSBMMBase:
             for q in range(self.Q):
                 for r in range(q, self.Q):
                     if r != q:
-                        for i, j, t in self._edge_locs:
+                        for i, j, t, a_ijt in self._edge_vals:
+                            i, j, t = int(i), int(j), int(t)
                             j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
                             # print(self.twopoint_edge_marg[t][i][j_idx, q, r])
                             # assert j_idx.sum() == 1
@@ -759,7 +799,7 @@ class DSBMMBase:
                                 assert not np.isnan(val)
                             except:
                                 print("(i,j,t):", i, j, t)
-                                print("A[i,j,t] = ", self.A[i, j, t])
+                                print("A[i,j,t] = ", a_ijt)
                                 print("twopoint marg: ", val)
                                 raise RuntimeError("Problem updating beta")
                             beta_num[q, r, t] += val
@@ -769,7 +809,8 @@ class DSBMMBase:
                                 beta_num[r, q, t] = beta_num[q, r, t]
                     else:
                         # enforce uniformity across t for identifiability
-                        for i, j, t in self._edge_locs:
+                        for i, j, t, a_ijt in self._edge_vals:
+                            i, j, t = int(i), int(j), int(t)
                             j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
                             # print(self.twopoint_edge_marg[t][i][j_idx, q, r])
                             # assert j_idx.sum() == 1
@@ -778,7 +819,7 @@ class DSBMMBase:
                                 assert not np.isnan(val)
                             except:
                                 print("(i,j,t):", i, j, t)
-                                print("A[i,j,t] = ", self.A[i, j, t])
+                                print("A[i,j,t] = ", a_ijt)
                                 print("twopoint marg: ", val)
                                 raise RuntimeError("Problem updating beta")
                             for tprime in range(self.T):
@@ -788,7 +829,8 @@ class DSBMMBase:
 
                 if self.directed:
                     for r in range(q):
-                        for i, j, t in self._edge_locs:
+                        for i, j, t, _ in self._edge_vals:
+                            i, j, t = int(i), int(j), int(t)
                             j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
                             val = self.twopoint_edge_marg[t][i][j_idx, q, r][0]
                             beta_num[q, r, t] += val
@@ -868,10 +910,12 @@ class DSBMMBase:
             #         for q in range(self.Q)
             #     ]
             # )
-            for q in range(self.Q):
-                for t in range(self.T):
-                    xi[q, t, 0] = (self.Z[:, t] == q).sum()
-                    zeta[q, t, 0] = self.X[s][self.Z[:, t] == q, t, 0].sum()
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        xi[self.Z[i, t], t, 0] += 1
+                        zeta[self.Z[i, t], t, 0] += self.X[s][i, t, 0]
+                for q in range(self.Q):
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
                     if zeta[q, t, 0] < TOL:
@@ -884,11 +928,20 @@ class DSBMMBase:
             # )
             # gdb()
         else:
-            xi[:, :, 0] = self.node_marg.sum(axis=0).transpose(1, 0)
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        for q in range(self.Q):
+                            xi[q, t, 0] += self.node_marg[i, t, q]
             # zeta = np.einsum("itq,itd->qt", self.node_marg, self.X[s])
-            for q in range(self.Q):
-                for t in range(self.T):
-                    zeta[q, t, 0] = (self.node_marg[:, t, q] * self.X[s][:, t, 0]).sum()
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        for q in range(self.Q):
+                            zeta[q, t, 0] += (
+                                self.node_marg[i, t, q] * self.X[s][i, t, 0]
+                            )
+                for q in range(self.Q):
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
                     if zeta[q, t, 0] < TOL:
@@ -922,10 +975,12 @@ class DSBMMBase:
             #         for q in range(self.Q)
             #     ]
             # )
-            for q in range(self.Q):
-                for t in range(self.T):
-                    xi[q, t, 0] = (self.Z[:, t] == q).sum()
-                    rho[q, t, :] = self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        xi[self.Z[i, t], t, 0] += 1
+                        rho[self.Z[i, t], t, :] += self.X[s][i, t, :]
+                for q in range(self.Q):
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
                     for l in range(L):
@@ -942,18 +997,23 @@ class DSBMMBase:
             #     ]
             # )
         else:
-            xi[:, :, 0] = self.node_marg.sum(axis=0).transpose(1, 0)
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        for q in range(self.Q):
+                            xi[q, t, 0] += self.node_marg[i, t, q]
             # rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s])
-            for q in range(self.Q):
-                for t in range(self.T):
-                    rho[q, t, :] = (
-                        np.expand_dims(self.node_marg[:, t, q], 1) * self.X[s][:, t, :]
-                    ).sum(axis=0)
+            for t in range(self.T):
+                for i in range(self.N):
+                    if self._pres_nodes[i, t]:
+                        for q in range(self.Q):
+                            rho[q, t, :] += self.node_marg[i, t, q] * self.X[s][i, t, :]
+                for q in range(self.Q):
                     if xi[q, t, 0] < TOL:
                         xi[q, t, 0] = 1.0
-                    # for l in range(L):
-                    #     if rho[q, t, l] < TOL:
-                    #         rho[q, t, l] = TOL
+                    for l in range(L):
+                        if rho[q, t, l] < TOL:
+                            rho[q, t, l] = TOL
         # TODO: fix for xi very small (just use logs)
         tmp = rho / xi
         for q in range(self.Q):
@@ -981,7 +1041,10 @@ class DSBMMBase:
     def set_Z_by_MAP(self):
         for i in range(self.N):
             for t in range(self.T):
-                self.Z[i, t] = np.argmax(self.node_marg[i, t, :])
+                if self._pres_nodes[i, t]:
+                    self.Z[i, t] = np.argmax(self.node_marg[i, t, :])
+                else:
+                    self.Z[i, t] = -1
 
 
 class DSBMM:
@@ -1009,6 +1072,9 @@ class DSBMM:
         #     self.X = data["X"]
         #     self.Z = data.get("Z", None)
         # else:
+        # assume A passed as N x N x T np.ndarray
+        self.A = A
+        self.tuning_param = tuning_param
         self.jit_model = DSBMMBase(
             A,
             X,
@@ -1135,20 +1201,6 @@ class DSBMM:
         """Compute group in- and out-degrees for current node memberships
         """
         return self.jit_model.compute_group_degs()
-
-    def compute_block_edgemat(self):
-        """Compute number of edges between each pair of blocks
-
-        Returns:
-            _type_: _description_
-        """
-
-        # numpy impl
-        # self.edgemat = np.array([[[self.A[np.ix_(self.Z[:,t]==q,self.Z[:,t]==r),t].sum() for t in range(self.T)]
-        #                           for r in range(self.Q)]
-        #                          for q in range(self.Q)])
-
-        return self.jit_model.compute_block_edgemat()
 
     def compute_log_likelihood(self):
         """Compute log likelihood of model for given memberships 

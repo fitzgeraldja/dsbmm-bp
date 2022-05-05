@@ -1,19 +1,13 @@
-# TODO: implement DSBMM again but using sparse formulation so can fully take advantage of scaling
-
 from numba import (
-    jit,
-    njit,
-    prange,
     int32,
     float32,
     int64,
     float64,
     # unicode_type,
     typeof,
-    gdb,
 )
 from numba.types import unicode_type, ListType, bool_, Array
-from numba.typed import List, Dict
+from numba.typed import List
 from numba.experimental import jitclass
 
 # from numba_dsbmm_methods import * # TODO: implement separately to allow parallelisation + GPU usage

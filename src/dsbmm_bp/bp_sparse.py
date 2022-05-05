@@ -1,6 +1,4 @@
-# TODO: implement BP again but using sparse formulation so can fully take advantage of scaling
-
-# Immediate way of doing so is to create an E x 4 matrix much as before, i.e. i,j,t, val rows
+# Immediate way of making sparse is to create an E x 4 matrix much as before, i.e. i,j,t, val rows
 # edge list, as don't actually need any matrix operations (can implement directly - faster
 # in numba and more clear anyway)
 # But things to think about are
@@ -51,9 +49,6 @@
 # TODO: think about how could allow batching.
 
 from numba import (
-    jit,
-    njit,
-    prange,
     int32,
     float32,
     int64,
@@ -61,10 +56,9 @@ from numba import (
     bool_,
     # unicode_type,
     typeof,
-    gdb,
 )
 from numba.types import unicode_type, ListType, bool_, Array
-from numba.typed import List, Dict
+from numba.typed import List
 from numba.experimental import jitclass
 import csr
 import yaml
@@ -322,7 +316,7 @@ class BPSparseBase:
             # i.e. if z_0(i,t) = r,
             # \psi^{it}_q = \delta_{qr}(ps + (1 - ps)*rand) + (1 - \delta_{qr})*(1 - ps)*rand
             # TODO: don't hardcode
-            p = 0.8  
+            p = 0.8
             ## INIT MARGINALS ##
             one_hot_Z = np.zeros((self.N, self.T, self.Q))
             for i in range(self.N):
