@@ -148,6 +148,8 @@ class EM:
                 .reshape(-1, 1)
             )
         self.k_means_init_Z = np.tile(kmeans_labels, (1, self.T))
+        self._pres_nodes = (self.A.sum(axis=1) > 0) | (self.A.sum(axis=0) > 0)
+        self.k_means_init_Z[~self._pres_nodes] = -1
         try:
             assert self.k_means_init_Z.shape == (self.N, self.T)
         except:
@@ -256,7 +258,7 @@ class EM:
         self.best_Z = None
         self.best_val = 0.0
 
-    def perturb_init_Z(self, pert_prop=0.1):
+    def perturb_init_Z(self, pert_prop=0.05):
         # add some noise to init clustering
         # prop = 0.1  # proportion of noise to add
         mask = np.random.rand(*self.k_means_init_Z.shape) < pert_prop
@@ -266,6 +268,7 @@ class EM:
         )[mask]
         init_Z[init_Z < 0] = 0
         init_Z[init_Z > self.Q - 1] = self.Q - 1
+        init_Z[~self._pres_nodes] = -1
         self.init_Z = init_Z
 
     def reinit(self, tuning_param=1.0, set_Z=None):
@@ -460,7 +463,7 @@ class EM:
                     ]
                 )
                 if self.verbose:
-                    print("ARIs:", np.round_(aris, 3))
+                    print("ARIs:", np.round_(aris, 2))
                 return aris
             except:
                 print(
@@ -476,7 +479,7 @@ class EM:
                 ]
             )
             if self.verbose:
-                print("ARIs:", np.round_(aris, 3))
+                print("ARIs:", np.round_(aris, 2))
             return aris
 
     def update_score_plot(self):

@@ -794,13 +794,13 @@ class DSBMMBase:
                             # print(self.twopoint_edge_marg[t][i][j_idx, q, r])
                             # assert j_idx.sum() == 1
                             val = self.twopoint_edge_marg[t][i][j_idx, q, r][0]
-                            try:
-                                assert not np.isnan(val)
-                            except:
-                                print("(i,j,t):", i, j, t)
-                                print("A[i,j,t] = ", a_ijt)
-                                print("twopoint marg: ", val)
-                                raise RuntimeError("Problem updating beta")
+                            # try:
+                            #     assert not np.isnan(val)
+                            # except:
+                            #     print("(i,j,t):", i, j, t)
+                            #     print("A[i,j,t] = ", a_ijt)
+                            #     print("twopoint marg: ", val)
+                            #     raise RuntimeError("Problem updating beta")
                             beta_num[q, r, t] += val
                         if not self.directed:
                             for t in range(self.T):
@@ -814,13 +814,13 @@ class DSBMMBase:
                             # print(self.twopoint_edge_marg[t][i][j_idx, q, r])
                             # assert j_idx.sum() == 1
                             val = self.twopoint_edge_marg[t][i][j_idx, q, r][0]
-                            try:
-                                assert not np.isnan(val)
-                            except:
-                                print("(i,j,t):", i, j, t)
-                                print("A[i,j,t] = ", a_ijt)
-                                print("twopoint marg: ", val)
-                                raise RuntimeError("Problem updating beta")
+                            # try:
+                            #     assert not np.isnan(val)
+                            # except:
+                            #     print("(i,j,t):", i, j, t)
+                            #     print("A[i,j,t] = ", a_ijt)
+                            #     print("twopoint marg: ", val)
+                            #     raise RuntimeError("Problem updating beta")
                             for tprime in range(self.T):
                                 beta_num[q, r, tprime] += (
                                     val / 2.0

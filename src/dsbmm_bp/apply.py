@@ -181,6 +181,15 @@ if __name__ == "__main__":
             test_Ns = [param["N"] for param in params_set]
             with open(f"../../results/{testset_name}_N.pkl", "wb") as f:
                 pickle.dump(test_Ns, f)
+        elif testset_name == "align":
+            test_Z = np.zeros(
+                (
+                    len(all_samples),
+                    params_set[0]["n_samps"],
+                    params_set[0]["N"],
+                    test_params["T"],
+                )
+            )
         for test_no, (samples, params) in enumerate(zip(all_samples, params_set)):
             # if test_no < 5:
             print()
@@ -204,7 +213,7 @@ if __name__ == "__main__":
                     ## Initialise
                     if testset_name != "scaling":
                         if testset_name == "align":
-                            print(f"alignment = {params['meta_align']}")
+                            print(f"alignment = {params['meta_aligned']}")
                         model = em.EM(sample, verbose=verbose)
                     else:
                         print(f"N = {params['N']}")
@@ -214,9 +223,13 @@ if __name__ == "__main__":
                     ## Score from K means
                     print("Before fitting model, K-means init partition has")
                     if verbose:
-                        model.ari_score(true_Z)
+                        model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
                     else:
-                        print(np.round_(model.ari_score(true_Z), 3))
+                        print(
+                            np.round_(
+                                model.ari_score(true_Z, pred_Z=model.k_means_init_Z), 3
+                            )
+                        )
                     ## Fit to given data
                     model.fit(true_Z=true_Z, learning_rate=0.2)
                     ## Score after fit
@@ -225,25 +238,35 @@ if __name__ == "__main__":
                         print("BP Z ARI:")
                         test_aris[test_no, samp_no, :] = model.ari_score(true_Z)
                         if not verbose:
-                            print(np.round_(test_aris[test_no, samp_no, :]))
+                            print(np.round_(test_aris[test_no, samp_no, :], 3))
                         print("Init Z ARI:")
                         if verbose:
-                            model.ari_score(true_Z, pred_Z=model.init_Z)
+                            model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
                         else:
                             print(
-                                np.round_(model.ari_score(true_Z, pred_Z=model.init_Z))
+                                np.round_(
+                                    model.ari_score(
+                                        true_Z, pred_Z=model.k_means_init_Z
+                                    ),
+                                    3,
+                                )
                             )
                     except:
                         print("BP Z ARI:")
                         test_aris[test_no][samp_no, :] = model.ari_score(true_Z)
                         if not verbose:
-                            print(np.round_(test_aris[test_no][samp_no, :]))
+                            print(np.round_(test_aris[test_no][samp_no, :], 3))
                         print("Init Z ARI:")
                         if verbose:
-                            model.ari_score(true_Z, pred_Z=model.init_Z)
+                            model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
                         else:
                             print(
-                                np.round_(model.ari_score(true_Z, pred_Z=model.init_Z))
+                                np.round_(
+                                    model.ari_score(
+                                        true_Z, pred_Z=model.k_means_init_Z
+                                    ),
+                                    3,
+                                )
                             )
                     # print("Z inferred:", model.bp.model.jit_model.Z)
                     if verbose:
@@ -281,6 +304,12 @@ if __name__ == "__main__":
                         0.5
                     )  # sleep a bit to allow threads to complete, TODO: properly sort this
                     # save after every sample in case of crash
+                    if testset_name == "align":
+                        test_Z[test_no, samp_no, :, :] = model.bp.model.jit_model.Z
+                        with open(
+                            f"../../results/{testset_name}_test_Z.pkl", "wb"
+                        ) as f:
+                            pickle.dump(test_Z, f)
                     with open(f"../../results/{testset_name}_test_aris.pkl", "wb") as f:
                         pickle.dump(test_aris, f)
                     with open(
