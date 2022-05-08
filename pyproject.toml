@@ -3,7 +3,11 @@ name = "dsbmm-bp"
 version = "0.1.0"
 description = "Dynamic SBM for temporal networks with metadata, inferred through belief propagation"
 authors = ["John Fitzgerald <j.a.fitzgerald@outlook.com>"]
-license = "GPL-3"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/fitzgeraldja/dsbmm-bp"
+packages = [
+    { include = "dsbmm_bp", from = "src" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.9"
