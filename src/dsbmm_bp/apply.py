@@ -10,6 +10,29 @@ import pickle
 import time
 from pathlib import Path
 
+import argparse
+
+parser = argparse.ArgumentParser(description="Apply model to data.")
+
+
+testset_names = ["og", "default", "scaling", "align", "scopus"]
+parser.add_argument(
+    "--test",
+    type=str,
+    default="default",
+    help=f"Run chosen set of provided tests, options are {testset_names}, default is default.",
+    choices=testset_names,
+)
+parser.add_argument(
+    "--data",
+    type=str,
+    default="./data",
+    help="Specify path to data directory. Default is ./data",
+)
+
+args = parser.parse_args() 
+
+
 
 if __name__ == "__main__":
     ## Simulate data (for multiple tests)
@@ -17,8 +40,7 @@ if __name__ == "__main__":
     og_test_params = simulation.og_test_params
     scaling_test_params = simulation.scaling_test_params
     align_test_params = simulation.align_test_params
-    testset_names = ["og", "default", "scaling", "align", "scopus"]
-    testset_name = testset_names[3]
+    testset_name = args.test
     # choose which set of tests to run
     if testset_name == "og":
         test_params = og_test_params

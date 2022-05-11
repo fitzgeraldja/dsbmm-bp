@@ -21,6 +21,7 @@ RANDOM_ONLINE_UPDATE_MSG = config[
 ]  # if true then update messages online (always using most recent vals),
 # otherwise update all messages simultaneously
 USE_FASTMATH = config["use_fastmath"]
+PLANTED_P = config["planted_p"]
 
 
 @njit(parallel=True, fastmath=USE_FASTMATH)
@@ -95,8 +96,7 @@ def nb_init_msgs(
         # specified by plant_strength (shortened to ps below)
         # i.e. if z_0(i,t) = r,
         # \psi^{it}_q = \delta_{qr}(ps + (1 - ps)*rand) + (1 - \delta_{qr})*(1 - ps)*rand
-        # TODO: don't hardcode
-        p = 0.8
+        p = PLANTED_P
         ## INIT MARGINALS ##
         one_hot_Z = np.zeros((N, T, Q))
         for i in range(N):
@@ -197,7 +197,6 @@ def nb_spatial_msg_term_small_deg(
     nbrs_inv,
     deg_corr,
     degs,
-    e_idx,
     i,
     t,
     dc_lkl,
@@ -344,13 +343,11 @@ def nb_spatial_msg_term_large_deg(
     Returns:
         _type_: _description_
     """
-    # TODO: create edge idx lookup table along w nbrs s.t.
-    # _edge_vals[e_idx[t][i][j],-1]=A[i,j,t]
     beta = block_edge_prob[:, :, t]
     # deg_i = len(nbrs)
     msg = np.zeros((Q,))
     log_field_iter = np.zeros((len(nbrs), Q))
-    # TODO: make logger that tracks this
+    # debug option: make logger that tracks this
     # print("Large deg version used")
     max_log_msg = -1000000.0
     for nbr_idx, j in enumerate(nbrs):
@@ -465,13 +462,11 @@ def nb_update_node_marg(
     Q,
     deg_corr,
     degs,
-    e_idx,
-    i,
-    t,
     _pres_nodes,
     _pres_trans,
     all_nbrs,
     nbrs_inv,
+    e_nbrs_inv,
     n_msgs,
     block_edge_prob,
     trans_prob,
@@ -512,10 +507,10 @@ def nb_update_node_marg(
                         (spatial_msg_term, field_iter,) = nb_spatial_msg_term_small_deg(
                             Q,
                             nbrs,
-                            nbrs_inv,
+                            e_nbrs_inv[t][i],
+                            nbrs_inv[t][i],
                             deg_corr,
                             degs,
-                            e_idx,
                             i,
                             t,
                             dc_lkl,
@@ -583,7 +578,7 @@ def nb_update_node_marg(
                                 )
                             else:
                                 # node present at t but not t-1, use alpha instead
-                                forward_term = _alpha
+                                forward_term = _alpha.copy()
                             tmp *= forward_term
                         # REMOVE CHECK AFTER FIX
                         if np.isnan(forward_term).sum() > 0:
@@ -605,10 +600,9 @@ def nb_update_node_marg(
                                     # too small for stable div, construct
                                     # directly instead
                                     tmp_loc = back_term[q] * forward_term[q]
-                                    alt_nbrs = np.arange(deg_i)
-                                    alt_nbrs = alt_nbrs[alt_nbrs != nbr_idx]
-                                    for k in alt_nbrs:
-                                        tmp_loc *= field_iter[k, q]
+                                    for k in range(deg_i):
+                                        if k != nbr_idx:
+                                            tmp_loc *= field_iter[k, q]
                                     tmp_spatial_msg[nbr_idx, q] = tmp_loc
                         tmp_spat_sums = tmp_spatial_msg.sum(axis=1)
                         for nbr_idx in range(deg_i):
@@ -689,10 +683,10 @@ def nb_update_node_marg(
                         ) = nb_spatial_msg_term_large_deg(
                             Q,
                             nbrs,
+                            e_nbrs_inv,
                             nbrs_inv,
                             deg_corr,
                             degs,
-                            e_idx,
                             i,
                             t,
                             dc_lkl,
@@ -845,14 +839,11 @@ def nb_compute_free_energy(
     Q,
     deg_corr,
     degs,
-    e_idx,
-    i,
-    t,
     _pres_nodes,
     _pres_trans,
     all_nbrs,
     nbrs_inv,
-    n_msgs,
+    e_nbrs_inv,
     block_edge_prob,
     trans_prob,
     dc_lkl,
@@ -870,17 +861,17 @@ def nb_compute_free_energy(
     for i in range(N):
         for t in range(T):
             if _pres_nodes[i, t]:
-                nbrs = nbrs[t][i]
+                nbrs = all_nbrs[t][i]
                 deg_i = len(nbrs)
                 if deg_i > 0:
                     if deg_i < LARGE_DEG_THR:
                         (spatial_msg_term, field_iter,) = nb_spatial_msg_term_small_deg(
                             Q,
                             nbrs,
-                            nbrs_inv,
+                            e_nbrs_inv[t][i],
+                            nbrs_inv[t][i],
                             deg_corr,
                             degs,
-                            e_idx,
                             i,
                             t,
                             dc_lkl,
@@ -914,7 +905,7 @@ def nb_compute_free_energy(
                                 )
                             else:
                                 # node present at t but not t-1, use alpha instead
-                                forward_term = _alpha
+                                forward_term = _alpha.copy()
                             tmp *= forward_term
                         tmp_spatial_msg = np.ones((deg_i, Q))
                         for nbr_idx in range(deg_i):
@@ -927,10 +918,9 @@ def nb_compute_free_energy(
                                     # too small for stable div, construct
                                     # directly instead
                                     tmp_loc = back_term[q] * forward_term[q]
-                                    alt_nbrs = np.arange(deg_i)
-                                    alt_nbrs = alt_nbrs[alt_nbrs != nbr_idx]
-                                    for k in alt_nbrs:
-                                        tmp_loc *= field_iter[k, q]
+                                    for k in range(deg_i):
+                                        if k != nbr_idx:
+                                            tmp_loc *= field_iter[k, q]
                                     tmp_spatial_msg[nbr_idx, q] = tmp_loc
                         tmp_spat_sums = tmp_spatial_msg.sum(axis=1)
                         for nbr_idx in range(deg_i):
@@ -952,10 +942,10 @@ def nb_compute_free_energy(
                         ) = nb_spatial_msg_term_large_deg(
                             Q,
                             nbrs,
+                            e_nbrs_inv,
                             nbrs_inv,
                             deg_corr,
                             degs,
-                            e_idx,
                             i,
                             t,
                             dc_lkl,
@@ -1052,12 +1042,43 @@ def nb_compute_free_energy(
 
 
 @njit(parallel=True, fastmath=USE_FASTMATH)
-def nb_update_twopoint_marginals(verbose):
+def nb_update_twopoint_marginals(
+    N,
+    T,
+    Q,
+    _edge_vals,
+    _pres_trans,
+    nbrs,
+    nbrs_inv,
+    directed,
+    deg_corr,
+    dc_lkl,
+    block_edge_prob,
+    trans_prob,
+    _psi_e,
+    _psi_t,
+    twopoint_e_marg,
+    twopoint_t_marg,
+    verbose,
+):
     # node_marg = None
-    twopoint_e_marg = nb_update_twopoint_spatial_marg()
+    twopoint_e_marg = nb_update_twopoint_spatial_marg(
+        Q,
+        _edge_vals,
+        nbrs,
+        nbrs_inv,
+        directed,
+        deg_corr,
+        dc_lkl,
+        block_edge_prob,
+        _psi_e,
+        twopoint_e_marg,
+    )
     if verbose:
         print("\tUpdated twopoint spatial marg")
-    twopoint_t_marg = nb_update_twopoint_temp_marg()
+    twopoint_t_marg = nb_update_twopoint_temp_marg(
+        N, T, Q, _pres_trans, trans_prob, _psi_t, twopoint_t_marg
+    )
     if verbose:
         print("\tUpdated twopoint temp marg")
     # twopoint_marginals = [twopoint_e_marg, twopoint_t_marg]
@@ -1087,6 +1108,7 @@ def nb_update_twopoint_spatial_marg(
     Q,
     _edge_vals,
     nbrs,
+    nbrs_inv,
     directed,
     deg_corr,
     dc_lkl,
@@ -1100,9 +1122,7 @@ def nb_update_twopoint_spatial_marg(
         i, j, t, a_ijt = int(i), int(j), int(t), float(a_ijt)
         # print(i, j, t)
         j_idx = nbrs[t][i] == j
-        # TODO: create inverse array that holds these values
-        #       in memory rather than calc on the fly each time
-        i_idx = nbrs[t][j] == i
+        i_idx = nbrs_inv[t][i][j_idx]
         # tmp = np.outer(_psi_e[t][i][j_idx, :], _psi_e[t][j][i_idx, :])
         # if not directed:
         #     tmp += np.outer(
@@ -1110,6 +1130,7 @@ def nb_update_twopoint_spatial_marg(
         #     )
         tmp = np.zeros((Q, Q))
         for q in range(Q):
+            # TODO: fix in directed case, where reciprocal edges would mean that this only accounts for single direction
             tmp[q, q] += (_psi_e[t][i][j_idx, q] * _psi_e[t][j][i_idx, q])[0]
             for r in range(q + 1, Q):
                 tmp[q, r] += (_psi_e[t][i][j_idx, q] * _psi_e[t][j][i_idx, r])[0]
@@ -1154,16 +1175,8 @@ def nb_update_twopoint_temp_marg(
                 for q in range(Q):
                     for qprime in range(Q):
                         tmp[q, qprime] += trans_prob[q, qprime] * (
-                            _psi_t[i, t, q, 1]
-                            * _psi_t[i, t, qprime, 0]
-                            # + _psi_t[i, t, qprime, 1] * _psi_t[i, t, q, 0]
+                            _psi_t[i, t, q, 1] * _psi_t[i, t, qprime, 0]
                         )
-                # tmp = np.outer(
-                #     _psi_t[i, t, :, 1], _psi_t[i, t, :, 0]
-                # )
-                # TODO: check this
-                # tmp += np.outer(_psi_t[i, t, :, 0], _psi_t[i, t, :, 1])
-                # tmp *= trans_prob
                 if tmp.sum() > 0:
                     tmp /= tmp.sum()
                 for q in range(Q):

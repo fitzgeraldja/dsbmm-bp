@@ -195,7 +195,7 @@ class EM:
         if self.sparse:
             # TODO: make abstract wrapper with separate dense / sparse impl
             # so can remove redundant code below
-            self.dsbmm = dsbmm_sparse.DSBMMSparse(
+            self.dsbmm = dsbmm_sparse.DSBMMSparseParallel(
                 A=self.A,
                 X=self.X,
                 X_poisson=self.X_poisson,

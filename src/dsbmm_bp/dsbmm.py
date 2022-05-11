@@ -115,8 +115,6 @@ class DSBMMBase:
         # data=None,
         A,
         X,
-        X_poisson,
-        X_ib,
         Z,
         Q,
         deg_corr,
@@ -173,20 +171,6 @@ class DSBMMBase:
                     # of i at time t
                     tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[s])))
                 self.X = tmp
-                self._meta_params = tmp2
-            elif X is None and X_poisson is not None and X_ib is not None:
-                tmp = List()
-                self.X_poisson = X_poisson
-                self.X_ib = X_ib
-                tmp.append(self.X_poisson)
-                tmp.append(self.X_ib)
-                self.meta_dims = np.array(
-                    [X_poisson.shape[-1], X_ib.shape[-1]], dtype=np.int32
-                )
-                self.X = tmp
-                tmp2 = List()
-                tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[0])))
-                tmp2.append(np.zeros((self.Q, self.T, self.meta_dims[1])))
                 self._meta_params = tmp2
             else:
                 self.use_meta = False
@@ -1055,8 +1039,6 @@ class DSBMM:
         # data=None,
         A=None,
         X=None,
-        X_poisson=None,
-        X_ib=None,
         Z=None,
         Q=None,
         deg_corr=False,
@@ -1075,31 +1057,11 @@ class DSBMM:
         self.A = A
         self.tuning_param = tuning_param
         self.jit_model = DSBMMBase(
-            A,
-            X,
-            X_poisson,
-            X_ib,
-            Z,
-            Q,
-            deg_corr,
-            directed,
-            use_meta,
-            meta_types,
-            tuning_param,
-            verbose,
+            A, X, Z, Q, deg_corr, directed, use_meta, meta_types, tuning_param, verbose,
         )
         self.directed = directed
         self.verbose = verbose
         # self.A = A
-        # if X_poisson is not None and X_ib is not None:
-        #     tmp = List()
-        #     self.X_poisson = X_poisson
-        #     self.X_ib = X_ib
-        #     tmp.append(self.X_poisson)
-        #     tmp.append(self.X_ib)
-        #     self.X = tmp
-        # else: # TODO: fix for loading general X
-        #     self.X = X
         # self.Z = Z
         # assert self.A is not None
         # assert self.X is not None
