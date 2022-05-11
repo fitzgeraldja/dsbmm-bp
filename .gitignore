@@ -30,6 +30,9 @@ MANIFEST
 # VSCode artifacts 
 .vscode/
 
+# Jupyter notebooks 
+notebooks/
+
 # Data 
 scopus/
 scopus*

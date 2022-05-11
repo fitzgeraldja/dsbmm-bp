@@ -6,3 +6,4 @@ tol: 1.0e-50 # min val of any array before thresholding for num stab
 large_deg_thr: 20 # threshold for degree above which logs used
 random_online_update_msg: True # update messages sequentially or in random order
 non_informative_init: True # initialise alpha, pi as uniform (True), or according to init part passed (False)
+use_fastmath: True # only require within 4 ULP rather than 1 ULP for vector computations if True - can significantly speed up, but not requires SVML

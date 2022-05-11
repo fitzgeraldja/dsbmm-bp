@@ -353,3 +353,5 @@ if __name__ == "__main__":
         with open(f"../../results/{testset_name}_{link_choice}_Z.pkl", "wb") as f:
             pickle.dump(pred_Z, f)
 
+    # TODO: clean up code and improve documentation, then
+    # run poetry publish
