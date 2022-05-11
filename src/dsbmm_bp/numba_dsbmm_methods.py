@@ -16,6 +16,8 @@ NON_INFORMATIVE_INIT = config[
 ]  # initialise alpha, pi as uniform (True), or according to init part passed (False)
 USE_FASTMATH = config["use_fastmath"]
 
+# TODO: annotate all fns
+
 
 @njit(parallel=True, fastmath=USE_FASTMATH)
 def nb_calc_meta_lkl(
@@ -354,7 +356,7 @@ def nb_update_beta(
     twopoint_edge_marg,
     diff: float,
     verbose: bool,
-):
+) -> tuple[np.ndarray, float]:
     beta_num = np.zeros((Q, Q, T))
     beta_den = np.ones((Q, Q, T))
     if init:
@@ -543,7 +545,7 @@ def nb_update_beta(
 
 
 @njit(parallel=True, fastmath=USE_FASTMATH)
-def nb_update_meta(
+def nb_update_meta_params(
     init,
     learning_rate,
     meta_types,
