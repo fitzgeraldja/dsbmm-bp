@@ -15,7 +15,7 @@ DSBMM-BP
 
 Model dynamic networks with metadata using dynamic SBMs, with parameters inferred through belief propagation.
 
-To implement purely in Python, with relatively high performance and parallelisation through use of Numba_.
+Implemented purely in Python, with relatively high performance and parallelisation through use of Numba_. PyPI package to follow shortly!
 
 .. _Numba: https://numba.pydata.org/
 
