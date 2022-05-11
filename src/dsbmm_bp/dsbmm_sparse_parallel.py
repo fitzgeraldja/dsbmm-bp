@@ -55,7 +55,7 @@ tp_e_marg_ex = List.empty_list(ListType(Array(float64, ndim=3, layout="C")))
 # NB Array(dtype,ndim=k,layout="C") is equiv to dtype[:,...(k - 1 times),::1]
 # if want Fortran layout then place ::1 in first loc rather than last
 tp_e_marg_type = typeof(tp_e_marg_ex)
-nbrs_ex = List.empty_list(ListType(Array(int64, ndim=1, layout="C")))
+nbrs_ex = List.empty_list(ListType(Array(int32, ndim=1, layout="C")))
 nbrs_type = typeof(nbrs_ex)
 
 sparse_A_ex = List()
@@ -91,7 +91,8 @@ class DSBMMSparseParallelBase:
     tuning_param: float64
     degs: float64[:, :, ::1]  # N x T x [in,out]
     kappa: float64[:, :, ::1]  # Q x T x [in,out]
-    deg_entropy: float
+    _n_qt: int64[:, ::1]  # Q x T
+    # deg_entropy: float
     _alpha: float64[::1]  # init group probs
     _pi: Array(float64, ndim=2, layout="C")  # group transition mat
     _lam: float64[:, :, ::1]  # block pois params in DC case
@@ -130,8 +131,8 @@ class DSBMMSparseParallelBase:
         )  # N x T boolean array w i,t True if i present in net at time t
         for t in range(self.T):
             for i in range(self.N):
-                # TODO: fix for directed (only counting out-edges here)
                 self._pres_nodes[self.A[t].row_cs(i), t] = True
+                self._pres_nodes[self.A[t].transpose().row_cs(i), t] = True
         self._tot_N_pres = self._pres_nodes.sum()
         self._pres_trans = (
             self._pres_nodes[:, :-1] * self._pres_nodes[:, 1:]
@@ -144,7 +145,7 @@ class DSBMMSparseParallelBase:
             row_idx = A_t.transpose().colinds.astype(np.float64)
             col_idx = A_t.colinds.astype(np.float64)
             t_vals = np.ones(A_t.nnz) * t
-            vals = A_t.values
+            vals = A_t.values.astype(np.float64)
             tmp = np.vstack((row_idx, col_idx, t_vals, vals)).T
             self._edge_vals[pos : pos + A_t.nnz] = tmp
             pos += A_t.nnz
@@ -192,12 +193,12 @@ class DSBMMSparseParallelBase:
         self.directed = directed
         self.tuning_param = tuning_param
         self.degs = self.compute_degs(self.A)
-        if not NON_INFORMATIVE_INIT:
-            self.kappa = self.compute_group_degs()
-            self._n_qt = self.compute_group_counts()
-        else:
-            self.kappa = np.empty((1, 1, 1))
-            self._n_qt = np.empty((1, 1, 1))
+        # if not NON_INFORMATIVE_INIT: # for some reason can't make these conditional in numba
+        self.kappa = self.compute_group_degs()
+        self._n_qt = self.compute_group_counts()
+        # else:
+        #     self.kappa = np.empty((1, 1, 1), dtype=np.float64)
+        #     self._n_qt = np.empty((1, 1, 1), dtype=np.float64)
         # self.deg_entropy = -(self.degs * np.log(self.degs)).sum()
 
         tmp = List()
@@ -218,7 +219,7 @@ class DSBMMSparseParallelBase:
 
         self.nbrs = tmp
 
-        # # nbrs of i at t (possibly none)
+        # nbrs of i at t (possibly none)
 
         self._alpha = np.zeros(self.Q)
         self._beta = np.zeros((self.Q, self.Q, self.T))
@@ -271,9 +272,9 @@ class DSBMMSparseParallelBase:
     def num_timesteps(self):
         return self.T
 
-    @property
-    def get_deg_entropy(self):
-        return self.deg_entropy
+    # @property
+    # def get_deg_entropy(self):
+    #     return self.deg_entropy
 
     @property
     def num_edges(self):
@@ -336,7 +337,7 @@ class DSBMMSparseParallelBase:
                 in_degs[i, t] = A_T[t].row_vs(i).sum()
                 out_degs[i, t] = A[t].row_vs(i).sum()
 
-        return np.dstack((in_degs, out_degs))
+        return np.dstack((in_degs, out_degs)).astype(float64)
 
     def compute_group_degs(self):
         """Compute group in- and out-degrees for current node memberships
@@ -345,7 +346,7 @@ class DSBMMSparseParallelBase:
         for q in range(self.Q):
             for t in range(self.T):
                 kappa[q, t, :] = self.degs[self.Z[:, t] == q, t, :].sum(axis=0)
-        return kappa
+        return kappa.astype(float64)
 
     def compute_log_likelihood(self):
         """Compute log likelihood of model for given memberships 
@@ -385,6 +386,7 @@ class DSBMMSparseParallelBase:
         )
         if self.verbose:
             print(self._alpha)
+            print("\tUpdated alpha")
         self._pi, self.diff = parmeth.nb_update_pi(
             init,
             learning_rate,
@@ -400,6 +402,7 @@ class DSBMMSparseParallelBase:
         )
         if self.verbose:
             print(self._pi)
+            print("\tUpdated pi")
         if self.deg_corr:
             self._lam, self.diff = parmeth.nb_update_lambda(
                 init,
@@ -420,6 +423,7 @@ class DSBMMSparseParallelBase:
             )
             if self.verbose:
                 print(self._lam)
+                print("\tUpdated lambda")
         else:
             # NB only implemented for binary case
             self._beta, self.diff = parmeth.nb_update_beta(
@@ -440,8 +444,12 @@ class DSBMMSparseParallelBase:
                 self.diff,
                 self.verbose,
             )
+            # NB only implemented for binary case
             if self.verbose:
-                print(self._beta)
+                print(self._beta.transpose(2, 0, 1))
+                print("\tUpdated beta")
+            if not self.directed:
+                assert np.allclose(self._beta.transpose(1, 0, 2), self._beta)
         self._meta_params, self.diff = parmeth.update_meta_params(
             init,
             learning_rate,
@@ -458,7 +466,8 @@ class DSBMMSparseParallelBase:
             self.verbose,
         )
         if self.verbose:
-            print(self._meta_params)
+            # print(self.jit_model._meta_params)
+            print("\tUpdated meta")
         self.meta_lkl = parmeth.nb_calc_meta_lkl(
             self.N,
             self.T,
@@ -545,7 +554,7 @@ class DSBMMSparseParallel:
         self.A = A
         self.tuning_param = tuning_param
         self.jit_model = DSBMMSparseParallelBase(
-            A, X, Z, Q, deg_corr, directed, use_meta, meta_types, tuning_param, verbose,
+            A, X, Z, Q, deg_corr, directed, use_meta, meta_types, tuning_param, verbose
         )
         self.directed = directed
         self.verbose = verbose
@@ -640,37 +649,11 @@ class DSBMMSparseParallel:
         """Given marginals, update parameters suitably
 
         Args:
-            messages (_type_): _description_
+            init (bool, optional): _description_. Defaults to False.
+            learning_rate (float, optional): _description_. Defaults to 0.2.
         """
         # first init of parameters given initial groups if init=True, else use provided marginals
-        # TODO: remove extra prints after fix
-        self.jit_model.update_alpha(init, learning_rate)
-        if self.verbose:
-            print(self.jit_model._alpha)
-            print("\tUpdated alpha")
-        self.jit_model.update_pi(init, learning_rate)
-        if self.verbose:
-            print(self.jit_model._pi)
-            print("\tUpdated pi")
-        if self.jit_model.deg_corr:
-            self.jit_model.update_lambda(init, learning_rate)
-            if self.verbose:
-                print("\tUpdated lambda")
-        else:
-            # NB only implemented for binary case
-            self.jit_model.update_beta(init, learning_rate)
-            if self.verbose:
-                print(self.jit_model._beta.transpose(2, 0, 1))
-                print("\tUpdated beta")
-            if not self.directed:
-                assert np.allclose(
-                    self.jit_model._beta.transpose(1, 0, 2), self.jit_model._beta
-                )
-        self.jit_model.update_meta_params(init, learning_rate)
-        if self.verbose:
-            # print(self.jit_model._meta_params)
-            print("\tUpdated meta")
-        self.jit_model.calc_meta_lkl()
+        self.jit_model.update_params(init, learning_rate)
 
     def set_node_marg(self, values):
         self.jit_model.node_marg = values

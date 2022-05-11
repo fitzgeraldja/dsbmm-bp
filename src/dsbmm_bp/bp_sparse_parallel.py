@@ -104,7 +104,7 @@ class BPSparseParallelBase:
     N: int
     Q: int
     T: int
-    _beta: float  # temperature
+    _boltz_temp: float  # temperature
     deg_corr: bool
     directed: bool
     use_meta: bool
@@ -133,8 +133,9 @@ class BPSparseParallelBase:
     _edge_vals: float64[:, ::1]
     _trans_locs: int64[:, ::1]
     nbrs: nbrs_type
-    e_nbrs: nbrs_type
     nbrs_inv: nbrs_type
+    e_nbrs: nbrs_type
+    e_nbrs_inv: nbrs_type
     n_msgs: int64
     msg_diff: float64
     verbose: bool
@@ -229,7 +230,8 @@ class BPSparseParallelBase:
         for t in range(self.T):
             for i in range(self.N):
                 for j_idx, j in enumerate(self.nbrs[t][i]):
-                    i_idx = np.nonzero(self.nbrs[t][j] == i)[0]
+                    # TODO: fix nbrs_inv for directed nets where i may appear in nbrs twice, if edge is reciprocated
+                    i_idx = np.nonzero(self.nbrs[t][j] == i)[0][0]
                     tmp[t][i][j_idx] = i_idx
         self.nbrs_inv = tmp
 
@@ -253,6 +255,7 @@ class BPSparseParallelBase:
             tmpalt.append(tmp2alt)
 
         for e_idx, (i, j, t, _) in enumerate(self._edge_vals):
+            i, j, t = int(i), int(j), int(t)
             j_idx = np.nonzero(self.nbrs[t][i] == j)[0]
             i_idx = np.nonzero(self.nbrs[t][j] == i)[0]
             tmp[t][i][j_idx] = e_idx

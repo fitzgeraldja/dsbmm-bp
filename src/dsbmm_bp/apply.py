@@ -30,8 +30,9 @@ parser.add_argument(
     help="Specify path to data directory. Default is ./data",
 )
 
-args = parser.parse_args() 
+parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
 
+args = parser.parse_args()
 
 
 if __name__ == "__main__":
@@ -189,7 +190,7 @@ if __name__ == "__main__":
         data["Q"] = 22 if link_choice == "au" else 19 if link_choice == "ref" else None
 
     use_X_init = False
-    verbose = False
+    verbose = args.verbose
     if testset_name != "scopus":
         if testset_name == "og":
             test_aris = [np.zeros((20, T)) for T in test_params["T"]]

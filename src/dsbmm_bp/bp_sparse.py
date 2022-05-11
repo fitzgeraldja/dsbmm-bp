@@ -185,8 +185,8 @@ class BPSparseBase:
         )  # N x T boolean array w i,t True if i present in net at time t
         for t in range(self.T):
             for i in range(self.N):
-                # TODO: fix for directed - only counting out-edges here
                 self._pres_nodes[self.A[t].row_cs(i), t] = True
+                self._pres_nodes[self.A[t].transpose().row_cs(i), t] = True
         self._pres_trans = (
             self._pres_nodes[:, :-1] * self._pres_nodes[:, 1:]
         )  # returns N x T-1 array w i,t true if i

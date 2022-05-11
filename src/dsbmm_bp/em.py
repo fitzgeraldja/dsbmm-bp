@@ -2,6 +2,9 @@ import dsbmm
 import bp
 import dsbmm_sparse
 import bp_sparse
+import dsbmm_sparse_parallel
+import bp_sparse_parallel
+
 
 # from utils import nb_ari_local  # , nb_nmi_local
 from sklearn.metrics import adjusted_rand_score as ari
@@ -85,23 +88,18 @@ class EM:
         self.X = data["X"]
         if type(self.X) == dict:
             try:
-                self.X_poisson = np.ascontiguousarray(
-                    self.X["poisson"].transpose(1, 2, 0)
-                )
-                self.X_ib = np.ascontiguousarray(
+                X_poisson = np.ascontiguousarray(self.X["poisson"].transpose(1, 2, 0))
+                X_ib = np.ascontiguousarray(
                     self.X["indep bernoulli"].transpose(1, 2, 0)
                 )
                 self.X = List()
-                self.X.append(self.X_poisson)
-                self.X.append(self.X_ib)
+                self.X.append(X_poisson)
+                self.X.append(X_ib)
             except:
                 print(self.X)
                 raise ValueError(
                     "X given as dict - expected test run with keys 'poisson' and 'indep bernoulli'"
                 )
-        else:
-            self.X_poisson = None
-            self.X_ib = None
 
         ## Sort init partition
         if init_Z_mode in ["AX", "XA"]:
@@ -148,7 +146,22 @@ class EM:
                 .reshape(-1, 1)
             )
         self.k_means_init_Z = np.tile(kmeans_labels, (1, self.T))
-        self._pres_nodes = (self.A.sum(axis=1) > 0) | (self.A.sum(axis=0) > 0)
+        if not self.sparse:
+            self._pres_nodes = (self.A.sum(axis=1) > 0) | (self.A.sum(axis=0) > 0)
+        else:
+            self._pres_nodes = np.zeros(
+                (self.N, self.T), dtype=bool
+            )  # N x T boolean array w i,t True if i present in net at time t
+        for t in range(self.T):
+            indptrs = self.A[t].indptr
+            idxs = self.A[t].indices
+            indptrsT = self.A[t].transpose().indptr
+            idxsT = self.A[t].transpose().indices
+            for i in range(self.N):
+                val_locs = idxs[indptrs[i] : indptrs[i + 1]]
+                self._pres_nodes[val_locs, t] = True
+                val_locsT = idxsT[indptrsT[i] : indptrsT[i + 1]]
+                self._pres_nodes[val_locsT, t] = True
         self.k_means_init_Z[~self._pres_nodes] = -1
         try:
             assert self.k_means_init_Z.shape == (self.N, self.T)
@@ -193,13 +206,11 @@ class EM:
             if self.verbose:
                 print("No p_in / p_out provided")
         if self.sparse:
-            # TODO: make abstract wrapper with separate dense / sparse impl
+            # TODO: [clean-up] make abstract wrapper with separate dense / sparse impl
             # so can remove redundant code below
-            self.dsbmm = dsbmm_sparse.DSBMMSparseParallel(
+            self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
                 A=self.A,
                 X=self.X,
-                X_poisson=self.X_poisson,
-                X_ib=self.X_ib,
                 Z=self.init_Z.copy(),
                 Q=self.Q,
                 deg_corr=self.deg_corr,
@@ -209,15 +220,13 @@ class EM:
             )  # X=X,
             if self.verbose:
                 print("Successfully instantiated DSBMM...")
-            self.bp = bp_sparse.BPSparse(self.dsbmm)
+            self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
             if self.verbose:
                 print("Successfully instantiated BP system...")
         else:
             self.dsbmm = dsbmm.DSBMM(
                 A=self.A,
                 X=self.X,
-                X_poisson=self.X_poisson,
-                X_ib=self.X_ib,
                 Z=self.init_Z.copy(),
                 Q=self.Q,
                 deg_corr=self.deg_corr,
@@ -274,11 +283,9 @@ class EM:
     def reinit(self, tuning_param=1.0, set_Z=None):
         self.perturb_init_Z()
         if self.sparse:
-            self.dsbmm = dsbmm_sparse.DSBMMSparse(
+            self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
                 A=self.A,
                 X=self.X,
-                X_poisson=self.X_poisson,
-                X_ib=self.X_ib,
                 Z=self.init_Z.copy() if set_Z is None else set_Z,
                 Q=self.Q,
                 deg_corr=self.deg_corr,
@@ -288,15 +295,13 @@ class EM:
             )  # X=X,
             if self.verbose:
                 print("Successfully reinstantiated DSBMM...")
-            self.bp = bp_sparse.BPSparse(self.dsbmm)
+            self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
             if self.verbose:
                 print("Successfully reinstantiated BP system...")
         else:
             self.dsbmm = dsbmm.DSBMM(
                 A=self.A,
                 X=self.X,
-                X_poisson=self.X_poisson,
-                X_ib=self.X_ib,
                 Z=self.init_Z.copy() if set_Z is None else set_Z,
                 Q=self.Q,
                 deg_corr=self.deg_corr,
