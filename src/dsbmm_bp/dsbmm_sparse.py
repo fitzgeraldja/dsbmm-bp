@@ -1,24 +1,26 @@
-from numba import (
-    int32,
-    float32,
-    int64,
-    float64,
-    # unicode_type,
-    typeof,
-)
-from numba.types import unicode_type, ListType, bool_, Array
-from numba.typed import List
+import csr
+import numpy as np
+import yaml
+from numba import float64
+from numba import int32
+from numba import int64
+from numba import typeof
 from numba.experimental import jitclass
+from numba.typed import List
+from numba.types import Array
+from numba.types import bool_
+from numba.types import ListType
+from numba.types import unicode_type
+from utils import nb_ib_lkl
+from utils import nb_poisson_lkl_int
+
+# from numba import float32
+# from scipy import sparse
+
+# from utils import numba_ix
 
 # from numba_dsbmm_methods import * # TODO: implement separately to allow parallelisation + GPU usage
 # from numba_bp_methods import *
-import numpy as np
-
-from utils import numba_ix, nb_poisson_lkl_int, nb_ib_lkl
-
-from scipy import sparse
-import csr
-import yaml
 
 # import utils
 
@@ -59,11 +61,13 @@ meta_types_type = typeof(meta_types_ex)
 meta_params_ex = List.empty_list(typeof(np.empty((1, 1, 1), dtype=np.float64)))
 # meta_params_ex.append(np.empty((1, 1, 1), dtype=np.float64))
 meta_params_type = typeof(meta_params_ex)
-tp_e_marg_ex = List.empty_list(ListType(Array(float64, ndim=3, layout="C")))
+tp_e_marg_ex = List.empty_list(
+    ListType(Array(float64, ndim=3, layout="C"))
+)  # noqa: F821
 # NB Array(dtype,ndim=k,layout="C") is equiv to dtype[:,...(k - 1 times),::1]
 # if want Fortran layout then place ::1 in first loc rather than last
 tp_e_marg_type = typeof(tp_e_marg_ex)
-nbrs_ex = List.empty_list(ListType(Array(int64, ndim=1, layout="C")))
+nbrs_ex = List.empty_list(ListType(Array(int64, ndim=1, layout="C")))  # noqa: F821
 nbrs_type = typeof(nbrs_ex)
 
 sparse_A_ex = List()
@@ -71,6 +75,8 @@ sparse_A_ex.append(csr.create_empty(1, 1))
 sparse_A_type = typeof(sparse_A_ex)
 # this decorator ensures types of each base field, and means all methods are compiled into nopython fns
 # further types are inferred from type annotations
+
+
 @jitclass  # (base_spec)
 class DSBMMSparseBase:
     # A: np.ndarray  # assume N x N x T array s.t. (i,j,t)th position confers information about connection from i to j at time t
@@ -101,9 +107,11 @@ class DSBMMSparseBase:
     kappa: float64[:, :, ::1]  # Q x T x [in,out]
     deg_entropy: float
     _alpha: float64[::1]  # init group probs
-    _pi: Array(float64, ndim=2, layout="C")  # group transition mat
+    _pi: Array(float64, ndim=2, layout="C")  # noqa: F821 # group transition mat
     _lam: float64[:, :, ::1]  # block pois params in DC case
-    _beta: Array(float64, ndim=3, layout="C")  # block edge probs in binary NDC case
+    _beta: Array(
+        float64, ndim=3, layout="C"  # noqa: F821
+    )  # block edge probs in binary NDC case
     # _meta_params: list[np.ndarray]  # params for metadata dists
     _meta_params: meta_params_type
     node_marg: float64[:, :, ::1]
@@ -194,7 +202,7 @@ class DSBMMSparseBase:
                 self.use_meta = False
                 try:
                     assert self.use_meta == use_meta
-                except:
+                except AssertionError:
                     print(
                         "!" * 10,
                         "WARNING: no metadata passed but use_meta=True,",
@@ -230,7 +238,10 @@ class DSBMMSparseBase:
             tmp2 = List()
             for i in range(self.N):
                 tmp2.append(
-                    np.zeros((len(self.nbrs[t][i]), self.Q, self.Q), dtype=np.float64)
+                    np.zeros(
+                        (len(self.nbrs[t][i]), self.Q, self.Q),
+                        dtype=np.float64,
+                    )
                 )
             tmp.append(tmp2)
         self.twopoint_edge_marg = tmp
@@ -339,8 +350,7 @@ class DSBMMSparseBase:
         return np.dstack((in_degs, out_degs))
 
     def compute_group_degs(self):
-        """Compute group in- and out-degrees for current node memberships
-        """
+        """Compute group in- and out-degrees for current node memberships"""
         kappa = np.zeros((self.Q, self.T, 2))
         for q in range(self.Q):
             for t in range(self.T):
@@ -348,12 +358,12 @@ class DSBMMSparseBase:
         return kappa
 
     def compute_log_likelihood(self):
-        """Compute log likelihood of model for given memberships 
+        """Compute log likelihood of model for given memberships
 
             In DC case this corresponds to usual DSBMM with exception of each timelice now has log lkl
-                \sum_{q,r=1}^Q m_{qr} \log\frac{m_{qr}}{\kappa_q^{out}\kappa_r^{in}},
-            (ignoring constants w.r.t. node memberships) 
-            
+                \\sum_{q,r=1}^Q m_{qr} \\log\frac{m_{qr}}{\\kappa_q^{out}\\kappa_r^{in}},
+            (ignoring constants w.r.t. node memberships)
+
         Returns:
             _type_: _description_
         """
@@ -1055,8 +1065,7 @@ class DSBMMSparseBase:
 
 
 class DSBMMSparse:
-    """Pure Python wrapper around DSBMMSparseBase to allow optional/keyword arguments
-    """
+    """Pure Python wrapper around DSBMMSparseBase to allow optional/keyword arguments"""
 
     def __init__(
         self,
@@ -1085,7 +1094,16 @@ class DSBMMSparse:
         self.A = A
         self.tuning_param = tuning_param
         self.jit_model = DSBMMSparseBase(
-            A, X, Z, Q, deg_corr, directed, use_meta, meta_types, tuning_param, verbose,
+            A,
+            X,
+            Z,
+            Q,
+            deg_corr,
+            directed,
+            use_meta,
+            meta_types,
+            tuning_param,
+            verbose,
         )
         self.directed = directed
         self.verbose = verbose
@@ -1187,17 +1205,16 @@ class DSBMMSparse:
         return self.jit_model.compute_degs(A)
 
     def compute_group_degs(self):
-        """Compute group in- and out-degrees for current node memberships
-        """
+        """Compute group in- and out-degrees for current node memberships"""
         return self.jit_model.compute_group_degs()
 
     def compute_log_likelihood(self):
-        """Compute log likelihood of model for given memberships 
+        """Compute log likelihood of model for given memberships
 
             In DC case this corresponds to usual DSBMM with exception of each timelice now has log lkl
-                \sum_{q,r=1}^Q m_{qr} \log\frac{m_{qr}}{\kappa_q^{out}\kappa_r^{in}},
-            (ignoring constants w.r.t. node memberships) 
-            
+                \\sum_{q,r=1}^Q m_{qr} \\log\frac{m_{qr}}{\\kappa_q^{out}\\kappa_r^{in}},
+            (ignoring constants w.r.t. node memberships)
+
         Returns:
             _type_: _description_
         """
@@ -1231,7 +1248,8 @@ class DSBMMSparse:
                 print("\tUpdated beta")
             if not self.directed:
                 assert np.allclose(
-                    self.jit_model._beta.transpose(1, 0, 2), self.jit_model._beta
+                    self.jit_model._beta.transpose(1, 0, 2),
+                    self.jit_model._beta,
                 )
         self.jit_model.update_meta_params(init, learning_rate)
         if self.verbose:
@@ -1252,7 +1270,8 @@ class DSBMMSparse:
         self.jit_model.update_alpha(init)
 
     def update_pi(
-        self, init=False,
+        self,
+        init=False,
     ):
         self.jit_model.update_pi(init)
         # qqprime_trans = np.array(
@@ -1383,4 +1402,3 @@ class DSBMMSparse:
     def set_Z_by_MAP(self):
         self.jit_model.set_Z_by_MAP()
         self.Z = self.jit_model.Z
-

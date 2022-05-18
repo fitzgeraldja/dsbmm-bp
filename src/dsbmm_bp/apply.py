@@ -1,16 +1,14 @@
-import simulation
-import em
-import utils
-
-import numpy as np
-from numba.typed import List
-from scipy import sparse
-
+import argparse
 import pickle
 import time
 from pathlib import Path
 
-import argparse
+import em
+import numpy as np
+import simulation
+import utils
+from numba.typed import List
+from scipy import sparse
 
 parser = argparse.ArgumentParser(description="Apply model to data.")
 
@@ -100,7 +98,8 @@ if __name__ == "__main__":
             if testset_name in ["scaling", "align"]:
                 try:
                     with open(
-                        f"../../results/{testset_name}_{testno}_samples.pkl", "rb"
+                        f"../../results/{testset_name}_{testno}_samples.pkl",
+                        "rb",
                     ) as f:
                         samples = pickle.load(f)
                 except FileNotFoundError:
@@ -116,7 +115,8 @@ if __name__ == "__main__":
                             ]
                         print("...done")
                     with open(
-                        f"../../results/{testset_name}_{testno}_samples.pkl", "wb"
+                        f"../../results/{testset_name}_{testno}_samples.pkl",
+                        "wb",
                     ) as f:
                         pickle.dump(samples, f)
             else:
@@ -250,7 +250,8 @@ if __name__ == "__main__":
                     else:
                         print(
                             np.round_(
-                                model.ari_score(true_Z, pred_Z=model.k_means_init_Z), 3
+                                model.ari_score(true_Z, pred_Z=model.k_means_init_Z),
+                                3,
                             )
                         )
                     ## Fit to given data
@@ -274,7 +275,7 @@ if __name__ == "__main__":
                                     3,
                                 )
                             )
-                    except:
+                    except IndexError:
                         print("BP Z ARI:")
                         test_aris[test_no][samp_no, :] = model.ari_score(true_Z)
                         if not verbose:
@@ -297,7 +298,7 @@ if __name__ == "__main__":
                         print("Pi inferred:", model.bp.trans_prob)
                         try:
                             print("Versus true pi:", params["trans_mat"])
-                        except:
+                        except KeyError:
                             print(
                                 "Versus true pi:",
                                 simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
@@ -316,7 +317,8 @@ if __name__ == "__main__":
                         print(
                             "Pred effective beta:",
                             utils.effective_beta(
-                                model.bp.model.jit_model.A, model.bp.model.jit_model.Z
+                                model.bp.model.jit_model.A,
+                                model.bp.model.jit_model.Z,
                             ).transpose(2, 0, 1),
                         )
                     if samp_no > 0:
@@ -350,7 +352,7 @@ if __name__ == "__main__":
         print("Mean ARIs inferred for each test:")
         try:
             print(test_aris.mean(axis=(1, 2)))
-        except:
+        except AttributeError:
             print(np.array([aris.mean() for aris in test_aris]))
         print("Mean times for each test:")
         print(test_times.mean(axis=1))
@@ -359,7 +361,7 @@ if __name__ == "__main__":
         N = data["A"][0].shape[0]
         n_runs = 5
         test_Z = np.zeros((n_runs, N, T))
-        print("*" * 15, f"Running Scopus data", "*" * 15)
+        print("*" * 15, "Running Scopus data", "*" * 15)
         ## Initialise
         model = em.EM(
             data,

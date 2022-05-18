@@ -9,7 +9,6 @@
 #     for i, t in self._trans_locs:
 #         self.update_temporal_messages(i, t)
 #     print("\tUpdated temporal messages")
-
 # def update_spatial_message(self, i, j, t):
 #     # TODO: remove, just calc messages while calc node marginals, as have all
 #     # necessary info there
@@ -17,7 +16,6 @@
 #     # TODO: make separate large deg version using logs
 #     # backhere - this is problem (cavity term going to zero for large deg)
 #     cavity_term = self.cavity_spatial_message(i, j, t)
-
 #     marg = self.meta_prob(i, t) * np.exp(-1.0 * self._h[:, t]) * cavity_term
 #     # TODO: include h neg update here (remove old h)
 #     try:
@@ -56,7 +54,6 @@
 #     marg /= marg.sum()
 #     self._psi_e[t][i][j_idx] = marg
 #     # TODO: then include h pos update here (add new h)
-
 # def cavity_spatial_message(self, i, j, t):
 #     # sum_r(p_rq^t *
 #     # self._psi_e[t][k][i_idx (=self.nbrs[t][k]==i)][r]
@@ -90,14 +87,11 @@
 #     else:
 #         print("Fault:", i, t)
 #     return msg
-
-
 # def update_temporal_messages(self, i, t):
 #     # know that i present at t and t+1, so want to update forward from t,
 #     # backward from t+1
 #     self.update_backward_temporal_message(i, t)
 #     self.update_forward_temporal_message(i, t)
-
 # def update_forward_temporal_message(self, i, t):
 #     # size N x T - 1 x Q, w itq entry corresponding to temporal message from i at t to
 #     # i at t+1 (i.e. covering t=0 to T-2)
@@ -129,7 +123,6 @@
 #         else:
 #             print("Fault:", i, t)
 #             raise RuntimeError("Problem with adj for given i")
-
 #     except:
 #         # at t=0, no forward message
 #         try:
@@ -140,7 +133,6 @@
 #             print("External:", np.exp(-1.0 * self._h[:, t]))
 #             # print("Spatial:", self.spatial_msg_term(i, t))
 #             raise RuntimeError("Problem with updating forward msg term")
-
 # def update_backward_temporal_message(self, i, t):
 #     # size N x T - 1 x Q, w itq entry corresponding to temporal message from i at t+1
 #     # to i at t (i.e. covering t=0 to T-2 again)
@@ -182,4 +174,3 @@
 #             print("External:", np.exp(-1.0 * self._h[:, t + 1]))
 #             # print("Spatial:", self.spatial_msg_term(i, t + 1))
 #             raise RuntimeError("Problem with updating backward msg term")
-

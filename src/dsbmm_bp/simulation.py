@@ -1,11 +1,15 @@
-from numba import jit, njit, prange
-import numpy as np
-from scipy import sparse
-from scipy.stats import norm, poisson, nbinom, bernoulli
 import pickle
 
-from sklearn.metrics import normalized_mutual_info_score as nmi
+import numpy as np
+from numba import njit
+from scipy.stats import bernoulli
+from scipy.stats import nbinom
+from scipy.stats import norm
+from scipy.stats import poisson
 from sklearn.metrics import adjusted_rand_score as ari
+from sklearn.metrics import normalized_mutual_info_score as nmi
+
+# from scipy import sparse
 
 
 @njit
@@ -77,10 +81,6 @@ def gen_ppm(
     Q = Z.max() + 1
     N = Z.shape[0]
     T = Z.shape[1]
-    sizes = np.array(
-        [[len([i for i in Z[:, t] if i == q]) for q in range(Q)] for t in range(T)]
-    ).T
-    # sizes[q,t] gives size of group q at time t
 
     idxs = [[Z[:, t] == q for q in range(Q)] for t in range(T)]
     # idxs[t][q] gives indexes of group q at time t in 1D array length N
@@ -137,23 +137,27 @@ def gen_ppm(
         # sparse construction - only implemented currently for p_in / p_out formulation
         try:
             assert beta_mat is None
-        except:
+        except AssertionError:
             raise ValueError(
                 "Sparse construction only implemented for p_in / p_out formulation"
             )
-        sparse_blocks = [
-            [
-                [
-                    sparse.random(
-                        sizes[q, t], sizes[r, t], density=p_in if r == q else p_out
-                    )
-                    for r in range(Q)
-                ]
-                for q in range(Q)
-            ]
-            for t in range(T)
-        ]
-        A = [sparse.to_csr(A_t) for A_t in A]
+        # sizes = np.array(
+        #     [[len([i for i in Z[:, t] if i == q]) for q in range(Q)] for t in range(T)]
+        # ).T
+        # sizes[q,t] gives size of group q at time t
+        # sparse_blocks = [
+        #     [
+        #         [
+        #             sparse.random(
+        #                 sizes[q, t], sizes[r, t], density=p_in if r == q else p_out,
+        #             )
+        #             for r in range(Q)
+        #         ]
+        #         for q in range(Q)
+        #     ]
+        #     for t in range(T)
+        # ]
+        # A = [sparse.to_csr(A_t) for A_t in A]
         # TODO: finish (above will likely need to be tweaked - possibly want to draw nnzs for each block pair (from binomial) and/or directly
         # sample edge pairs according to idxs followed by sparse construction according to COO format)
 
@@ -193,17 +197,17 @@ def evolve_Z(Z_1, trans_prob, T):
 
 def ari_meta_aligned(Z, target_ari, mask_prop=0.01, max_trials=100):
     """
-    Generate new series of partitions, where at each timestep (so locally), the 
-    ARI between the new partition and the old partition is roughly equal to the 
-    target ARI. 
+    Generate new series of partitions, where at each timestep (so locally), the
+    ARI between the new partition and the old partition is roughly equal to the
+    target ARI.
 
     Args:
         Z (_type_): Base (temporal) partition, shape N x T
         target_ari (float): target ARI
-        mask_prop (float, optional): Proportion of partition at each timestep to mask each loop - smaller 
-                                     gives finer control (so closer to target ARI), but is slower. 
+        mask_prop (float, optional): Proportion of partition at each timestep to mask each loop - smaller
+                                     gives finer control (so closer to target ARI), but is slower.
                                      Defaults to 0.01.
-        max_trials (int, optional): maximum number of trials to get roughly correct 
+        max_trials (int, optional): maximum number of trials to get roughly correct
     """
     Zalt = Z.copy()
     for t in range(Z.shape[1]):
@@ -220,15 +224,15 @@ def ari_meta_aligned(Z, target_ari, mask_prop=0.01, max_trials=100):
 
 def nmi_meta_aligned(Z, target_nmi, mask_prop=0.01, max_trials=1000):
     """
-    Generate new series of partitions, where at each timestep (so locally), the 
-    NMI between the new partition and the old partition is roughly equal to the 
-    target NMI. 
+    Generate new series of partitions, where at each timestep (so locally), the
+    NMI between the new partition and the old partition is roughly equal to the
+    target NMI.
 
     Args:
         Z (_type_): Base (temporal) partition, shape N x T
         target_nmi (float): target NMI
-        mask_prop (float, optional): Proportion of partition at each timestep to mask each loop - smaller 
-                                     gives finer control (so closer to target NMI), but is slower. 
+        mask_prop (float, optional): Proportion of partition at each timestep to mask each loop - smaller
+                                     gives finer control (so closer to target NMI), but is slower.
                                      Defaults to 0.01.
         max_trials (int, optional): maximum number of trials to get roughly correct
     """
@@ -283,7 +287,7 @@ def sample_dynsbm_A(
     Returns:
         _type_: _description_
     """
-    N = len(Z_1)
+    # N = len(Z_1)
 
     # generate Z
     Z = evolve_Z(Z_1, trans_prob, T)
@@ -319,7 +323,8 @@ def sample_dynsbm_A(
             for q in range(Q):
                 for r in range(Q):
                     pois_tmp = poisson.rvs(
-                        ZTP_params[t, q, r], size=(idxs[t][q].sum(), idxs[t][r].sum())
+                        ZTP_params[t, q, r],
+                        size=(idxs[t][q].sum(), idxs[t][r].sum()),
                     )
                     pois_zeros = pois_tmp == 0
                     # ensure all values >0
@@ -346,7 +351,13 @@ def sample_dynsbm_meta(
     beta_mat=None,
     ZTP_params=None,
     self_loops=False,
-    meta_types=["normal", "poisson", "nbinom", "indep bernoulli", "categorical"],
+    meta_types=[
+        "normal",
+        "poisson",
+        "nbinom",
+        "indep bernoulli",
+        "categorical",
+    ],
     meta_dims=None,
     meta_params=None,
     meta_part=None,
@@ -368,7 +379,7 @@ def sample_dynsbm_meta(
         meta_types (list, optional): _description_. Defaults to ["normal", "poisson", "nbinom", "indep bernoulli", "categorical"].
         meta_dims (_type_, optional): _description_. Defaults to None.
         meta_params (_type_, optional): _description_. Defaults to None.
-        meta_part (np.array or float, optional): either specified partition for metadata, or float defining score of alignment. 
+        meta_part (np.array or float, optional): either specified partition for metadata, or float defining score of alignment.
                                                  Defaults to None.
     """
     A, Z = sample_dynsbm_A(
@@ -446,7 +457,9 @@ def sample_dynsbm_meta(
             X = [
                 [
                     nbinom.rvs(
-                        params[0, q, t], params[1, q, t], size=(meta_sizes[q, t],)
+                        params[0, q, t],
+                        params[1, q, t],
+                        size=(meta_sizes[q, t],),
                     )
                     for q in range(Q)
                 ]
@@ -527,9 +540,9 @@ def gen_test_data(
     save=False,
     export_dir=".",
 ):
-    """Generate test data given params (multiple runs, 
+    """Generate test data given params (multiple runs,
     optionally saved)
-    
+
     Args:
         test_no (_type_): _description_
         n_samps (int, optional): _description_. Defaults to 20.
@@ -541,7 +554,7 @@ def gen_test_data(
         beta_mat (_type_, optional): _description_. Defaults to None.
         T (int, optional): _description_. Defaults to 5.
         p_stay (_type_, optional): _description_. Defaults to None.
-        trans_mat (_type_, optional): _description_. Defaults to None. 
+        trans_mat (_type_, optional): _description_. Defaults to None.
         directed (bool, optional): _description_. Defaults to False.
         meta_types (list, optional): _description_. Defaults to ["poisson", "indep bernoulli"].
         L (int, optional): _description_. Defaults to 4.
@@ -550,15 +563,15 @@ def gen_test_data(
         base_bern_params (_type_, optional): _description_. Defaults to None.
         indep_bern_params (_type_, optional): _description_. Defaults to None.
         sample_meta_params (bool,optional): _description_. Defaults to False.
-        meta_aligned (bool or float, optional): Whether metadata is perfectly aligned or not (bool), 
-                                                or rough ARI between net and meta partition at each 
+        meta_aligned (bool or float, optional): Whether metadata is perfectly aligned or not (bool),
+                                                or rough ARI between net and meta partition at each
                                                 step. Defaults to True.
         save (bool, optional): _description_. Defaults to False.
         export_dir (str, optional): _description_. Defaults to ".".
 
     Returns:
         _type_: _description_
-        
+
     Example for test 7 - misaligned metadata for relatively difficult test (poor group stability)
     gen_test_data(
         7,
@@ -586,7 +599,8 @@ def gen_test_data(
                 np.ones((L, 1, T))
             )  # +np.random.normal(loc=0,scale=0.1))
         indep_bern_params = np.concatenate(
-            [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q)], axis=1
+            [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q)],
+            axis=1,
         )
     if sample_meta_params:
         # TODO: allow generalisation of params to sample around
@@ -636,12 +650,12 @@ def gen_test_data(
         for q in range(1, Q):
             Z_1[cum_size[q - 1] : cum_size[q]] = q
 
-        if meta_aligned == True:
+        if meta_aligned is True:
             meta_part = None
         else:
             if meta_Q is None:
                 meta_Q = Q
-            if meta_aligned == False:
+            if meta_aligned is False:
                 meta_part = evolve_Z(
                     np.random.randint(0, high=meta_Q, size=(N,)),
                     gen_trans_mat(p_stay, meta_Q),
@@ -649,6 +663,7 @@ def gen_test_data(
                 )  # TODO: allow to pass more general transitions for metadata
                 # meta_parts.append(meta_part)
             else:
+                # have explicitly passed degree of alignment as float
                 meta_part = meta_aligned
 
         if not sample_meta_params:
@@ -751,7 +766,8 @@ pois_params = [
 base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
 indep_bern_params = [
     np.concatenate(
-        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)], axis=1
+        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
+        axis=1,
     )
     for Q_i in Q
 ]
@@ -812,6 +828,7 @@ for bn, beta_mat in enumerate(beta_mats):
             og_test_params["trans_mat"].append(trans_mat)
             og_test_params["beta_mat"].append(beta_mat)
 
+
 # scaling tests
 def calc_det_limit(p_stay, c_in, c_out, Q, tol=1e-1):
     c = (c_in + (Q - 1) * c_out) / Q
@@ -823,11 +840,12 @@ def calc_det_limit(p_stay, c_in, c_out, Q, tol=1e-1):
             "Warning: Q for scaling test given params is close to theoretical det. limit (in no meta case)"
         )
         print(f"For test idxs {np.where(bdd_up - tol < bdd_down)[0]}")
+    # note that GCC exists in undirected graph iff E[k^2] - 2E[k] > 0, so this is also important
 
 
 scaling_test_params = {}
 n_tests = 20
-n_samps = 5
+n_samps = 3
 scaling_test_params["n_samps"] = n_samps
 test_no = np.arange(400, 400 + n_tests)
 scaling_test_params["test_no"] = test_no
@@ -835,10 +853,10 @@ N = np.floor(np.exp(np.linspace(5, 8, n_tests))).astype(int)
 scaling_test_params["N"] = N
 Q = np.floor(np.log(N)).astype(int)
 scaling_test_params["Q"] = Q
-c_in = 10
+c_in = 20
 p_in = [c_in / ni for ni in N]
 scaling_test_params["p_in"] = p_in
-c_out = 2
+c_out = 5
 p_out = [c_out / ni for ni in N]
 scaling_test_params["p_out"] = p_out
 p_stay = 0.8 * np.ones_like(N)
@@ -863,7 +881,8 @@ pois_params = [
 base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
 indep_bern_params = [
     np.concatenate(
-        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)], axis=1
+        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
+        axis=1,
     )
     for Q_i in Q
 ]
@@ -910,7 +929,8 @@ pois_params = [
 base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
 indep_bern_params = [
     np.concatenate(
-        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)], axis=1
+        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
+        axis=1,
     )
     for Q_i in Q
 ]

@@ -1,20 +1,21 @@
-import dsbmm
-import bp
-import dsbmm_sparse
-import bp_sparse
-import dsbmm_sparse_parallel
-import bp_sparse_parallel
-
-
-# from utils import nb_ari_local  # , nb_nmi_local
-from sklearn.metrics import adjusted_rand_score as ari
-import numpy as np
-from scipy import sparse
-from numba.typed import List
-from sklearn.cluster import MiniBatchKMeans, KMeans
+import faulthandler
 import time
 
-import faulthandler
+import bp
+import bp_sparse_parallel
+import dsbmm
+import dsbmm_sparse_parallel
+import numpy as np
+from numba.typed import List
+from scipy import sparse
+from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.metrics import adjusted_rand_score as ari
+
+# import bp_sparse
+# import dsbmm_sparse
+
+# from utils import nb_ari_local  # , nb_nmi_local
 
 faulthandler.enable()
 
@@ -22,9 +23,7 @@ import matplotlib.pyplot as plt
 
 # plt.ion()
 
-import pickle
 import yaml  # for reading config file
-from pathlib import Path
 
 with open("config.yaml") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
@@ -60,7 +59,7 @@ class EM:
         self.run_idx = 0
         try:
             self.Q = data["Q"]
-        except:
+        except KeyError:
             raise ValueError("Must specify Q in data")
         self.sparse = sparse_adj
         try:
@@ -70,7 +69,7 @@ class EM:
                 # TODO: fix properly - currently just force symmetrising and binarising
                 self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
 
-        except:
+        except AssertionError:
             # symmetrise for this test case
             print(
                 "WARNING: provided non-symmetric adjacency,",
@@ -95,9 +94,9 @@ class EM:
                 self.X = List()
                 self.X.append(X_poisson)
                 self.X.append(X_ib)
-            except:
+            except KeyError:
                 print(self.X)
-                raise ValueError(
+                raise KeyError(
                     "X given as dict - expected test run with keys 'poisson' and 'indep bernoulli'"
                 )
 
@@ -121,7 +120,7 @@ class EM:
                     )  # done for fixing labels over time
                 else:
                     kmeans_mat = sparse.hstack(self.A)
-            except:
+            except ValueError:
                 print("A:", self.A.shape, "T:", self.T)
                 raise ValueError("Problem with A passed")
         if self.N > 1e5:
@@ -165,7 +164,7 @@ class EM:
         self.k_means_init_Z[~self._pres_nodes] = -1
         try:
             assert self.k_means_init_Z.shape == (self.N, self.T)
-        except:
+        except AssertionError:
             print(self.k_means_init_Z.shape)
             print((self.N, self.T))
             raise ValueError("Wrong partition shape")
@@ -176,7 +175,7 @@ class EM:
             for mt in data["meta_types"]:
                 self.meta_types.append(mt)
             assert len(self.meta_types) == len(self.X)
-        except:
+        except AssertionError:
             raise ValueError("Must specify types of all metadata")
         try:
             # known params for sim data
@@ -202,7 +201,7 @@ class EM:
                 )
                 print(f"\twith variance {deg_var:.2f}")
 
-        except:
+        except AttributeError:
             if self.verbose:
                 print("No p_in / p_out provided")
         if self.sparse:
@@ -273,7 +272,9 @@ class EM:
         mask = np.random.rand(*self.k_means_init_Z.shape) < pert_prop
         init_Z = self.k_means_init_Z.copy()
         init_Z[mask] += np.random.randint(
-            -self.Q // 2, self.Q // 2 + 1, size=(self.N, self.T),
+            -self.Q // 2,
+            self.Q // 2 + 1,
+            size=(self.N, self.T),
         )[mask]
         init_Z[init_Z < 0] = 0
         init_Z[init_Z > self.Q - 1] = self.Q - 1
@@ -352,7 +353,11 @@ class EM:
     ):
         self.true_Z = true_Z
         if self.verbose:
-            print("#" * 15, f"Using tuning_param {self.tuning_params[0]}", "#" * 15)
+            print(
+                "#" * 15,
+                f"Using tuning_param {self.tuning_params[0]}",
+                "#" * 15,
+            )
         while self.run_idx < self.n_runs - 1:
             if self.verbose:
                 print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
@@ -366,26 +371,38 @@ class EM:
         if len(self.tuning_params) > 1:
             for tuning_param in self.tuning_params[1:]:
                 if self.verbose:
-                    print("#" * 15, f"Using tuning_param {tuning_param}", "#" * 15)
+                    print(
+                        "#" * 15,
+                        f"Using tuning_param {tuning_param}",
+                        "#" * 15,
+                    )
                     time.sleep(1)
                 self.run_idx = 0
                 self.reinit(tuning_param=tuning_param)
                 while self.run_idx < self.n_runs - 1:
                     self.do_run(
-                        max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+                        max_iter,
+                        max_msg_iter,
+                        conv_tol,
+                        msg_conv_tol,
+                        learning_rate,
                     )
                     self.bp.model.set_Z_by_MAP()
                     self.reinit(tuning_param=tuning_param)
                 # final random init run
                 self.do_run(
-                    max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+                    max_iter,
+                    max_msg_iter,
+                    conv_tol,
+                    msg_conv_tol,
+                    learning_rate,
                 )
         # now reinit with best part found from these runs
         if self.best_Z is None:
             self.best_Z = self.bp.model.Z
         try:
             self.reinit(tuning_param=self.best_tun_param, set_Z=self.best_Z)
-        except:
+        except AttributeError:
             # no tuning param used
             self.reinit(set_Z=self.best_Z)
         self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
@@ -470,7 +487,7 @@ class EM:
                 if self.verbose:
                     print("ARIs:", np.round_(aris, 2))
                 return aris
-            except:
+            except AttributeError:
                 print(
                     "Can't provide ARI score - make sure have both",
                     "provided ground truth \nwhen initialising model,",
@@ -501,4 +518,3 @@ class EM:
     # print("NMIs: ", nb_nmi_local(bp_ex.model.Z, Z))
 
     # print("Overlaps:", (bp_ex.model.Z == Z).sum(axis=0) / Z.shape[0])
-

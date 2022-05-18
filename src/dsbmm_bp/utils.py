@@ -1,6 +1,7 @@
-from numba import njit, prange
-from numba.typed import List
 import numpy as np
+from numba import njit
+from numba import prange
+from numba.typed import List
 
 
 @njit(cache=True)
@@ -11,7 +12,7 @@ def numba_ix(arr, rows, cols):
     :param rows: Row indices
     :param cols: Column indices
     :return: 2D array with the given rows and columns of the input array
-    
+
     From https://github.com/numba/numba/issues/5894
     """
     one_d_index = np.zeros(len(rows) * len(cols), dtype=np.int32)
@@ -190,10 +191,10 @@ def nb_contingency_matrix(labels_true, labels_pred):
 
 
 @njit
-def nb_mi(labels_true, labels_pred):
+def nb_mi(labels_true, labels_pred, contingency=None):
     # TODO: fix
     """Calculate mutual information between two integer vectors
-    Modified from sklearn impl 
+    Modified from sklearn impl
 
     Args:
         labels_true (_type_): _description_
@@ -297,7 +298,7 @@ def nb_nmi(labels_true, labels_pred):
 
 @njit
 def nb_nmi_local(labels_true, labels_pred):
-    """Assume given temporal partitions in shape N x T 
+    """Assume given temporal partitions in shape N x T
 
     Args:
         pred (_type_): _description_
@@ -321,12 +322,12 @@ def nb_pair_confusion_mat(labels_true, labels_pred):
     contingency = nb_contingency_matrix(labels_true, labels_pred)
     n_c = np.ravel(contingency.sum(axis=1))
     n_k = np.ravel(contingency.sum(axis=0))
-    sum_squares = (contingency ** 2).sum()
+    sum_squares = (contingency**2).sum()
     C = np.empty((2, 2), dtype=np.int64)
     C[1, 1] = sum_squares - n_samples
     C[0, 1] = contingency.dot(n_k).sum() - sum_squares
     C[1, 0] = contingency.transpose().dot(n_c).sum() - sum_squares
-    C[0, 0] = n_samples ** 2 - C[0, 1] - C[1, 0] - sum_squares
+    C[0, 0] = n_samples**2 - C[0, 1] - C[1, 0] - sum_squares
     return C
 
 
@@ -405,7 +406,7 @@ def calc_trans_present(present):
     counted in transitions
 
     Args:
-        present (_type_): N x T boolean for presence of node i at time t 
+        present (_type_): N x T boolean for presence of node i at time t
     """
     return present[:, :-1] & present[:, 1:]
 

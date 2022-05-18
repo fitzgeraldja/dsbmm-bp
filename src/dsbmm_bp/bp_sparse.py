@@ -11,17 +11,13 @@
 # contains the position of i in the row corresponding to the node in that place in the original
 # lookup mat - e.g. if orig[i*t,0] = j_idx s.t. edgelist[j_idx] = i, j, t, val, then want
 # inv[i*t,0] = i_idx_for_j s.t. edgelist[i_idx_for_j] = j, i, t, val
-
 # However, can also just take advantage of existing CSR implementations, along with again first
 # identifying the index of i in row of j for faster lookup
-
 # Actually the original implementation was already memory efficient for edge parameters - key
 # change is just storage of A, and handling all uses of this within (should be doable)
-
 # NB CSR implementation used only allows consideration of matrices w up to 2^31 ~ 2 B
 # nonzero entries - this should be sufficient for most problems considered, and would likely
 # already suggest batching (currently unimplemented)
-
 # ADVANTAGES OF CSR:
 # - Efficient arithmetic operations between matrices (addition / multiplication etc)
 # - Efficient row slicing
@@ -31,7 +27,6 @@
 # - Changes to sparsity structure are expensive (suitable alts like LIL or DOK currently
 #   unavailable in suitable numba form I believe) - this is not a concern herein as all
 #   sparse matrices (i.e. just A) are left unchanged throughout the process
-
 # Assumption is that only N is large, so N^2 terms dominate - not using sparse formulations
 # for other params - possible problems could particularly emerge from next largest
 # variables:
@@ -43,45 +38,45 @@
 #   (assumption is that Q ~ log(N) which holds in general for most real data)
 # No immediately obvious way of sparsifying these, with the exception of X for categorical data
 # with many categories (currently one-hot encoded (OHE)) - plan to deal with in future
-
-
 # TODO: Allow X to be ordinal categorical encoding rather than OHE for memory efficiency,
 # TODO: think about how could allow batching.
-
-from numba import (
-    int32,
-    float32,
-    int64,
-    float64,
-    bool_,
-    # unicode_type,
-    typeof,
-)
-from numba.types import unicode_type, ListType, bool_, Array
-from numba.typed import List
-from numba.experimental import jitclass
 import csr
+import numpy as np
 import yaml
+from dsbmm_sparse import DSBMMSparse
+from dsbmm_sparse import DSBMMSparseBase
+from numba import bool_
+from numba import float64
+from numba import int32
+from numba import int64
+from numba import typeof
+from numba.experimental import jitclass
+from numba.typed import List
+from numba.types import Array
+from numba.types import ListType
+
+# from numba import float32
+
+# from numba.types import unicode_type
+# from utils import numba_ix
 
 # from numba_dsbmm_methods import *
 # from numba_bp_methods import *
-import numpy as np
-from utils import numba_ix
-
-from dsbmm_sparse import DSBMMSparse, DSBMMSparseBase
 
 X_ex = List.empty_list(float64[:, :, ::1])
 X_type = typeof(X_ex)
 sparse_A_ex = List()
 sparse_A_ex.append(csr.create_empty(1, 1))
 sparse_A_type = typeof(sparse_A_ex)
-psi_e_ex = List.empty_list(ListType(Array(float64, ndim=2, layout="C")))
+psi_e_ex = List.empty_list(ListType(Array(float64, ndim=2, layout="C")))  # noqa: F821
 psi_e_type = typeof(psi_e_ex)
 # psi_t_ex = List.empty_list(ListType(float64[:, :])) # unnecessary for same reasons as below
 # psi_t_type = typeof(psi_t_ex)
-nbrs_ex = List.empty_list(ListType(Array(int32, ndim=1, layout="C")))
+nbrs_ex = List.empty_list(ListType(Array(int32, ndim=1, layout="C")))  # noqa: F821
 nbrs_type = typeof(nbrs_ex)
-twopoint_e_ex = List.empty_list(ListType(Array(float64, ndim=3, layout="C")))
+twopoint_e_ex = List.empty_list(
+    ListType(Array(float64, ndim=3, layout="C"))
+)  # noqa: F821
 # TODO: replace as array type of size (Q^2 sum_t E_t), along w lookup table for idx of i,j,t as this should be sufficient
 # given implementation below - would this actually result in speedup over lru cache implementation?
 # twopoint_t_ex = List.empty_list(ListType(float64[:,:])) # unnecessary for t marg, as memory size O(NTQ^2) at most O(Q^2\sum_t E_t) size of constrained formulation
@@ -117,18 +112,20 @@ class BPSparseBase:
     # n_qt: float64[:, :]  # prior prob
     _psi_e: psi_e_type  # spatial messages
     _psi_t: Array(
-        float64, ndim=4, layout="C"
+        float64, ndim=4, layout="C"  # noqa: F821
     )  # temporal messages, assume (i,t,q,q',2) for t in 0 to T-2, where first loc of final dim is backward messages from t+1 to t
     # and second loc is forward messages from t to t+1
     _h: float64[:, ::1]  # external field for each group, with shape (Q,T)
     node_marg: Array(
-        float64, ndim=3, layout="C"
+        float64, ndim=3, layout="C"  # noqa: F821
     )  # marginal group probabilities for each node
     # - NB this also referred to as nu, eta or
     # other terms elsewhere
     # twopoint_e_marg: float64[:, :, :, :, :]
     twopoint_e_marg: twopoint_e_type  # [t][i][len(nbrs[t][i]),Q,Q]
-    twopoint_t_marg: Array(float64, ndim=4, layout="C")  # N x T - 1 X Q x Q
+    twopoint_t_marg: Array(
+        float64, ndim=4, layout="C"  # noqa: F821
+    )  # N x T - 1 X Q x Q
     _pres_nodes: bool_[:, ::1]
     _pres_trans: bool_[:, ::1]
     _edge_vals: float64[:, ::1]
@@ -366,7 +363,7 @@ class BPSparseBase:
             for q in range(self.Q):
                 if out[q] < TOL:
                     out[q] = TOL
-        except:
+        except IndexError:
             # must have t=0 so t-1 outside of range, no forward message, but do have alpha instead - stopped now as need for backward term
             assert t == 0
             # out = self.model._alpha
@@ -374,8 +371,8 @@ class BPSparseBase:
 
     def backward_temp_msg_term(self, i, t):
         """Backwards temporal message term for marginal of i at t, coming from i at t + 1
-        Much as for spatial messages, by definition 
-            \psi^{i(t)\to i(t+1)} \propto \psi^{it} / \psi^{i(t+1)\to i(t)} 
+        Much as for spatial messages, by definition
+            \\psi^{i(t)\to i(t+1)} \\propto \\psi^{it} / \\psi^{i(t+1)\to i(t)}
         so we can use this term to update forward temporal messages to t + 1 if t < T
 
         Args:
@@ -409,7 +406,7 @@ class BPSparseBase:
             #     print("psi_t shape:", self._psi_t.shape)
             #     print("backward out:", out)
             #     raise RuntimeError("Problem with backward msg term")
-        except:
+        except IndexError:
             # t=T outside of range, so no backward message
             assert t == self.T - 1
             out = np.ones((self.Q,))
@@ -417,24 +414,24 @@ class BPSparseBase:
 
     def spatial_msg_term_small_deg(self, i, t, nbrs):
         """For node i with degree smaller than threshold within timestep t, and
-        neighbours nbrs, calculate the spatial message term for the marginal distribution of i, 
-        updating spatial messages \psi^{i\to j}(t) and external field h(t) in the process.
-        
-        Updating together rational as by definition, 
-            \psi^{i\to j}(t) \propto \psi^{it}/\psi^{j\to i}(t),
-        hence we can 
-            (i) Calculate all terms involved in unnormalised node marginal / node messages 
-            (ii) Calculate product of these (for unnorm marginals), divide by term involving j 
-                 for \psi^{i\to j}(t) for unnorm messages
-            (iii) Calculate normalisation for node marginals, update marginals 
-            (iv) Calculate normalisation for node messages, update messages 
-            
-        As there are \Oh(Q d_i) terms only involved for each q (so \Oh(Q^2 d_i) total),
-        for sparse networks where the average degree d ~ \Oh(1), updating all messages 
-        and marginals together is an \Oh(Q^2 N T d) process. As typically Q ~ log(N), 
-        this means approximate complexity of \Oh(2 N T d log(N)), so roughly linear in the 
+        neighbours nbrs, calculate the spatial message term for the marginal distribution of i,
+        updating spatial messages \\psi^{i\to j}(t) and external field h(t) in the process.
+
+        Updating together rational as by definition,
+            \\psi^{i\to j}(t) \\propto \\psi^{it}/\\psi^{j\to i}(t),
+        hence we can
+            (i) Calculate all terms involved in unnormalised node marginal / node messages
+            (ii) Calculate product of these (for unnorm marginals), divide by term involving j
+                 for \\psi^{i\to j}(t) for unnorm messages
+            (iii) Calculate normalisation for node marginals, update marginals
+            (iv) Calculate normalisation for node messages, update messages
+
+        As there are \\Oh(Q d_i) terms only involved for each q (so \\Oh(Q^2 d_i) total),
+        for sparse networks where the average degree d ~ \\Oh(1), updating all messages
+        and marginals together is an \\Oh(Q^2 N T d) process. As typically Q ~ log(N),
+        this means approximate complexity of \\Oh(2 N T d log(N)), so roughly linear in the
         number of nodes - a significant improvement to quadratic complexity of mean-field VI!
-            
+
         Args:
             i (_type_): node to update
             t (_type_): timestep
@@ -445,7 +442,7 @@ class BPSparseBase:
 
         Returns:
             msg (_type_): spatial message term of total node marginal for i at t
-            field_iter (_type_): len(nbrs) x Q array containing value of term corresponding to  
+            field_iter (_type_): len(nbrs) x Q array containing value of term corresponding to
                                  each nbr so can update corresponding message
         """
         beta = self.block_edge_prob[:, :, t]
@@ -486,7 +483,12 @@ class BPSparseBase:
                     for r in range(self.Q):
                         tmp[q] += (
                             self.model.compute_DC_lkl(
-                                i, j, t, r, q, self.A[t].row_vs(i)[nbr_idx],
+                                i,
+                                j,
+                                t,
+                                r,
+                                q,
+                                self.A[t].row_vs(i)[nbr_idx],
                             )
                             * jtoi_msgs[r]
                         )
@@ -542,8 +544,8 @@ class BPSparseBase:
         return msg, field_iter
 
     def spatial_msg_term_large_deg(self, i, t, nbrs):
-        """Same as spatial_msg_term_small_deg but for node i that has degree within timestep t 
-        larger than specified threshold - basically just handle logs + subtract max value 
+        """Same as spatial_msg_term_small_deg but for node i that has degree within timestep t
+        larger than specified threshold - basically just handle logs + subtract max value
         before exponentiating and normalising instead for numerical stability
 
         Args:
@@ -634,10 +636,14 @@ class BPSparseBase:
     def collect_messages(self):
         pass
 
-    def store_messages(self,):
+    def store_messages(
+        self,
+    ):
         pass
 
-    def learning_step(self,):
+    def learning_step(
+        self,
+    ):
         # this should fix normalisation of expected marginals so sum to one - might not due to learning rate. Unsure if necessary
         pass
 
@@ -781,9 +787,9 @@ class BPSparseBase:
                                 max_log_spatial_msg_term,
                                 log_field_iter,
                             ) = self.spatial_msg_term_large_deg(i, t, nbrs)
+                            tmp = spatial_msg_term
                             if t == 0:
                                 tmp += np.log(self.model._alpha)
-                            tmp = spatial_msg_term
                             back_term = np.zeros(self.Q)
                             if t < self.T - 1:
                                 if self._pres_trans[i, t]:
@@ -874,13 +880,13 @@ class BPSparseBase:
         pass
 
     def update_node_marg(self):
-        """Update all node marginals (in random order), simultaneously updating messages and 
+        """Update all node marginals (in random order), simultaneously updating messages and
         external fields h(t) - process is as follows:
-            (i) Determine whether large or small degree version of spatial message updates 
-                should be used 
+            (i) Determine whether large or small degree version of spatial message updates
+                should be used
             (ii) Subtract old marginals for i from external field h(t)
-            (iii) Update spatial messages while calculating spatial term  
-            (iv) Update forwards temporal messages from i at t while calculating backward temp 
+            (iii) Update spatial messages while calculating spatial term
+            (iv) Update forwards temporal messages from i at t while calculating backward temp
                  term from i at t + 1
             (v) Update backwards temporal messages from i at t while calculating forward temp term
                 from i at t - 1
@@ -1058,9 +1064,9 @@ class BPSparseBase:
                                 log_field_iter,
                             ) = self.spatial_msg_term_large_deg(i, t, nbrs)
                             self.update_h(i, t, -1.0)
+                            tmp = spatial_msg_term
                             if t == 0:
                                 tmp += np.log(self.model._alpha)
-                            tmp = spatial_msg_term
                             back_term = np.zeros(self.Q)
                             if t < self.T - 1:
                                 if self._pres_trans[i, t]:
@@ -1292,8 +1298,7 @@ class BPSparseBase:
 
 
 class BPSparse:
-    """Pure Python wrapper of BPBase class to allow optional/keyword arguments
-    """
+    """Pure Python wrapper of BPBase class to allow optional/keyword arguments"""
 
     def __init__(self, dsbmm: DSBMMSparse):
         self.model = dsbmm
@@ -1324,7 +1329,9 @@ class BPSparse:
     def init_messages(self, mode="random"):
         self.jit_model.init_messages(mode)
 
-    def update_messages(self,):
+    def update_messages(
+        self,
+    ):
         self.jit_model.update_messages()
 
     def update_spatial_message(self, i, j, t):
@@ -1369,10 +1376,14 @@ class BPSparse:
     def collect_messages(self):
         pass
 
-    def store_messages(self,):
+    def store_messages(
+        self,
+    ):
         pass
 
-    def learning_step(self,):
+    def learning_step(
+        self,
+    ):
         # this should fix normalisation of expected marginals so sum to one - might not due to learning rate. Unsure if necessary
         pass
 

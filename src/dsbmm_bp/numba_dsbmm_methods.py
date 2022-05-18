@@ -1,12 +1,11 @@
 # numba reimplementation of all methods for DSBMM class that reasonably stand to gain from doing so
 # - simply prepend method name with nb_
-
-from numba import njit
 import numpy as np
-
-from utils import nb_poisson_lkl_int, nb_ib_lkl
-
 import yaml
+from numba import njit
+from numba import prange
+from utils import nb_ib_lkl
+from utils import nb_poisson_lkl_int
 
 with open("config.yaml") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
@@ -58,7 +57,7 @@ def nb_calc_meta_lkl(
             raise NotImplementedError(
                 "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
             )  # NB can't use string formatting for print in numba
-    for i in range(N):
+    for i in prange(N):
         for t in range(T):
             if _pres_nodes[i, t]:
                 for q in range(Q):
@@ -72,7 +71,17 @@ def nb_calc_meta_lkl(
 
 @njit(parallel=True, fastmath=USE_FASTMATH)
 def nb_update_alpha(
-    init, learning_rate, N, T, Q, Z, _tot_N_pres, _alpha, node_marg, diff, verbose
+    init,
+    learning_rate,
+    N,
+    T,
+    Q,
+    Z,
+    _tot_N_pres,
+    _alpha,
+    node_marg,
+    diff,
+    verbose,
 ):
     if init:
         if NON_INFORMATIVE_INIT:
@@ -92,7 +101,7 @@ def nb_update_alpha(
         #
         for q in range(Q):
             for t in range(T):
-                for i in range(N):
+                for i in prange(N):
                     tmp[q] += node_marg[i, t, q]
             tmp[q] /= _tot_N_pres
         if tmp.sum() > 0:
@@ -109,19 +118,29 @@ def nb_update_alpha(
             print("Alpha diff:", np.round_(tmp_diff, 3))
         diff += tmp_diff
         _alpha = tmp
-        return _alpha, diff
+    return _alpha, diff
 
 
 @njit(parallel=True, fastmath=USE_FASTMATH)
 def nb_update_pi(
-    init, learning_rate, N, T, Q, Z, _pres_trans, _pi, twopoint_time_marg, diff, verbose
+    init,
+    learning_rate,
+    N,
+    T,
+    Q,
+    Z,
+    _pres_trans,
+    _pi,
+    twopoint_time_marg,
+    diff,
+    verbose,
 ):
     qqprime_trans = np.zeros((Q, Q))
     if init:
         if NON_INFORMATIVE_INIT:
             qqprime_trans = np.ones((Q, Q))
         else:
-            for i in range(N):
+            for i in prange(N):
                 for t in range(T - 1):
                     if _pres_trans[i, t]:
                         q1 = Z[i, t]
@@ -130,7 +149,9 @@ def nb_update_pi(
 
             # TODO: provide different cases for non-uniform init clustering
             # NB for uniform init clustering this provides too homogeneous pi, and is more important now
-            trans_sums = qqprime_trans.sum(axis=1)
+            trans_sums = np.zeros(Q)
+            for q in range(Q):
+                trans_sums[q] = qqprime_trans[q, :].sum()
             for q in range(Q):
                 if trans_sums[q] > 0:
                     qqprime_trans[q, :] /= trans_sums[q]
@@ -141,7 +162,7 @@ def nb_update_pi(
     else:
         for q in range(Q):
             for qprime in range(Q):
-                for i in range(N):
+                for i in prange(N):
                     for t in range(T - 1):
                         if _pres_trans[i, t]:
                             qqprime_trans[q, qprime] += twopoint_time_marg[
@@ -164,17 +185,21 @@ def nb_update_pi(
         #         raise RuntimeError("Problem with node marginals")
         # qqprime_trans[q, :] = TOL
         # correct_pi()
-    trans_sums = qqprime_trans.sum(axis=1)
+    trans_sums = np.zeros(Q)
+    for q in range(Q):
+        trans_sums[q] = qqprime_trans[q, :].sum()
     for q in range(Q):
         if trans_sums[q] > 0:
             qqprime_trans[q, :] /= trans_sums[q]
+    trans_sums = np.zeros(Q)
     for q in range(Q):
         for qprime in range(Q):
             if qqprime_trans[q, qprime] < TOL:
                 qqprime_trans[q, qprime] = TOL
-    qqprime_trans = qqprime_trans / np.expand_dims(
-        qqprime_trans.sum(axis=1), 1
-    )  # normalise rows
+        trans_sums[q] = qqprime_trans[q, :].sum()
+    for q in range(Q):
+        # normalise rows last time
+        qqprime_trans[q, :] /= trans_sums[q]
     if not init:
         tmp = learning_rate * qqprime_trans + (1 - learning_rate) * _pi
         tmp_diff = np.abs(tmp - _pi).mean()
@@ -211,7 +236,8 @@ def nb_update_lambda(
     lam_num = np.zeros((Q, Q, T))
     lam_den = np.zeros((Q, Q, T))
     if init:
-        for i, j, t, val in _edge_vals:
+        for e_idx in prange(_edge_vals.shape[0]):
+            i, j, t, val = _edge_vals[e_idx, :]
             i, j, t = int(i), int(j), int(t)
             lam_num[Z[i, t], Z[j, t], t] += val
 
@@ -281,11 +307,12 @@ def nb_update_lambda(
         # lam_num = np.einsum("ijtqr,ijt->qrt", twopoint_edge_marg, A)
         for q in range(Q):
             for r in range(q, Q):
-                for i, j, t, val in _edge_vals:
+                for e_idx in prange(_edge_vals.shape[0]):
+                    i, j, t, val = _edge_vals[e_idx, :]
                     i, j, t = int(i), int(j), int(t)
                     j_idx = nbrs[t][i] == j
                     # if r==q: # TODO: special treatment?
-                    lam_num[q, r, t] += twopoint_edge_marg[t][i][j_idx, q, r] * val
+                    lam_num[q, r, t] += (twopoint_edge_marg[t][i][j_idx, q, r] * val)[0]
                 for t in range(T):
                     if lam_num[q, r, t] < TOL:
                         lam_num[q, r, t] = TOL
@@ -293,11 +320,14 @@ def nb_update_lambda(
                         lam_num[r, q, t] = lam_num[q, r, t]
             if directed:
                 for r in range(q):
-                    for i, j, t, val in _edge_vals:
+                    for e_idx in prange(_edge_vals.shape[0]):
+                        i, j, t, val = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
                         j_idx = nbrs[t][i] == j
                         # if r==q: # TODO: special treatment?
-                        lam_num[q, r, t] += twopoint_edge_marg[t][i][j_idx, q, r] * val
+                        lam_num[q, r, t] += (
+                            twopoint_edge_marg[t][i][j_idx, q, r] * val
+                        )[0]
 
         # lam_den = np.einsum("itq,it->qt", node_marg, degs)
         # lam_den = np.einsum("qt,rt->qrt", lam_den, lam_den)
@@ -305,10 +335,10 @@ def nb_update_lambda(
         marg_kappa_in = np.zeros((Q, T))
         for q in range(Q):
             for t in range(T):
-                marg_kappa_out[q, t] = (node_marg[:, t, q] * degs[:, t, 1]).sum(
-                    axis=0
-                )  # TODO: again check this uses right deg if directed
-                marg_kappa_in[q, t] = (node_marg[:, t, q] * degs[:, t, 0]).sum(axis=0)
+                marg_kappa_out[q, t] = (
+                    node_marg[:, t, q] * degs[:, t, 1]
+                ).sum()  # TODO: again check this uses right deg if directed
+                marg_kappa_in[q, t] = (node_marg[:, t, q] * degs[:, t, 0]).sum()
         for q in range(Q):
             for t in range(T):
                 for r in range(q, Q):
@@ -391,7 +421,8 @@ def nb_update_beta(
         #     ]
         # )
         else:
-            for i, j, t, _ in _edge_vals:
+            for e_idx in prange(_edge_vals.shape[0]):
+                i, j, t, _ = _edge_vals[e_idx, :]
                 i, j, t = int(i), int(j), int(t)
                 beta_num[Z[i, t], Z[j, t], t] += 1
             for q in range(Q):
@@ -449,7 +480,8 @@ def nb_update_beta(
         for q in range(Q):
             for r in range(q, Q):
                 if r != q:
-                    for i, j, t, a_ijt in _edge_vals:
+                    for e_idx in prange(_edge_vals.shape[0]):
+                        i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
                         j_idx = np.nonzero(nbrs[t][i] == j)[0]
                         # print(twopoint_edge_marg[t][i][j_idx, q, r])
@@ -469,7 +501,8 @@ def nb_update_beta(
                             beta_num[r, q, t] = beta_num[q, r, t]
                 else:
                     # enforce uniformity across t for identifiability
-                    for i, j, t, _ in _edge_vals:
+                    for e_idx in prange(_edge_vals.shape[0]):
+                        i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
                         j_idx = np.nonzero(nbrs[t][i] == j)[0]
                         # print(twopoint_edge_marg[t][i][j_idx, q, r])
@@ -489,7 +522,8 @@ def nb_update_beta(
 
             if directed:
                 for r in range(q):
-                    for i, j, t, _ in _edge_vals:
+                    for e_idx in prange(_edge_vals.shape[0]):
+                        i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
                         j_idx = np.nonzero(nbrs[t][i] == j)[0]
                         val = twopoint_edge_marg[t][i][j_idx, q, r][0]
@@ -544,7 +578,7 @@ def nb_update_beta(
     return _beta, diff
 
 
-@njit(parallel=True, fastmath=USE_FASTMATH)
+@njit
 def nb_update_meta_params(
     init,
     learning_rate,
@@ -560,20 +594,23 @@ def nb_update_meta_params(
     diff,
     verbose,
 ):
-    for s, mt in enumerate(meta_types):
+    # NB can't internally parallelise as need to aggregate
+    # on diff, but would need to write entirely within this
+    # fn to do so (less clear) - marginal benefit anyway
+    # as typically S << N, T
+    for s in range(len(meta_types)):
         # print(f"Updating params for {mt} dist")
-        X_s = X[s]
-        if mt == "poisson":
+        if meta_types[s] == "poisson":
             # print("In Poisson")
-            _mt_params, diff = nb_update_poisson_meta(
+            _meta_params[s], diff = nb_update_poisson_meta(
                 init,
                 learning_rate,
                 N,
                 T,
                 Q,
                 Z,
-                X_s,
-                _mt_params,
+                X[s],
+                _meta_params[s],
                 _pres_nodes,
                 node_marg,
                 diff,
@@ -581,17 +618,17 @@ def nb_update_meta_params(
             )
             if verbose:
                 print("\tUpdated Poisson")
-        elif mt == "indep bernoulli":
+        elif meta_types[s] == "indep bernoulli":
             # print("In IB")
-            _mt_params, diff = nb_update_indep_bern_meta(
+            _meta_params[s], diff = nb_update_indep_bern_meta(
                 init,
                 learning_rate,
                 N,
                 T,
                 Q,
                 Z,
-                X_s,
-                _mt_params,
+                X[s],
+                _meta_params[s],
                 _pres_nodes,
                 node_marg,
                 diff,
@@ -603,7 +640,6 @@ def nb_update_meta_params(
             raise NotImplementedError(
                 "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
             )  # NB can't use string formatting for print in numba
-        _meta_params[s] = _mt_params
     return _meta_params, diff
 
 
@@ -632,7 +668,7 @@ def nb_update_poisson_meta(
         #     ]
         # )
         for t in range(T):
-            for i in range(N):
+            for i in prange(N):
                 if _pres_nodes[i, t]:
                     xi[Z[i, t], t, 0] += 1
                     zeta[Z[i, t], t, 0] += X_s[i, t, 0]
@@ -651,12 +687,12 @@ def nb_update_poisson_meta(
     else:
         for q in range(Q):
             for t in range(T):
-                for i in range(N):
+                for i in prange(N):
                     if _pres_nodes[i, t]:
                         xi[q, t, 0] += node_marg[i, t, q]
         # zeta = np.einsum("itq,itd->qt", node_marg, X[s])
         for t in range(T):
-            for i in range(N):
+            for i in prange(N):
                 if _pres_nodes[i, t]:
                     for q in range(Q):
                         zeta[q, t, 0] += node_marg[i, t, q] * X_s[i, t, 0]
@@ -709,16 +745,16 @@ def nb_update_indep_bern_meta(
         #     ]
         # )
         for t in range(T):
-            for i in range(N):
+            for i in prange(N):
                 if _pres_nodes[i, t]:
                     xi[Z[i, t], t, 0] += 1
                     rho[Z[i, t], t, :] += X_s[i, t, :]
             for q in range(Q):
                 if xi[q, t, 0] < TOL:
                     xi[q, t, 0] = 1.0
-                for l in range(L):
-                    if rho[q, t, l] < TOL:
-                        rho[q, t, l] = TOL
+                for l_idx in range(L):
+                    if rho[q, t, l_idx] < TOL:
+                        rho[q, t, l_idx] = TOL
 
         # rho = np.array(
         #     [
@@ -731,31 +767,31 @@ def nb_update_indep_bern_meta(
         # )
     else:
         for t in range(T):
-            for i in range(N):
+            for i in prange(N):
                 if _pres_nodes[i, t]:
                     for q in range(Q):
                         xi[q, t, 0] += node_marg[i, t, q]
         # rho = np.einsum("itq,itl->qtl", node_marg, X[s])
         for t in range(T):
-            for i in range(N):
+            for i in prange(N):
                 if _pres_nodes[i, t]:
                     for q in range(Q):
                         rho[q, t, :] += node_marg[i, t, q] * X_s[i, t, :]
             for q in range(Q):
                 if xi[q, t, 0] < TOL:
                     xi[q, t, 0] = 1.0
-                for l in range(L):
-                    if rho[q, t, l] < TOL:
-                        rho[q, t, l] = TOL
+                for l_idx in range(L):
+                    if rho[q, t, l_idx] < TOL:
+                        rho[q, t, l_idx] = TOL
     # TODO: fix for xi very small (just use logs)
     tmp = rho / xi
     for q in range(Q):
         for t in range(T):
-            for l in range(L):
-                if tmp[q, t, l] < TOL:
-                    tmp[q, t, l] = TOL
-                elif tmp[q, t, l] > 1 - TOL:
-                    tmp[q, t, l] = 1 - TOL
+            for l_idx in range(L):
+                if tmp[q, t, l_idx] < TOL:
+                    tmp[q, t, l_idx] = TOL
+                elif tmp[q, t, l_idx] > 1 - TOL:
+                    tmp[q, t, l_idx] = 1 - TOL
     if not init:
         tmp = learning_rate * tmp + (1 - learning_rate) * _mt_params
         tmp_diff = np.abs(tmp - _mt_params).mean()
@@ -772,12 +808,14 @@ def nb_update_indep_bern_meta(
 
 @njit(parallel=True, fastmath=USE_FASTMATH)
 def nb_compute_DC_lkl(_edge_vals, Q, degs, _lam):
-    # TODO: sort computation for all pres edges simultaneously (in DSBMM),
+    # Sort computation for all pres edges simultaneously (in DSBMM),
     # then just pass as matrix rather than computing on fly
-    dc_lkl = np.zeros(_edge_vals.shape[0], Q, Q)
+    dc_lkl = np.zeros((_edge_vals.shape[0], Q, Q))
     for q in range(Q):
         for r in range(Q):
-            for e_idx, (i, j, t, a_ijt) in enumerate(_edge_vals):
+            for e_idx in prange(_edge_vals.shape[0]):
+                i, j, t, a_ijt = _edge_vals[e_idx, :]
+                i, j, t = int(i), int(j), int(t)
                 dc_lkl[e_idx, q, r] = nb_poisson_lkl_int(
                     a_ijt, degs[i, t, 1] * degs[j, t, 0] * _lam[q, r, t]
                 )

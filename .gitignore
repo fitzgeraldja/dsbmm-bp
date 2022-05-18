@@ -27,13 +27,13 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# VSCode artifacts 
+# VSCode artifacts
 .vscode/
 
-# Jupyter notebooks 
+# Jupyter notebooks
 notebooks/
 
-# Data 
+# Data
 scopus/
 scopus*
 scaling*

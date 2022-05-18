@@ -1,16 +1,25 @@
-from numba import int32, float32, int64, float64, typeof, set_num_threads
-from numba.types import unicode_type, ListType, bool_, Array
-from numba.typed import List
-from numba.experimental import jitclass
-
-import numpy as np
-
-import numba_dsbmm_methods as parmeth
-from utils import numba_ix, nb_poisson_lkl_int, nb_ib_lkl
-
-from scipy import sparse
 import csr
+import numba_dsbmm_methods as parmeth
+import numpy as np
 import yaml
+from numba import float64
+from numba import int32
+from numba import int64
+from numba import set_num_threads
+from numba import typeof
+from numba.experimental import jitclass
+from numba.typed import List
+from numba.types import Array
+from numba.types import bool_
+from numba.types import ListType
+from numba.types import unicode_type
+
+# from numba import float32
+
+# from scipy import sparse
+# from utils import nb_ib_lkl
+# from utils import nb_poisson_lkl_int
+# from utils import numba_ix
 
 # import utils
 
@@ -63,6 +72,8 @@ sparse_A_ex.append(csr.create_empty(1, 1))
 sparse_A_type = typeof(sparse_A_ex)
 # this decorator ensures types of each base field, and means all methods are compiled into nopython fns
 # further types are inferred from type annotations
+
+
 @jitclass  # (base_spec)
 class DSBMMSparseParallelBase:
     # A: np.ndarray  # assume N x N x T array s.t. (i,j,t)th position confers information about connection from i to j at time t
@@ -94,15 +105,18 @@ class DSBMMSparseParallelBase:
     _n_qt: int64[:, ::1]  # Q x T
     # deg_entropy: float
     _alpha: float64[::1]  # init group probs
-    _pi: Array(float64, ndim=2, layout="C")  # group transition mat
+    # group transition mat
+    _pi: Array(float64, ndim=2, layout="C")  # noqa: F821
     _lam: float64[:, :, ::1]  # block pois params in DC case
-    _beta: Array(float64, ndim=3, layout="C")  # block edge probs in binary NDC case
+    # block edge probs in binary NDC case
+    _beta: Array(float64, ndim=3, layout="C")  # noqa: F821
     # _meta_params: list[np.ndarray]  # params for metadata dists
     _meta_params: meta_params_type
     node_marg: float64[:, :, ::1]
     twopoint_time_marg: float64[:, :, :, ::1]  # assume N x T - 1 x Q x Q (i,t,q,qprime)
     # twopoint_edge_marg: float64[:, :, :, :, ::1]  # assume N x N x T x Q x Q (i,j,t,q,r)
     twopoint_edge_marg: tp_e_marg_type  # [t][i][j_idx,q,r] where j_idx is idx where nbrs[t][i]==j
+    dc_lkl: float64[:, :, ::1]  # E x Q x Q array of DC lkl of edge belonging to q, r
     meta_lkl: float64[:, :, ::1]  # N x T x Q array of meta lkl term for i at t in q
     nbrs: nbrs_type
     _edge_vals: float64[:, ::1]
@@ -179,7 +193,7 @@ class DSBMMSparseParallelBase:
                 self.use_meta = False
                 try:
                     assert self.use_meta == use_meta
-                except:
+                except AssertionError:
                     print(
                         "!" * 10,
                         "WARNING: no metadata passed but use_meta=True,",
@@ -231,7 +245,10 @@ class DSBMMSparseParallelBase:
             tmp2 = List()
             for i in range(self.N):
                 tmp2.append(
-                    np.zeros((len(self.nbrs[t][i]), self.Q, self.Q), dtype=np.float64)
+                    np.zeros(
+                        (len(self.nbrs[t][i]), self.Q, self.Q),
+                        dtype=np.float64,
+                    )
                 )
             tmp.append(tmp2)
         self.twopoint_edge_marg = tmp
@@ -340,8 +357,7 @@ class DSBMMSparseParallelBase:
         return np.dstack((in_degs, out_degs)).astype(float64)
 
     def compute_group_degs(self):
-        """Compute group in- and out-degrees for current node memberships
-        """
+        """Compute group in- and out-degrees for current node memberships"""
         kappa = np.zeros((self.Q, self.T, 2))
         for q in range(self.Q):
             for t in range(self.T):
@@ -349,20 +365,16 @@ class DSBMMSparseParallelBase:
         return kappa.astype(float64)
 
     def compute_log_likelihood(self):
-        """Compute log likelihood of model for given memberships 
+        """Compute log likelihood of model for given memberships
 
             In DC case this corresponds to usual DSBMM with exception of each timelice now has log lkl
-                \sum_{q,r=1}^Q m_{qr} \log\frac{m_{qr}}{\kappa_q^{out}\kappa_r^{in}},
-            (ignoring constants w.r.t. node memberships) 
-            
+                \\sum_{q,r=1}^Q m_{qr} \\log\frac{m_{qr}}{\\kappa_q^{out}\\kappa_r^{in}},
+            (ignoring constants w.r.t. node memberships)
+
         Returns:
             _type_: _description_
         """
         pass
-
-    def compute_DC_lkl(self, i, j, t, q, r, a_ijt):
-        dclam = self.degs[i, t, 1] * self.degs[j, t, 0] * self._lam[q, r, t]
-        return nb_poisson_lkl_int(a_ijt, dclam)
 
     def update_params(self, init, learning_rate):
         """Given marginals, update parameters suitably
@@ -449,8 +461,10 @@ class DSBMMSparseParallelBase:
                 print(self._beta.transpose(2, 0, 1))
                 print("\tUpdated beta")
             if not self.directed:
-                assert np.allclose(self._beta.transpose(1, 0, 2), self._beta)
-        self._meta_params, self.diff = parmeth.update_meta_params(
+                assert np.all(
+                    np.abs(self._beta.transpose(1, 0, 2) - self._beta) < 1e-10
+                )
+        self._meta_params, self.diff = parmeth.nb_update_meta_params(
             init,
             learning_rate,
             self.meta_types,
@@ -479,6 +493,10 @@ class DSBMMSparseParallelBase:
             self._pres_nodes,
             self.verbose,
         )
+        if self.deg_corr:
+            self.dc_lkl = parmeth.nb_compute_DC_lkl(
+                self._edge_vals, self.Q, self.degs, self._lam
+            )
 
     def set_node_marg(self, values):
         self.node_marg = values
@@ -503,7 +521,7 @@ class DSBMMSparseParallelBase:
 
 class DSBMMSparseParallel:
     """Pure Python wrapper around DSBMMSparseParallelBase to allow optional/keyword arguments
-    Note the class this wraps is itself now a wrapper for separately njit'd functions, so as to allow 
+    Note the class this wraps is itself now a wrapper for separately njit'd functions, so as to allow
     parallelisation
     """
 
@@ -525,7 +543,7 @@ class DSBMMSparseParallel:
         """Initalise the class
 
         Args:
-            A (list[scipy.sparse.csr_matrix], optional): (Sparse) adjacency matrices at each timestep, 
+            A (list[scipy.sparse.csr_matrix], optional): (Sparse) adjacency matrices at each timestep,
                                                          each shape N x N. Defaults to None.
             X (list[np.ndarray], optional): Metadata, each entry shape N x T x Ds. Defaults to None.
             Z (np.ndarray, optional): Initial clustering, shape N x T. Defaults to None.
@@ -533,7 +551,7 @@ class DSBMMSparseParallel:
             deg_corr (bool, optional): Use degree-corrected version. Defaults to False.
             directed (bool, optional): Use directed version - will symmetrise otherwise. Defaults to False.
             use_meta (bool, optional): Use metadata. Defaults to True.
-            tuning_param (float, optional): Tuning parameter (eff. relative weight of metadata to edges). 
+            tuning_param (float, optional): Tuning parameter (eff. relative weight of metadata to edges).
                                             Defaults to 1.0.
             verbose (bool, optional): Verbosity. Defaults to False.
             n_threads (_type_, optional): Number of threads. Defaults to None (use all available).
@@ -554,7 +572,16 @@ class DSBMMSparseParallel:
         self.A = A
         self.tuning_param = tuning_param
         self.jit_model = DSBMMSparseParallelBase(
-            A, X, Z, Q, deg_corr, directed, use_meta, meta_types, tuning_param, verbose
+            A,
+            X,
+            Z,
+            Q,
+            deg_corr,
+            directed,
+            use_meta,
+            meta_types,
+            tuning_param,
+            verbose,
         )
         self.directed = directed
         self.verbose = verbose
@@ -629,17 +656,16 @@ class DSBMMSparseParallel:
         return self.jit_model.compute_degs(A)
 
     def compute_group_degs(self):
-        """Compute group in- and out-degrees for current node memberships
-        """
+        """Compute group in- and out-degrees for current node memberships"""
         return self.jit_model.compute_group_degs()
 
     def compute_log_likelihood(self):
-        """Compute log likelihood of model for given memberships 
+        """Compute log likelihood of model for given memberships
 
             In DC case this corresponds to usual DSBMM with exception of each timelice now has log lkl
-                \sum_{q,r=1}^Q m_{qr} \log\frac{m_{qr}}{\kappa_q^{out}\kappa_r^{in}},
-            (ignoring constants w.r.t. node memberships) 
-            
+                \\sum_{q,r=1}^Q m_{qr} \\log\frac{m_{qr}}{\\kappa_q^{out}\\kappa_r^{in}},
+            (ignoring constants w.r.t. node memberships)
+
         Returns:
             _type_: _description_
         """
@@ -668,7 +694,8 @@ class DSBMMSparseParallel:
         self.jit_model.update_alpha(init)
 
     def update_pi(
-        self, init=False,
+        self,
+        init=False,
     ):
         self.jit_model.update_pi(init)
         # qqprime_trans = np.array(
@@ -799,4 +826,3 @@ class DSBMMSparseParallel:
     def set_Z_by_MAP(self):
         self.jit_model.set_Z_by_MAP()
         self.Z = self.jit_model.Z
-

@@ -11,17 +11,13 @@
 # contains the position of i in the row corresponding to the node in that place in the original
 # lookup mat - e.g. if orig[i*t,0] = j_idx s.t. edgelist[j_idx] = i, j, t, val, then want
 # inv[i*t,0] = i_idx_for_j s.t. edgelist[i_idx_for_j] = j, i, t, val
-
 # However, can also just take advantage of existing CSR implementations, along with again first
 # identifying the index of i in row of j for faster lookup
-
 # Actually the original implementation was already memory efficient for edge parameters - key
 # change is just storage of A, and handling all uses of this within (should be doable)
-
 # NB CSR implementation used only allows consideration of matrices w up to 2^31 ~ 2 B
 # nonzero entries - this should be sufficient for most problems considered, and would likely
 # already suggest batching (currently unimplemented)
-
 # ADVANTAGES OF CSR:
 # - Efficient arithmetic operations between matrices (addition / multiplication etc)
 # - Efficient row slicing
@@ -31,7 +27,6 @@
 # - Changes to sparsity structure are expensive (suitable alts like LIL or DOK currently
 #   unavailable in suitable numba form I believe) - this is not a concern herein as all
 #   sparse matrices (i.e. just A) are left unchanged throughout the process
-
 # Assumption is that only N is large, so N^2 terms dominate - not using sparse formulations
 # for other params - possible problems could particularly emerge from next largest
 # variables:
@@ -43,44 +38,43 @@
 #   (assumption is that Q ~ log(N) which holds in general for most real data)
 # No immediately obvious way of sparsifying these, with the exception of X for categorical data
 # with many categories (currently one-hot encoded (OHE)) - plan to deal with in future
-
-
 # TODO: Allow X to be ordinal categorical encoding rather than OHE for memory efficiency,
 # TODO: think about how could allow batching.
-
-from numba import (
-    int32,
-    float32,
-    int64,
-    float64,
-    bool_,
-    # unicode_type,
-    typeof,
-)
-from numba.types import unicode_type, ListType, bool_, Array
-from numba.typed import List
-from numba.experimental import jitclass
 import csr
-import yaml
-
-import numpy as np
-from utils import numba_ix
-
-from dsbmm_sparse_parallel import DSBMMSparseParallel, DSBMMSparseParallelBase
 import numba_bp_methods as parmeth
+import numpy as np
+import yaml
+from dsbmm_sparse_parallel import DSBMMSparseParallel
+from dsbmm_sparse_parallel import DSBMMSparseParallelBase
+from numba import bool_
+from numba import float64
+from numba import int32
+from numba import int64
+from numba import typeof
+from numba.experimental import jitclass
+from numba.typed import List
+from numba.types import Array
+from numba.types import ListType
+
+# from numba import float32
+
+# from numba.types import unicode_type
+# from utils import numba_ix
 
 X_ex = List.empty_list(float64[:, :, ::1])
 X_type = typeof(X_ex)
 sparse_A_ex = List()
 sparse_A_ex.append(csr.create_empty(1, 1))
 sparse_A_type = typeof(sparse_A_ex)
-psi_e_ex = List.empty_list(ListType(Array(float64, ndim=2, layout="C")))
+psi_e_ex = List.empty_list(ListType(Array(float64, ndim=2, layout="C")))  # noqa: F821
 psi_e_type = typeof(psi_e_ex)
 # psi_t_ex = List.empty_list(ListType(float64[:, :])) # unnecessary for same reasons as below
 # psi_t_type = typeof(psi_t_ex)
-nbrs_ex = List.empty_list(ListType(Array(int32, ndim=1, layout="C")))
+nbrs_ex = List.empty_list(ListType(Array(int32, ndim=1, layout="C")))  # noqa: F821
 nbrs_type = typeof(nbrs_ex)
-twopoint_e_ex = List.empty_list(ListType(Array(float64, ndim=3, layout="C")))
+twopoint_e_ex = List.empty_list(
+    ListType(Array(float64, ndim=3, layout="C"))
+)  # noqa: F821
 # TODO: replace as array type of size (Q^2 sum_t E_t), along w lookup table for idx of i,j,t as this should be sufficient
 # given implementation below - would this actually result in speedup over lru cache implementation?
 # twopoint_t_ex = List.empty_list(ListType(float64[:,:])) # unnecessary for t marg, as memory size O(NTQ^2) at most O(Q^2\sum_t E_t) size of constrained formulation
@@ -116,18 +110,20 @@ class BPSparseParallelBase:
     # n_qt: float64[:, :]  # prior prob
     _psi_e: psi_e_type  # spatial messages
     _psi_t: Array(
-        float64, ndim=4, layout="C"
+        float64, ndim=4, layout="C"  # noqa: F821
     )  # temporal messages, assume (i,t,q,q',2) for t in 0 to T-2, where first loc of final dim is backward messages from t+1 to t
     # and second loc is forward messages from t to t+1
     _h: float64[:, ::1]  # external field for each group, with shape (Q,T)
     node_marg: Array(
-        float64, ndim=3, layout="C"
+        float64, ndim=3, layout="C"  # noqa: F821
     )  # marginal group probabilities for each node
     # - NB this also referred to as nu, eta or
     # other terms elsewhere
     # twopoint_e_marg: float64[:, :, :, :, :]
     twopoint_e_marg: twopoint_e_type  # [t][i][len(nbrs[t][i]),Q,Q]
-    twopoint_t_marg: Array(float64, ndim=4, layout="C")  # N x T - 1 X Q x Q
+    twopoint_t_marg: Array(
+        float64, ndim=4, layout="C"  # noqa: F821
+    )  # N x T - 1 X Q x Q
     _pres_nodes: bool_[:, ::1]
     _pres_trans: bool_[:, ::1]
     _edge_vals: float64[:, ::1]
@@ -299,24 +295,25 @@ class BPSparseParallelBase:
         # Key is that when consider a known message from i to j, can recover idxs for
 
     def init_messages(self, mode):
-        """Initialise messages and node marginals according to specified mode 
-        - random 
+        """Initialise messages and node marginals according to specified mode
+        - random
         - partial (specified extent planted vs random, currently unimplemented)
         - planted (according to initial partition + some noise)
         Args:
             mode (_type_): _description_
-            
+
         Initialises _psi_e, _psi_t, node_marg
         """
         self._psi_e, self._psi_t, self.node_marg = parmeth.nb_init_msgs(
             mode, self.N, self.T, self.Q, self.nbrs, self.model.Z
         )
 
-    def meta_prob(self, i, t):
+    @property
+    def meta_prob(self):
         if self.use_meta:
-            return self.model.meta_lkl[i, t, :]
+            return self.model.meta_lkl
         else:
-            return np.ones(self.Q)
+            return np.ones((self.N, self.T, self.Q))
 
     @property
     def trans_prob(self):
@@ -333,8 +330,8 @@ class BPSparseParallelBase:
             return self.model._beta
 
     def init_h(self):
-        """Initialise external fields, h(t) at each timestep  
-        
+        """Initialise external fields, h(t) at each timestep
+
         Initialises _h
         """
         self._h = parmeth.nb_init_h(
@@ -377,13 +374,13 @@ class BPSparseParallelBase:
         return f_energy
 
     def update_node_marg(self):
-        """Update all node marginals (in random order), simultaneously updating messages and 
+        """Update all node marginals (in random order), simultaneously updating messages and
         external fields h(t) - process is as follows:
-            (i) Determine whether large or small degree version of spatial message updates 
-                should be used 
+            (i) Determine whether large or small degree version of spatial message updates
+                should be used
             (ii) Subtract old marginals for i from external field h(t)
-            (iii) Update spatial messages while calculating spatial term  
-            (iv) Update forwards temporal messages from i at t while calculating backward temp 
+            (iii) Update spatial messages while calculating spatial term
+            (iv) Update forwards temporal messages from i at t while calculating backward temp
                  term from i at t + 1
             (v) Update backwards temporal messages from i at t while calculating forward temp term
                 from i at t - 1
@@ -464,13 +461,12 @@ class BPSparseParallelBase:
 
 
 class BPSparseParallel:
-    """Pure Python wrapper of BPBase class to allow optional/keyword arguments
-    """
+    """Pure Python wrapper of BPBase class to allow optional/keyword arguments"""
 
     def __init__(self, dsbmm: DSBMMSparseParallel):
         self.model = dsbmm
         self.jit_model = BPSparseParallelBase(dsbmm.jit_model)
-        self.jit_model.get_neighbours()
+        # self.jit_model.get_neighbours()
 
     @property
     def n_timesteps(self):
@@ -496,7 +492,9 @@ class BPSparseParallel:
     def init_messages(self, mode="random"):
         self.jit_model.init_messages(mode)
 
-    def update_messages(self,):
+    def update_messages(
+        self,
+    ):
         self.jit_model.update_messages()
 
     def update_spatial_message(self, i, j, t):
@@ -525,9 +523,9 @@ class BPSparseParallel:
 
     # def spatial_msg_term(self, i, t):
     #     return self.jit_model.spatial_msg_term(i, t)
-
-    def meta_prob(self, i, t):
-        return self.model.meta_lkl[i, t]
+    # @property
+    # def meta_prob(self):
+    #     return self.model.meta_lkl
 
     @property
     def trans_prob(self):
@@ -541,10 +539,14 @@ class BPSparseParallel:
     def collect_messages(self):
         pass
 
-    def store_messages(self,):
+    def store_messages(
+        self,
+    ):
         pass
 
-    def learning_step(self,):
+    def learning_step(
+        self,
+    ):
         # this should fix normalisation of expected marginals so sum to one - might not due to learning rate. Unsure if necessary
         pass
 
