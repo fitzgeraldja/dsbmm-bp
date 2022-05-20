@@ -137,7 +137,7 @@ def gen_ppm(
         # sparse construction - only implemented currently for p_in / p_out formulation
         try:
             assert beta_mat is None
-        except AssertionError:
+        except Exception:  # AssertionError:
             raise ValueError(
                 "Sparse construction only implemented for p_in / p_out formulation"
             )

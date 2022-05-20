@@ -59,7 +59,7 @@ class EM:
         self.run_idx = 0
         try:
             self.Q = data["Q"]
-        except KeyError:
+        except Exception:  # KeyError:
             raise ValueError("Must specify Q in data")
         self.sparse = sparse_adj
         try:
@@ -69,7 +69,7 @@ class EM:
                 # TODO: fix properly - currently just force symmetrising and binarising
                 self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
 
-        except AssertionError:
+        except Exception:  # AssertionError:
             # symmetrise for this test case
             print(
                 "WARNING: provided non-symmetric adjacency,",
@@ -94,7 +94,7 @@ class EM:
                 self.X = List()
                 self.X.append(X_poisson)
                 self.X.append(X_ib)
-            except KeyError:
+            except Exception:  # KeyError:
                 print(self.X)
                 raise KeyError(
                     "X given as dict - expected test run with keys 'poisson' and 'indep bernoulli'"
@@ -120,7 +120,7 @@ class EM:
                     )  # done for fixing labels over time
                 else:
                     kmeans_mat = sparse.hstack(self.A)
-            except ValueError:
+            except Exception:  # ValueError:
                 print("A:", self.A.shape, "T:", self.T)
                 raise ValueError("Problem with A passed")
         if self.N > 1e5:
@@ -164,7 +164,7 @@ class EM:
         self.k_means_init_Z[~self._pres_nodes] = -1
         try:
             assert self.k_means_init_Z.shape == (self.N, self.T)
-        except AssertionError:
+        except Exception:  # AssertionError:
             print(self.k_means_init_Z.shape)
             print((self.N, self.T))
             raise ValueError("Wrong partition shape")
@@ -175,7 +175,7 @@ class EM:
             for mt in data["meta_types"]:
                 self.meta_types.append(mt)
             assert len(self.meta_types) == len(self.X)
-        except AssertionError:
+        except Exception:  # AssertionError:
             raise ValueError("Must specify types of all metadata")
         try:
             # known params for sim data
@@ -201,7 +201,7 @@ class EM:
                 )
                 print(f"\twith variance {deg_var:.2f}")
 
-        except AttributeError:
+        except Exception:  # AttributeError:
             if self.verbose:
                 print("No p_in / p_out provided")
         if self.sparse:
@@ -402,7 +402,7 @@ class EM:
             self.best_Z = self.bp.model.Z
         try:
             self.reinit(tuning_param=self.best_tun_param, set_Z=self.best_Z)
-        except AttributeError:
+        except Exception:  # AttributeError:
             # no tuning param used
             self.reinit(set_Z=self.best_Z)
         self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
@@ -487,7 +487,7 @@ class EM:
                 if self.verbose:
                     print("ARIs:", np.round_(aris, 2))
                 return aris
-            except AttributeError:
+            except Exception:  # AttributeError:
                 print(
                     "Can't provide ARI score - make sure have both",
                     "provided ground truth \nwhen initialising model,",

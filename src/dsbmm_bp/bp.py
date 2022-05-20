@@ -317,7 +317,7 @@ class BPBase:
             for q in range(self.Q):
                 if out[q] < TOL:
                     out[q] = TOL
-        except IndexError:
+        except Exception:  # IndexError:
             # must have t=0 so t-1 outside of range, no forward message, but do have alpha instead - stopped now as need for backward term
             assert t == 0
             # out = self.model._alpha
@@ -360,7 +360,7 @@ class BPBase:
             #     print("psi_t shape:", self._psi_t.shape)
             #     print("backward out:", out)
             #     raise RuntimeError("Problem with backward msg term")
-        except IndexError:
+        except Exception:  # IndexError:
             # t=T outside of range, so no backward message
             assert t == self.T - 1
             out = np.ones((self.Q,))

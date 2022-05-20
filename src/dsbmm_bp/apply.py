@@ -102,7 +102,7 @@ if __name__ == "__main__":
                         "rb",
                     ) as f:
                         samples = pickle.load(f)
-                except FileNotFoundError:
+                except Exception:  # FileNotFoundError: NB only base exception supported by numba
                     samples = simulation.gen_test_data(**params)
                     print()
                     print(f"Simulated test {testno}")
@@ -275,7 +275,7 @@ if __name__ == "__main__":
                                     3,
                                 )
                             )
-                    except IndexError:
+                    except Exception:  # IndexError:
                         print("BP Z ARI:")
                         test_aris[test_no][samp_no, :] = model.ari_score(true_Z)
                         if not verbose:
@@ -298,7 +298,7 @@ if __name__ == "__main__":
                         print("Pi inferred:", model.bp.trans_prob)
                         try:
                             print("Versus true pi:", params["trans_mat"])
-                        except KeyError:
+                        except Exception:  # KeyError:
                             print(
                                 "Versus true pi:",
                                 simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
@@ -352,7 +352,7 @@ if __name__ == "__main__":
         print("Mean ARIs inferred for each test:")
         try:
             print(test_aris.mean(axis=(1, 2)))
-        except AttributeError:
+        except Exception:  # AttributeError:
             print(np.array([aris.mean() for aris in test_aris]))
         print("Mean times for each test:")
         print(test_times.mean(axis=1))

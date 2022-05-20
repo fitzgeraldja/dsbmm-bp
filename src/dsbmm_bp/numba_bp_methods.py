@@ -144,7 +144,7 @@ def nb_init_msgs(
         try:
             for q in range(Q):
                 _psi_t[:, :, q, :] /= t_msg_sums
-        except ValueError:
+        except Exception:  # ValueError:
             print(_psi_t[:, :, 0, :].shape, t_msg_sums.shape)
     return _psi_e, _psi_t, node_marg
 
@@ -160,7 +160,7 @@ def nb_forward_temp_msg_term(Q, trans_prob, i, t, _psi_t):
         for q in range(Q):
             for qprime in range(Q):
                 out[q] += trans_prob[qprime, q] * _psi_t[i, t - 1, qprime, 1]
-    except IndexError:
+    except Exception:  # IndexError:
         # must have t=0 so t-1 outside of range, no forward message, but do have alpha instead - stopped now as need for backward term
         assert t == 0
         # out = model._alpha
@@ -197,7 +197,7 @@ def nb_backward_temp_msg_term(Q, T, trans_prob, i, t, _psi_t):
         for q in range(Q):
             if out[q] < TOL:
                 out[q] = TOL
-    except IndexError:
+    except Exception:  # IndexError:
         # t=T outside of range, so no backward message
         assert t == T - 1
         out = np.ones(Q)

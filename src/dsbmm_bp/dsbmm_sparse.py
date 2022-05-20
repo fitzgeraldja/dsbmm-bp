@@ -202,7 +202,7 @@ class DSBMMSparseBase:
                 self.use_meta = False
                 try:
                     assert self.use_meta == use_meta
-                except AssertionError:
+                except Exception:  # AssertionError:
                     print(
                         "!" * 10,
                         "WARNING: no metadata passed but use_meta=True,",
