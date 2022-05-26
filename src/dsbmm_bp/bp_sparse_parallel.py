@@ -146,7 +146,7 @@ class BPSparseParallelBase:
         self.use_meta = self.model.use_meta
         self.verbose = self.model.verbose
         self.A = self.model.A
-        self.n_msgs = self.model.E.sum() + self.N * (self.T - 1) * 2
+        self.n_msgs = self.model.num_edges.sum() + self.N * (self.T - 1) * 2
         self.X = self.model.X
         # start with given membership and corresponding messages, iterate until reach fixed point
         # given messages at fixed point, can update parameters to their most likely values - these emerge naturally

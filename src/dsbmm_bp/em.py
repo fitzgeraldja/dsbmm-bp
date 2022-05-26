@@ -2,8 +2,10 @@ import faulthandler
 import time
 
 import bp
+import bp_sparse
 import bp_sparse_parallel
 import dsbmm
+import dsbmm_sparse
 import dsbmm_sparse_parallel
 import numpy as np
 from numba.typed import List
@@ -11,9 +13,6 @@ from scipy import sparse
 from sklearn.cluster import KMeans
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import adjusted_rand_score as ari
-
-# import bp_sparse
-# import dsbmm_sparse
 
 # from utils import nb_ari_local  # , nb_nmi_local
 
@@ -41,12 +40,14 @@ class EM:
         init_Z_mode="A",
         msg_init_mode="planted",
         sparse_adj=False,
+        try_parallel=False,
         n_runs=5,
         tuning_param=1.0,
         deg_corr=False,
         verbose=True,
     ):
         self.verbose = verbose
+        self.parallel = try_parallel
         self.msg_init_mode = msg_init_mode
         self.A = data["A"]
         if type(tuning_param) == float:
@@ -207,21 +208,38 @@ class EM:
         if self.sparse:
             # TODO: [clean-up] make abstract wrapper with separate dense / sparse impl
             # so can remove redundant code below
-            self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
-                A=self.A,
-                X=self.X,
-                Z=self.init_Z.copy(),
-                Q=self.Q,
-                deg_corr=self.deg_corr,
-                meta_types=self.meta_types,
-                tuning_param=self.tuning_params[0],
-                verbose=self.verbose,
-            )  # X=X,
-            if self.verbose:
-                print("Successfully instantiated DSBMM...")
-            self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
-            if self.verbose:
-                print("Successfully instantiated BP system...")
+            if try_parallel:
+                self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
+                    A=self.A,
+                    X=self.X,
+                    Z=self.init_Z.copy(),
+                    Q=self.Q,
+                    deg_corr=self.deg_corr,
+                    meta_types=self.meta_types,
+                    tuning_param=self.tuning_params[0],
+                    verbose=self.verbose,
+                )  # X=X,
+                if self.verbose:
+                    print("Successfully instantiated DSBMM...")
+                self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
+                if self.verbose:
+                    print("Successfully instantiated BP system...")
+            else:
+                self.dsbmm = dsbmm_sparse.DSBMMSparse(
+                    A=self.A,
+                    X=self.X,
+                    Z=self.init_Z.copy(),
+                    Q=self.Q,
+                    deg_corr=self.deg_corr,
+                    meta_types=self.meta_types,
+                    tuning_param=self.tuning_params[0],
+                    verbose=self.verbose,
+                )  # X=X,
+                if self.verbose:
+                    print("Successfully instantiated DSBMM...")
+                self.bp = bp_sparse.BPSparse(self.dsbmm)
+                if self.verbose:
+                    print("Successfully instantiated BP system...")
         else:
             self.dsbmm = dsbmm.DSBMM(
                 A=self.A,

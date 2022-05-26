@@ -30,6 +30,13 @@ parser.add_argument(
 
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
 
+parser.add_argument(
+    "--nb_parallel",
+    "-nbp",
+    action="store_true",
+    help="Try with numba parallelism (currently slower)",
+)
+
 args = parser.parse_args()
 
 
@@ -189,6 +196,8 @@ if __name__ == "__main__":
         data["meta_types"] = ["poisson", "indep bernoulli", "indep bernoulli"]
         data["Q"] = 22 if link_choice == "au" else 19 if link_choice == "ref" else None
 
+    try_parallel = args.nb_parallel
+
     use_X_init = False
     verbose = args.verbose
     if testset_name != "scopus":
@@ -240,7 +249,12 @@ if __name__ == "__main__":
                         model = em.EM(sample, verbose=verbose)
                     else:
                         print(f"N = {params['N']}")
-                        model = em.EM(sample, sparse_adj=True, verbose=verbose)
+                        model = em.EM(
+                            sample,
+                            sparse_adj=True,
+                            try_parallel=try_parallel,
+                            verbose=verbose,
+                        )
                     if samp_no > 0:
                         init_times[test_no, samp_no - 1] = time.time() - start_time
                     ## Score from K means
