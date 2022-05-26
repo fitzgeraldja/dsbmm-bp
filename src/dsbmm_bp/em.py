@@ -209,6 +209,8 @@ class EM:
             # TODO: [clean-up] make abstract wrapper with separate dense / sparse impl
             # so can remove redundant code below
             if try_parallel:
+                olderr = np.seterr(all="ignore")
+                print(f"{olderr} all changed to 'ignore'")
                 self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
                     A=self.A,
                     X=self.X,
@@ -302,21 +304,38 @@ class EM:
     def reinit(self, tuning_param=1.0, set_Z=None):
         self.perturb_init_Z()
         if self.sparse:
-            self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
-                A=self.A,
-                X=self.X,
-                Z=self.init_Z.copy() if set_Z is None else set_Z,
-                Q=self.Q,
-                deg_corr=self.deg_corr,
-                meta_types=self.meta_types,
-                tuning_param=tuning_param,
-                verbose=self.verbose,
-            )  # X=X,
-            if self.verbose:
-                print("Successfully reinstantiated DSBMM...")
-            self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
-            if self.verbose:
-                print("Successfully reinstantiated BP system...")
+            if self.parallel:
+                self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
+                    A=self.A,
+                    X=self.X,
+                    Z=self.init_Z.copy(),
+                    Q=self.Q,
+                    deg_corr=self.deg_corr,
+                    meta_types=self.meta_types,
+                    tuning_param=self.tuning_params[0],
+                    verbose=self.verbose,
+                )  # X=X,
+                if self.verbose:
+                    print("Successfully reinstantiated DSBMM...")
+                self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
+                if self.verbose:
+                    print("Successfully reinstantiated BP system...")
+            else:
+                self.dsbmm = dsbmm_sparse.DSBMMSparse(
+                    A=self.A,
+                    X=self.X,
+                    Z=self.init_Z.copy(),
+                    Q=self.Q,
+                    deg_corr=self.deg_corr,
+                    meta_types=self.meta_types,
+                    tuning_param=self.tuning_params[0],
+                    verbose=self.verbose,
+                )  # X=X,
+                if self.verbose:
+                    print("Successfully reinstantiated DSBMM...")
+                self.bp = bp_sparse.BPSparse(self.dsbmm)
+                if self.verbose:
+                    print("Successfully reinstantiated BP system...")
         else:
             self.dsbmm = dsbmm.DSBMM(
                 A=self.A,

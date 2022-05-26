@@ -517,27 +517,186 @@ def nb_update_node_marg(
     if RANDOM_ONLINE_UPDATE_MSG:
         np.random.shuffle(node_update_order)
         np.random.shuffle(time_update_order)
-    with np.errstate(all="ignore"):
-        # necessary as LLVM optimisation seems to result in spurious DividebyZero errors which aren't possible given checks
-        for iup_idx in range(N):
-            # TODO: note that parallelising over i in this way will technically cause race condition (different threads using
-            # messages updated at different points) - suggests synchronous updating probably better, or just not a concern
-            i = node_update_order[iup_idx]
-            for tup_idx in range(T):
-                t = time_update_order[tup_idx]
-                # TODO: Rather than looping over all N for every T then checking for presence, setup in same way as for edges
-                # where directly loop over present nodes only - just need to change how shuffling is done
-                if _pres_nodes[i, t]:
-                    nbrs = all_nbrs[t][i]
-                    deg_i = len(nbrs)
-                    if deg_i > 0:
-                        spatial_msg_term = np.empty(Q)
-                        if deg_i < LARGE_DEG_THR:
-                            field_iter = np.empty((deg_i, Q))
+    # with np.errstate(all="ignore"): # not usable in numba
+    # necessary as LLVM optimisation seems to result in spurious DividebyZero errors which aren't possible given checks
+    for iup_idx in prange(N):
+        # TODO: note that parallelising over i in this way will technically cause race condition (different threads using
+        # messages updated at different points) - suggests synchronous updating probably better, or just not a concern
+        i = node_update_order[iup_idx]
+        for tup_idx in range(T):
+            t = time_update_order[tup_idx]
+            # TODO: Rather than looping over all N for every T then checking for presence, setup in same way as for edges
+            # where directly loop over present nodes only - just need to change how shuffling is done
+            if _pres_nodes[i, t]:
+                nbrs = all_nbrs[t][i]
+                deg_i = len(nbrs)
+                if deg_i > 0:
+                    spatial_msg_term = np.empty(Q)
+                    if deg_i < LARGE_DEG_THR:
+                        field_iter = np.empty((deg_i, Q))
+                        (spatial_msg_term, field_iter,) = nb_spatial_msg_term_small_deg(
+                            Q,
+                            nbrs,
+                            e_nbrs_inv[t][i],
+                            nbrs_inv[t][i],
+                            deg_corr,
+                            degs,
+                            i,
+                            t,
+                            dc_lkl,
+                            _h,
+                            meta_prob,
+                            block_edge_prob,
+                            _psi_e,
+                        )
+                        # now terms using current h have been calculated, subtract old marg vals
+                        # nb_update_h(
+                        #    ...
+                        # ) # Possible problem using when parallel, just write out instead
+                        if deg_corr:
+                            for q in range(Q):
+                                for r in range(Q):
+                                    _h[q, t] -= (
+                                        block_edge_prob[r, q, t]
+                                        * node_marg[i, t, r]
+                                        * degs[i, t, 1]
+                                    )
+                        else:
+                            for q in range(Q):
+                                for r in range(Q):
+                                    _h[q, t] -= (
+                                        block_edge_prob[r, q, t] * node_marg[i, t, r]
+                                    )
+                        tmp = spatial_msg_term.copy()
+                        if t == 0:
+                            for q in range(Q):
+                                tmp[q] *= _alpha[q]
+                        back_term = np.ones(Q)
+                        if t < T - 1:
+                            if _pres_trans[i, t]:
+                                back_term = nb_backward_temp_msg_term(
+                                    Q, T, trans_prob, i, t, _psi_t
+                                )
+                                # REMOVE CHECK AFTER FIX
+                                if np.isnan(back_term).sum() > 0:
+                                    print("i,t:", i, t)
+                                    print("back:", back_term)
+                                    raise RuntimeError("Problem w back term")
+                                for q in range(Q):
+                                    tmp[q] *= back_term[q]
+                        ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
+                        forward_term = np.ones(Q)
+                        if t > 0:
+                            if _pres_trans[i, t - 1]:
+                                tmp_backwards_msg = tmp.copy()
+                                if tmp_backwards_msg.sum() > 0:
+                                    tmp_backwards_msg /= tmp_backwards_msg.sum()
+                                for q in range(Q):
+                                    if tmp_backwards_msg[q] < TOL:
+                                        tmp_backwards_msg[q] = TOL
+                                if tmp_backwards_msg.sum() > 0:
+                                    tmp_backwards_msg /= tmp_backwards_msg.sum()
+                                msg_diff += (
+                                    np.abs(
+                                        tmp_backwards_msg - _psi_t[i, t - 1, :, 0]
+                                    ).mean()
+                                    / n_msgs
+                                )
+                                _psi_t[i, t - 1, :, 0] = tmp_backwards_msg
+                                forward_term = nb_forward_temp_msg_term(
+                                    Q, trans_prob, i, t, _psi_t
+                                )
+                            else:
+                                # node present at t but not t-1, use alpha instead
+                                forward_term = _alpha.copy()
+                            for q in range(Q):
+                                tmp[q] *= forward_term[q]
+                        ## UPDATE SPATIAL MESSAGES FROM i AT t ##
+                        # tmp_spatial_msg = (
+                        #     np.expand_dims(tmp, 0) / field_iter
+                        # )  # can't use as problem if field_iter << 1
+                        tmp_spatial_msg = np.ones((deg_i, Q))
+                        for nbr_idx in range(deg_i):
+                            for q in range(Q):
+                                if field_iter[nbr_idx, q] > TOL:
+                                    tmp_spatial_msg[nbr_idx, q] = (
+                                        tmp[q] / field_iter[nbr_idx, q]
+                                    )
+                                else:
+                                    # too small for stable div, construct
+                                    # directly instead
+                                    tmp_loc = back_term[q] * forward_term[q]
+                                    for k in range(deg_i):
+                                        if k != nbr_idx:
+                                            tmp_loc *= field_iter[k, q]
+                                    tmp_spatial_msg[nbr_idx, q] = tmp_loc
+                        tmp_spat_sums = np.empty(deg_i)
+                        for nbr_idx in range(deg_i):
+                            tmp_spat_sums[nbr_idx] = tmp_spatial_msg[nbr_idx, :].sum()
+                        for nbr_idx in range(deg_i):
+                            if tmp_spat_sums[nbr_idx] > 0:
+                                for q in range(Q):
+                                    tmp_spatial_msg[nbr_idx, q] /= tmp_spat_sums[
+                                        nbr_idx
+                                    ]
+                        for nbr_idx in range(deg_i):
+                            for q in range(Q):
+                                if tmp_spatial_msg[nbr_idx, q] < TOL:
+                                    tmp_spatial_msg[nbr_idx, q] = TOL
+                        for nbr_idx in range(deg_i):
+                            tmp_spat_sums[nbr_idx] = tmp_spatial_msg[nbr_idx, :].sum()
+                        for nbr_idx in range(deg_i):
+                            if tmp_spat_sums[nbr_idx] > 0:
+                                for q in range(Q):
+                                    tmp_spatial_msg[nbr_idx, q] /= tmp_spat_sums[
+                                        nbr_idx
+                                    ]
+                        for nbr_idx in range(deg_i):
+                            msg_diff += (
+                                np.abs(
+                                    tmp_spatial_msg[nbr_idx, :]
+                                    - _psi_e[t][i][nbr_idx, :]
+                                ).mean()
+                                * deg_i
+                                / n_msgs
+                            )  # NB need to mult by deg_i so weighted correctly
+                        _psi_e[t][i] = tmp_spatial_msg
+                        ## UPDATE FORWARDS MESSAGES FROM i AT t ##
+                        if t < T - 1 and _pres_trans[i, t]:
+                            tmp_forwards_msg = spatial_msg_term
+                            if t > 0:
+                                for q in range(Q):
+                                    tmp_forwards_msg[q] *= forward_term[q]
+                                if tmp_forwards_msg.sum() > 0:
+                                    tmp_forwards_msg /= tmp_forwards_msg.sum()
+                                for q in range(Q):
+                                    if tmp_forwards_msg[q] < TOL:
+                                        tmp_forwards_msg[q] = TOL
+                                if tmp_forwards_msg.sum() > 0:
+                                    tmp_forwards_msg /= tmp_forwards_msg.sum()
+                                msg_diff += (
+                                    np.abs(tmp_forwards_msg - _psi_t[i, t, :, 1]).mean()
+                                    / n_msgs
+                                )
+                                _psi_t[i, t, :, 1] = tmp_forwards_msg
+                            ## UPDATE MARGINAL OF i AT t ##
+                            tmp_marg = tmp
+                            if tmp_marg.sum() > 0:
+                                tmp_marg /= tmp_marg.sum()
+                            for q in range(Q):
+                                if tmp_marg[q] < TOL:
+                                    tmp_marg[q] = TOL
+                            if tmp_marg.sum() > 0:
+                                tmp_marg /= tmp_marg.sum()
+                            node_marg[i, t, :] = tmp_marg
+
+                        else:
+                            log_field_iter = np.empty((deg_i, Q))
                             (
                                 spatial_msg_term,
-                                field_iter,
-                            ) = nb_spatial_msg_term_small_deg(
+                                max_log_spatial_msg_term,
+                                log_field_iter,
+                            ) = nb_spatial_msg_term_large_deg(
                                 Q,
                                 nbrs,
                                 e_nbrs_inv[t][i],
@@ -552,10 +711,6 @@ def nb_update_node_marg(
                                 block_edge_prob,
                                 _psi_e,
                             )
-                            # now terms using current h have been calculated, subtract old marg vals
-                            # nb_update_h(
-                            #    ...
-                            # ) # Possible problem using when parallel, just write out instead
                             if deg_corr:
                                 for q in range(Q):
                                     for r in range(Q):
@@ -574,30 +729,30 @@ def nb_update_node_marg(
                             tmp = spatial_msg_term.copy()
                             if t == 0:
                                 for q in range(Q):
-                                    tmp[q] *= _alpha[q]
-                            back_term = np.ones(Q)
+                                    tmp[q] += np.log(_alpha[q])
+                            back_term = np.zeros(Q)
                             if t < T - 1:
                                 if _pres_trans[i, t]:
-                                    back_term = nb_backward_temp_msg_term(
-                                        Q, T, trans_prob, i, t, _psi_t
+                                    back_term = np.log(
+                                        nb_backward_temp_msg_term(
+                                            Q, T, trans_prob, i, t, _psi_t
+                                        )
                                     )
-                                    # REMOVE CHECK AFTER FIX
-                                    if np.isnan(back_term).sum() > 0:
-                                        print("i,t:", i, t)
-                                        print("back:", back_term)
-                                        raise RuntimeError("Problem w back term")
-                                    for q in range(Q):
-                                        tmp[q] *= back_term[q]
+                                for q in range(Q):
+                                    tmp[q] += back_term[q]
                             ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
-                            forward_term = np.ones(Q)
+                            forward_term = np.zeros(Q)
                             if t > 0:
                                 if _pres_trans[i, t - 1]:
-                                    tmp_backwards_msg = tmp.copy()
+                                    tmp_backwards_msg = np.exp(
+                                        tmp - max_log_spatial_msg_term
+                                    )
                                     if tmp_backwards_msg.sum() > 0:
                                         tmp_backwards_msg /= tmp_backwards_msg.sum()
                                     for q in range(Q):
                                         if tmp_backwards_msg[q] < TOL:
                                             tmp_backwards_msg[q] = TOL
+                                    # tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = TOL
                                     if tmp_backwards_msg.sum() > 0:
                                         tmp_backwards_msg /= tmp_backwards_msg.sum()
                                     msg_diff += (
@@ -607,33 +762,32 @@ def nb_update_node_marg(
                                         / n_msgs
                                     )
                                     _psi_t[i, t - 1, :, 0] = tmp_backwards_msg
-                                    forward_term = nb_forward_temp_msg_term(
-                                        Q, trans_prob, i, t, _psi_t
+                                    forward_term = np.log(
+                                        nb_forward_temp_msg_term(
+                                            Q, trans_prob, i, t, _psi_t
+                                        )
                                     )
                                 else:
-                                    # node present at t but not t-1, use alpha instead
-                                    forward_term = _alpha.copy()
+                                    # node present at t but not t-1, so use alpha instead
+                                    forward_term = np.log(_alpha)
                                 for q in range(Q):
-                                    tmp[q] *= forward_term[q]
+                                    tmp[q] += forward_term[q]
                             ## UPDATE SPATIAL MESSAGES FROM i AT t ##
-                            # tmp_spatial_msg = (
-                            #     np.expand_dims(tmp, 0) / field_iter
-                            # )  # can't use as problem if field_iter << 1
-                            tmp_spatial_msg = np.ones((deg_i, Q))
+                            tmp_spatial_msg = -1.0 * log_field_iter.copy()
                             for nbr_idx in range(deg_i):
                                 for q in range(Q):
-                                    if field_iter[nbr_idx, q] > TOL:
-                                        tmp_spatial_msg[nbr_idx, q] = (
-                                            tmp[q] / field_iter[nbr_idx, q]
-                                        )
-                                    else:
-                                        # too small for stable div, construct
-                                        # directly instead
-                                        tmp_loc = back_term[q] * forward_term[q]
-                                        for k in range(deg_i):
-                                            if k != nbr_idx:
-                                                tmp_loc *= field_iter[k, q]
-                                        tmp_spatial_msg[nbr_idx, q] = tmp_loc
+                                    tmp_spatial_msg[nbr_idx, q] += tmp[q]
+                            log_field_iter_max = np.empty(deg_i)
+                            for nbr_idx in range(deg_i):
+                                log_field_iter_max[nbr_idx] = tmp_spatial_msg[
+                                    nbr_idx, :
+                                ].max()
+                            for nbr_idx in range(deg_i):
+                                for q in range(Q):
+                                    tmp_spatial_msg[nbr_idx, q] = np.exp(
+                                        tmp_spatial_msg[nbr_idx, q]
+                                        - log_field_iter_max[nbr_idx]
+                                    )
                             tmp_spat_sums = np.empty(deg_i)
                             for nbr_idx in range(deg_i):
                                 tmp_spat_sums[nbr_idx] = tmp_spatial_msg[
@@ -659,22 +813,17 @@ def nb_update_node_marg(
                                         tmp_spatial_msg[nbr_idx, q] /= tmp_spat_sums[
                                             nbr_idx
                                         ]
-                            for nbr_idx in range(deg_i):
-                                msg_diff += (
-                                    np.abs(
-                                        tmp_spatial_msg[nbr_idx, :]
-                                        - _psi_e[t][i][nbr_idx, :]
-                                    ).mean()
-                                    * deg_i
-                                    / n_msgs
-                                )  # NB need to mult by deg_i so weighted correctly
                             _psi_e[t][i] = tmp_spatial_msg
-                            ## UPDATE FORWARDS MESSAGES FROM i AT t ##
-                            if t < T - 1 and _pres_trans[i, t]:
-                                tmp_forwards_msg = spatial_msg_term
-                                if t > 0:
+                            # ## UPDATE FORWARDS MESSAGES FROM i AT t ##
+                            if t < T - 1:
+                                if _pres_trans[i, t]:
+                                    tmp_forwards_msg = np.empty(Q)
                                     for q in range(Q):
-                                        tmp_forwards_msg[q] *= forward_term[q]
+                                        tmp_forwards_msg[q] = np.exp(
+                                            tmp[q]
+                                            - back_term[q]
+                                            - max_log_spatial_msg_term
+                                        )
                                     if tmp_forwards_msg.sum() > 0:
                                         tmp_forwards_msg /= tmp_forwards_msg.sum()
                                     for q in range(Q):
@@ -689,198 +838,36 @@ def nb_update_node_marg(
                                         / n_msgs
                                     )
                                     _psi_t[i, t, :, 1] = tmp_forwards_msg
-                                ## UPDATE MARGINAL OF i AT t ##
-                                tmp_marg = tmp
-                                if tmp_marg.sum() > 0:
-                                    tmp_marg /= tmp_marg.sum()
-                                for q in range(Q):
-                                    if tmp_marg[q] < TOL:
-                                        tmp_marg[q] = TOL
-                                if tmp_marg.sum() > 0:
-                                    tmp_marg /= tmp_marg.sum()
-                                node_marg[i, t, :] = tmp_marg
-
-                            else:
-                                log_field_iter = np.empty((deg_i, Q))
-                                (
-                                    spatial_msg_term,
-                                    max_log_spatial_msg_term,
-                                    log_field_iter,
-                                ) = nb_spatial_msg_term_large_deg(
-                                    Q,
-                                    nbrs,
-                                    e_nbrs_inv[t][i],
-                                    nbrs_inv[t][i],
-                                    deg_corr,
-                                    degs,
-                                    i,
-                                    t,
-                                    dc_lkl,
-                                    _h,
-                                    meta_prob,
-                                    block_edge_prob,
-                                    _psi_e,
+                            # ## UPDATE MARGINAL OF i AT t ##
+                            tmp_marg = np.empty(Q)
+                            for q in range(Q):
+                                tmp_marg[q] = np.exp(tmp[q] - max_log_spatial_msg_term)
+                            if tmp_marg.sum() > 0:
+                                tmp_marg /= tmp_marg.sum()
+                            for q in range(Q):
+                                if tmp_marg[q] < TOL:
+                                    tmp_marg[q] = TOL
+                            if tmp_marg.sum() > 0:
+                                tmp_marg /= tmp_marg.sum()
+                            node_marg[i, t, :] = tmp_marg
+                            # GOOD TO HERE
+                    # update h with new values
+                    if deg_corr:
+                        for q in range(Q):
+                            for r in range(Q):
+                                _h[q, t] += (
+                                    block_edge_prob[r, q, t]
+                                    * node_marg[i, t, r]
+                                    * degs[i, t, 1]
                                 )
-                                if deg_corr:
-                                    for q in range(Q):
-                                        for r in range(Q):
-                                            _h[q, t] -= (
-                                                block_edge_prob[r, q, t]
-                                                * node_marg[i, t, r]
-                                                * degs[i, t, 1]
-                                            )
-                                else:
-                                    for q in range(Q):
-                                        for r in range(Q):
-                                            _h[q, t] -= (
-                                                block_edge_prob[r, q, t]
-                                                * node_marg[i, t, r]
-                                            )
-                                tmp = spatial_msg_term.copy()
-                                if t == 0:
-                                    for q in range(Q):
-                                        tmp[q] += np.log(_alpha[q])
-                                back_term = np.zeros(Q)
-                                if t < T - 1:
-                                    if _pres_trans[i, t]:
-                                        back_term = np.log(
-                                            nb_backward_temp_msg_term(
-                                                Q, T, trans_prob, i, t, _psi_t
-                                            )
-                                        )
-                                    for q in range(Q):
-                                        tmp[q] += back_term[q]
-                                ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
-                                forward_term = np.zeros(Q)
-                                if t > 0:
-                                    if _pres_trans[i, t - 1]:
-                                        tmp_backwards_msg = np.exp(
-                                            tmp - max_log_spatial_msg_term
-                                        )
-                                        if tmp_backwards_msg.sum() > 0:
-                                            tmp_backwards_msg /= tmp_backwards_msg.sum()
-                                        for q in range(Q):
-                                            if tmp_backwards_msg[q] < TOL:
-                                                tmp_backwards_msg[q] = TOL
-                                        # tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = TOL
-                                        if tmp_backwards_msg.sum() > 0:
-                                            tmp_backwards_msg /= tmp_backwards_msg.sum()
-                                        msg_diff += (
-                                            np.abs(
-                                                tmp_backwards_msg
-                                                - _psi_t[i, t - 1, :, 0]
-                                            ).mean()
-                                            / n_msgs
-                                        )
-                                        _psi_t[i, t - 1, :, 0] = tmp_backwards_msg
-                                        forward_term = np.log(
-                                            nb_forward_temp_msg_term(
-                                                Q, trans_prob, i, t, _psi_t
-                                            )
-                                        )
-                                    else:
-                                        # node present at t but not t-1, so use alpha instead
-                                        forward_term = np.log(_alpha)
-                                    for q in range(Q):
-                                        tmp[q] += forward_term[q]
-                                ## UPDATE SPATIAL MESSAGES FROM i AT t ##
-                                tmp_spatial_msg = -1.0 * log_field_iter.copy()
-                                for nbr_idx in range(deg_i):
-                                    for q in range(Q):
-                                        tmp_spatial_msg[nbr_idx, q] += tmp[q]
-                                log_field_iter_max = np.empty(deg_i)
-                                for nbr_idx in range(deg_i):
-                                    log_field_iter_max[nbr_idx] = tmp_spatial_msg[
-                                        nbr_idx, :
-                                    ].max()
-                                for nbr_idx in range(deg_i):
-                                    for q in range(Q):
-                                        tmp_spatial_msg[nbr_idx, q] = np.exp(
-                                            tmp_spatial_msg[nbr_idx, q]
-                                            - log_field_iter_max[nbr_idx]
-                                        )
-                                tmp_spat_sums = np.empty(deg_i)
-                                for nbr_idx in range(deg_i):
-                                    tmp_spat_sums[nbr_idx] = tmp_spatial_msg[
-                                        nbr_idx, :
-                                    ].sum()
-                                for nbr_idx in range(deg_i):
-                                    if tmp_spat_sums[nbr_idx] > 0:
-                                        for q in range(Q):
-                                            tmp_spatial_msg[
-                                                nbr_idx, q
-                                            ] /= tmp_spat_sums[nbr_idx]
-                                for nbr_idx in range(deg_i):
-                                    for q in range(Q):
-                                        if tmp_spatial_msg[nbr_idx, q] < TOL:
-                                            tmp_spatial_msg[nbr_idx, q] = TOL
-                                for nbr_idx in range(deg_i):
-                                    tmp_spat_sums[nbr_idx] = tmp_spatial_msg[
-                                        nbr_idx, :
-                                    ].sum()
-                                for nbr_idx in range(deg_i):
-                                    if tmp_spat_sums[nbr_idx] > 0:
-                                        for q in range(Q):
-                                            tmp_spatial_msg[
-                                                nbr_idx, q
-                                            ] /= tmp_spat_sums[nbr_idx]
-                                _psi_e[t][i] = tmp_spatial_msg
-                                # ## UPDATE FORWARDS MESSAGES FROM i AT t ##
-                                if t < T - 1:
-                                    if _pres_trans[i, t]:
-                                        tmp_forwards_msg = np.empty(Q)
-                                        for q in range(Q):
-                                            tmp_forwards_msg[q] = np.exp(
-                                                tmp[q]
-                                                - back_term[q]
-                                                - max_log_spatial_msg_term
-                                            )
-                                        if tmp_forwards_msg.sum() > 0:
-                                            tmp_forwards_msg /= tmp_forwards_msg.sum()
-                                        for q in range(Q):
-                                            if tmp_forwards_msg[q] < TOL:
-                                                tmp_forwards_msg[q] = TOL
-                                        if tmp_forwards_msg.sum() > 0:
-                                            tmp_forwards_msg /= tmp_forwards_msg.sum()
-                                        msg_diff += (
-                                            np.abs(
-                                                tmp_forwards_msg - _psi_t[i, t, :, 1]
-                                            ).mean()
-                                            / n_msgs
-                                        )
-                                        _psi_t[i, t, :, 1] = tmp_forwards_msg
-                                # ## UPDATE MARGINAL OF i AT t ##
-                                tmp_marg = np.empty(Q)
-                                for q in range(Q):
-                                    tmp_marg[q] = np.exp(
-                                        tmp[q] - max_log_spatial_msg_term
-                                    )
-                                if tmp_marg.sum() > 0:
-                                    tmp_marg /= tmp_marg.sum()
-                                for q in range(Q):
-                                    if tmp_marg[q] < TOL:
-                                        tmp_marg[q] = TOL
-                                if tmp_marg.sum() > 0:
-                                    tmp_marg /= tmp_marg.sum()
-                                node_marg[i, t, :] = tmp_marg
-                                # GOOD TO HERE
-                        # update h with new values
-                        if deg_corr:
-                            for q in range(Q):
-                                for r in range(Q):
-                                    _h[q, t] += (
-                                        block_edge_prob[r, q, t]
-                                        * node_marg[i, t, r]
-                                        * degs[i, t, 1]
-                                    )
-                        else:
-                            for q in range(Q):
-                                for r in range(Q):
-                                    _h[q, t] += (
-                                        block_edge_prob[r, q, t] * node_marg[i, t, r]
-                                    )
-                else:
-                    node_marg[i, t, :] = 0.0
+                    else:
+                        for q in range(Q):
+                            for r in range(Q):
+                                _h[q, t] += (
+                                    block_edge_prob[r, q, t] * node_marg[i, t, r]
+                                )
+            else:
+                node_marg[i, t, :] = 0.0
 
     if np.isnan(msg_diff):
         for i in range(N):
