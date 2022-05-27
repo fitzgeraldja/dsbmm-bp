@@ -913,7 +913,7 @@ def nb_compute_free_energy(
     f_site = 0.0
     f_link = 0.0
     last_term = 0.0  # something like average degree, but why?
-    for i in range(N):
+    for i in prange(N):
         for t in range(T):
             if _pres_nodes[i, t]:
                 nbrs = all_nbrs[t][i]
@@ -1256,3 +1256,83 @@ def nb_update_twopoint_temp_marg(
                     tmp /= tmp.sum()
                 twopoint_t_marg[i, t, :, :] = tmp
     return twopoint_t_marg
+
+
+# if __name__ == "__main__":
+#     N = 1000
+#     T = 5
+#     Q = 10
+#     deg_corr = False
+#     degs = np.random.randint(1, 10, (N, T, 2))
+#     _pres_nodes = np.random.rand(N, T) < 0.95
+#     _pres_trans = np.random.rand(N, T - 1) < 0.9
+#     tmp = List()
+#     for t in range(T):
+#         tmp2 = List()
+#         for i in range(N):
+#             tmp2.append(np.random.randint(0, N, degs[i, t, 0]))
+#         tmp.append(tmp2)
+#     all_nbrs = tmp
+#     nbrs_inv = tmp
+#     e_nbrs_inv = tmp
+#     n_msgs = 1000
+#     block_edge_prob = np.random.rand(Q, Q, T)
+#     trans_prob = np.random.rand(Q, Q)
+#     dc_lkl = np.random.rand(N, T, Q)
+#     _h = np.random.rand(Q, T)
+#     meta_prob = np.random.rand(N, T, Q)
+#     _alpha = np.random.rand(Q)
+#     node_marg = np.random.rand(N, T)
+#     tmp = List()
+#     for t in range(T):
+#         tmp2 = List()
+#         for i in range(N):
+#             tmp2.append(np.random.rand(degs[i, t, 0], Q))
+#         tmp.append(tmp2)
+#     _psi_e = tmp
+#     _psi_t = np.random.rand(N, T, Q, 2)
+#     msg_diff = 0.5
+#     _edge_vals = np.random.randint(0, N, (N * T, 4))
+#     directed = False
+#     twopoint_e_marg = tmp
+#     twopoint_t_marg = np.random.rand(N, T, Q, Q)
+
+#     nb_update_node_marg(
+#         N,
+#         T,
+#         Q,
+#         deg_corr,
+#         degs,
+#         _pres_nodes,
+#         _pres_trans,
+#         all_nbrs,
+#         nbrs_inv,
+#         e_nbrs_inv,
+#         n_msgs,
+#         block_edge_prob,
+#         trans_prob,
+#         dc_lkl,
+#         _h,
+#         meta_prob,
+#         _alpha,
+#         node_marg,
+#         _psi_e,
+#         _psi_t,
+#         msg_diff,
+#     )
+#     nb_update_node_marg.parallel_diagnostics(level=4)
+#     nb_update_twopoint_spatial_marg(
+#         Q,
+#         _edge_vals,
+#         all_nbrs[0][0],
+#         nbrs_inv,
+#         directed,
+#         deg_corr,
+#         dc_lkl,
+#         block_edge_prob,
+#         _psi_e,
+#         twopoint_e_marg,
+#     )
+#     nb_update_twopoint_temp_marg(
+#         N, T, Q, _pres_trans, trans_prob, _psi_t, twopoint_t_marg
+#     )

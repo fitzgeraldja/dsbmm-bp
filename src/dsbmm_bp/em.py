@@ -42,12 +42,14 @@ class EM:
         sparse_adj=False,
         try_parallel=False,
         n_runs=5,
+        patience=3,
         tuning_param=1.0,
         deg_corr=False,
         verbose=True,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
+        self.patience = patience
         self.msg_init_mode = msg_init_mode
         self.A = data["A"]
         if type(tuning_param) == float:
@@ -285,6 +287,7 @@ class EM:
             # ...
         self.best_Z = None
         self.best_val = 0.0
+        self.poor_run_ctr = 0  # ctr for runs without reduction in free energy
 
     def perturb_init_Z(self, pert_prop=0.05):
         # add some noise to init clustering
@@ -490,10 +493,17 @@ class EM:
                     self.best_tun_param = self.dsbmm.tuning_param
                 elif current_energy < self.best_val:
                     # new best
+                    self.poor_run_ctr = 0
                     self.best_val = current_energy
                     self.bp.model.set_Z_by_MAP()
                     self.best_Z = self.bp.model.Z
                     self.best_tun_param = self.dsbmm.tuning_param
+                else:
+                    self.poor_run_ctr += 1
+                    if self.poor_run_ctr >= self.patience:
+                        if self.verbose:
+                            print("~~~~~~ OUT OF PATIENCE, STOPPING EARLY ~~~~~~")
+                        break
             else:
                 self.bp.model.set_Z_by_MAP()
                 current_score = self.ari_score(self.true_Z)

@@ -37,6 +37,13 @@ parser.add_argument(
     help="Try with numba parallelism (currently slower)",
 )
 
+parser.add_argument(
+    "--tuning_param",
+    "-tunp",
+    type=float,
+    default=1.0,
+)
+
 args = parser.parse_args()
 
 
@@ -244,9 +251,12 @@ if __name__ == "__main__":
                     true_Z = sample.pop("Z")
                     ## Initialise
                     if testset_name != "scaling":
-                        if testset_name == "align":
-                            print(f"alignment = {params['meta_aligned']}")
                         model = em.EM(sample, verbose=verbose)
+                    elif testset_name == "align":
+                        print(f"alignment = {params['meta_aligned']}")
+                        model = em.EM(
+                            sample, verbose=verbose, tuning_param=args.tuning_param
+                        )
                     else:
                         print(f"N = {params['N']}")
                         model = em.EM(
@@ -343,20 +353,28 @@ if __name__ == "__main__":
                         0.5
                     )  # sleep a bit to allow threads to complete, TODO: properly sort this
                     # save after every sample in case of crash
+                    tp_str = (
+                        "_tp" + str(args.tuning_param)
+                        if args.tuning_param is not None
+                        else ""
+                    )
                     if testset_name == "align":
                         test_Z[test_no, samp_no, :, :] = model.bp.model.jit_model.Z
                         with open(
-                            f"../../results/{testset_name}_test_Z.pkl", "wb"
+                            f"../../results/{testset_name}_test_Z{tp_str}.pkl",
+                            "wb",
                         ) as f:
                             pickle.dump(test_Z, f)
-                    with open(f"../../results/{testset_name}_test_aris.pkl", "wb") as f:
+                    with open(
+                        f"../../results/{testset_name}_test_aris{tp_str}.pkl", "wb"
+                    ) as f:
                         pickle.dump(test_aris, f)
                     with open(
-                        f"../../results/{testset_name}_test_times.pkl", "wb"
+                        f"../../results/{testset_name}_test_times{tp_str}.pkl", "wb"
                     ) as f:
                         pickle.dump(test_times, f)
                     with open(
-                        f"../../results/{testset_name}_init_times.pkl", "wb"
+                        f"../../results/{testset_name}_init_times{tp_str}.pkl", "wb"
                     ) as f:
                         pickle.dump(init_times, f)
             print(f"Finished test {test_no+1} for true params:")

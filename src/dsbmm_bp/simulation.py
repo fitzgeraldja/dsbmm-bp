@@ -903,10 +903,12 @@ N = 100 * np.ones_like(test_no)
 align_test_params["N"] = N
 Q = 4 * np.ones_like(test_no)
 align_test_params["Q"] = Q
-c_in = np.concatenate([10 * np.ones(n_tests // 2), 6 * np.ones(n_tests - n_tests // 2)])
+c_in = np.concatenate(
+    [15 * np.ones(n_tests // 2), 10 * np.ones(n_tests - n_tests // 2)]
+)
 p_in = [ci / ni for ci, ni in zip(c_in, N)]
 align_test_params["p_in"] = p_in
-c_out = 2
+c_out = 4
 p_out = [c_out / ni for ni in N]
 align_test_params["p_out"] = p_out
 p_stay = 0.8 * np.ones_like(test_no)
