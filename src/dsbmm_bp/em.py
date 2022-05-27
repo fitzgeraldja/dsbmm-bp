@@ -154,16 +154,16 @@ class EM:
             self._pres_nodes = np.zeros(
                 (self.N, self.T), dtype=bool
             )  # N x T boolean array w i,t True if i present in net at time t
-        for t in range(self.T):
-            indptrs = self.A[t].indptr
-            idxs = self.A[t].indices
-            indptrsT = self.A[t].transpose().indptr
-            idxsT = self.A[t].transpose().indices
-            for i in range(self.N):
-                val_locs = idxs[indptrs[i] : indptrs[i + 1]]
-                self._pres_nodes[val_locs, t] = True
-                val_locsT = idxsT[indptrsT[i] : indptrsT[i + 1]]
-                self._pres_nodes[val_locsT, t] = True
+            for t in range(self.T):
+                indptrs = self.A[t].indptr
+                idxs = self.A[t].indices
+                indptrsT = self.A[t].transpose().indptr
+                idxsT = self.A[t].transpose().indices
+                for i in range(self.N):
+                    val_locs = idxs[indptrs[i] : indptrs[i + 1]]
+                    self._pres_nodes[val_locs, t] = True
+                    val_locsT = idxsT[indptrsT[i] : indptrsT[i + 1]]
+                    self._pres_nodes[val_locsT, t] = True
         self.k_means_init_Z[~self._pres_nodes] = -1
         try:
             assert self.k_means_init_Z.shape == (self.N, self.T)
