@@ -4,7 +4,7 @@ from numba import prange
 from numba.typed import List
 
 
-@njit(cache=True)
+@njit(parallel=True, cache=True)
 def numba_ix(arr, rows, cols):
     """
     Numba compatible implementation of arr[np.ix_(rows, cols)] for 2D arrays.
