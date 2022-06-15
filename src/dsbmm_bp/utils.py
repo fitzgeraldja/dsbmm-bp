@@ -1,6 +1,6 @@
 import numpy as np
-from numba import njit
-from numba import prange
+from csr import CSR
+from numba import bool_, njit, prange
 from numba.typed import List
 
 
@@ -23,6 +23,56 @@ def numba_ix(arr, rows, cols):
     arr_1d = arr.reshape((arr.shape[0] * arr.shape[1], 1))
     slice_1d = np.take(arr_1d, one_d_index)
     return slice_1d.reshape((len(rows), len(cols)))
+
+
+@njit
+def is_connected_dense(G: np.array):
+    """Check if a graph is connected
+
+    Args:
+        G (np.array): (Dense) adjacency matrix of the
+                      graph
+
+    Returns:
+        bool: True if graph connected, False otherwise
+    """
+    # TODO: check if actually faster in native python
+    # using deques
+
+    visited = np.zeros(G.shape[0], dtype=bool_)
+    visited[0] = True
+    stack = [0]
+    while stack:
+        node = stack.pop()
+        for n in np.nonzero(G[node])[0]:
+            if not visited[n]:
+                visited[n] = True
+                stack.append(n)
+    return np.all(visited)
+
+
+@njit
+def is_connected_sparse(G: CSR):
+    """Check if a graph is connected
+
+    Args:
+        G (CSR): (Sparse) adjacency matrix of the graph
+
+    Returns:
+        bool: True if graph is connected, False otherwise
+    """
+    # TODO: symmetrise first so only checking if weakly
+    # connected
+    visited = np.zeros(G.nrows, dtype=bool_)
+    visited[0] = True
+    stack = [0]
+    while stack:
+        node = stack.pop()
+        for n in G.row_cs(node):
+            if not visited[n]:
+                visited[n] = True
+                stack.append(n)
+    return np.all(visited)
 
 
 @njit(fastmath=True, error_model="numpy", parallel=True)
