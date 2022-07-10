@@ -1,11 +1,9 @@
+# type: ignore
 import pickle
 
 import numpy as np
 from numba import njit
-from scipy.stats import bernoulli
-from scipy.stats import nbinom
-from scipy.stats import norm
-from scipy.stats import poisson
+from scipy.stats import bernoulli, nbinom, norm, poisson
 from sklearn.metrics import adjusted_rand_score as ari
 from sklearn.metrics import normalized_mutual_info_score as nmi
 
@@ -133,6 +131,9 @@ def gen_ppm(
                     # [pois_zeros] = poisson.rvs(
                     #     ZTP_params[t, q, r], size=pois_zeros.sum()
                     # )
+            if not directed:
+                # symmetrise and binarise
+                A[t] = (A[t] + A[t].T > 0) * 1.0
     else:
         # sparse construction - only implemented currently for p_in / p_out formulation
         try:
@@ -188,9 +189,9 @@ def pick_category(p_dist, n_samps):
 def evolve_Z(Z_1, trans_prob, T):
     Z = np.zeros((len(Z_1), T))
     Z[:, 0] = Z_1
-    for i in range(T - 1):
-        Z[:, i + 1] = np.array(
-            [pick_category(trans_prob[int(zi), :], 1) for zi in Z[:, i]]
+    for t in range(T - 1):
+        Z[:, t + 1] = np.array(
+            [pick_category(trans_prob[int(zi), :], 1) for zi in Z[:, t]]
         )
     return Z.astype(np.int32)
 
@@ -321,7 +322,7 @@ def sample_dynsbm_A(
         A_zeros = A == 0
         for t in range(T):
             for q in range(Q):
-                for r in range(Q):
+                for r in range(q, Q):
                     pois_tmp = poisson.rvs(
                         ZTP_params[t, q, r],
                         size=(idxs[t][q].sum(), idxs[t][r].sum()),
@@ -334,6 +335,25 @@ def sample_dynsbm_A(
                         )
                         pois_zeros = pois_tmp == 0
                     A[t][np.ix_(idxs[t][q], idxs[t][r])] = pois_tmp
+                    if r != q:
+                        if not directed:
+                            A[t][np.ix_(idxs[t][r], idxs[t][q])] = A[t][
+                                np.ix_(idxs[t][q], idxs[t][r])
+                            ]
+                        else:
+                            pois_tmp = poisson.rvs(
+                                ZTP_params[t, r, q],
+                                size=(idxs[t][r].sum(), idxs[t][q].sum()),
+                            )
+                            pois_zeros = pois_tmp == 0
+                            # ensure all values >0
+                            while pois_zeros.sum() > 0:
+                                pois_tmp[pois_zeros] = poisson.rvs(
+                                    ZTP_params[t, r, q], size=pois_zeros.sum()
+                                )
+                                pois_zeros = pois_tmp == 0
+                            A[t][np.ix_(idxs[t][r], idxs[t][q])] = pois_tmp
+
         if A_zeros.sum() == 0:
             print("Problems")
         A[A_zeros] = 0.0
@@ -732,7 +752,7 @@ c_in = [
     6,
     10,
     6,
-]
+]  # type: ignore
 p_in = [ci / ni for ci, ni in zip(c_in, N)]
 default_test_params["p_in"] = p_in
 c_out = 2
@@ -747,7 +767,7 @@ p_stay = [
     0.8,
     0.6,
     0.6,
-]
+]  # type: ignore
 default_test_params["p_stay"] = p_stay
 T = 5
 default_test_params["T"] = T
@@ -755,22 +775,22 @@ meta_types = ["poisson", "indep bernoulli"]
 default_test_params["meta_types"] = meta_types
 L = 4
 default_test_params["L"] = L
-meta_dims = [1, L]
+meta_dims = [1, L]  # type: ignore
 default_test_params["meta_dims"] = meta_dims
 pois_params = [
     np.array(
         [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
     ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
     for Q_i in Q
-]
-base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
+]  # type: ignore
+base_bern_params = 0.1 * (np.ones((L, 1, T)))  # type: ignore # +np.random.normal(loc=0,scale=0.1))
 indep_bern_params = [
     np.concatenate(
         [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
         axis=1,
     )
     for Q_i in Q
-]
+]  # type: ignore
 meta_params = list(zip(pois_params, indep_bern_params))
 default_test_params["meta_params"] = meta_params
 meta_align = [
@@ -782,7 +802,7 @@ meta_align = [
     False,
     False,
     False,
-]
+]  # type: ignore
 default_test_params["meta_align"] = meta_align
 
 # OG paper tests
@@ -791,18 +811,18 @@ og_test_params["test_no"] = []
 og_test_params["n_samps"] = n_samps
 Q = 2
 og_test_params["Q"] = Q
-N = 100
+N = 100  # type: ignore
 og_test_params["N"] = N
 Ts = [5, 10]
-og_test_params["T"] = []
+og_test_params["T"] = []  # type: ignore
 beta_11 = np.array([0.2, 0.25, 0.3, 0.4, 0.3])
 beta_12 = np.array([0.1, 0.1, 0.1, 0.1, 0.1])
-beta_22 = np.array([0.15, 0.2, 0.2, 0.2, 0.3])
+beta_22 = np.array([0.15, 0.2, 0.2, 0.2, 0.3])  # type: ignore
 beta_mats = [
     np.array([[beta_11[i], beta_12[i]], [beta_12[i], beta_22[i]]])
     for i in range(len(beta_11))
-]
-og_test_params["beta_mat"] = []
+]  # type: ignore
+og_test_params["beta_mat"] = []  # type: ignore
 
 # pi_low, pi_medium, pi_high from paper
 trans_mats = [gen_trans_mat(p, Q) for p in [0.6, 0.75, 0.9]]
@@ -904,11 +924,11 @@ align_test_params["N"] = N
 Q = 4 * np.ones_like(test_no)
 align_test_params["Q"] = Q
 c_in = np.concatenate(
-    [15 * np.ones(n_tests // 2), 10 * np.ones(n_tests - n_tests // 2)]
+    [40 * np.ones(n_tests // 2), 30 * np.ones(n_tests - n_tests // 2)]
 )
 p_in = [ci / ni for ci, ni in zip(c_in, N)]
 align_test_params["p_in"] = p_in
-c_out = 4
+c_out = 10
 p_out = [c_out / ni for ni in N]
 align_test_params["p_out"] = p_out
 p_stay = 0.8 * np.ones_like(test_no)
@@ -938,7 +958,8 @@ indep_bern_params = [
 ]
 meta_params = list(zip(pois_params, indep_bern_params))
 align_test_params["meta_params"] = meta_params
-tmp = np.linspace(0.1, 1.0, n_tests // 2)
+tmp = np.linspace(0.1, 1.0, n_tests // 4)
+tmp = np.tile(tmp, 2)
 meta_align = np.zeros(n_tests)
 meta_align[::2] = tmp
 meta_align[1::2] = tmp
