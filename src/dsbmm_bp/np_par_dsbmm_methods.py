@@ -1,3 +1,5 @@
+# TODO: Optionally reconvert to numpy for speed comparison
+# - seems like likely faster for smaller nets
 # numba reimplementation of all methods for DSBMM class that reasonably stand to gain from doing so
 # - simply prepend method name with nb_
 import numpy as np
