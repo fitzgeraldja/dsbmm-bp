@@ -1,6 +1,8 @@
+from typing import Generator
+
 import numpy as np
 from csr import CSR
-from numba import bool_, njit, prange
+from numba import bool_, int32, njit, prange
 from numba.typed import List
 
 
@@ -26,7 +28,7 @@ def numba_ix(arr, rows, cols):
 
 
 @njit
-def is_connected_dense(G: np.array):
+def is_connected_dense(G: np.ndarray):
     """Check if a graph is connected
 
     Args:
@@ -38,13 +40,17 @@ def is_connected_dense(G: np.array):
     """
     # TODO: check if actually faster in native python
     # using deques
-
+    # NB only checking weak connectivity
     visited = np.zeros(G.shape[0], dtype=bool_)
     visited[0] = True
     stack = [0]
     while stack:
         node = stack.pop()
         for n in np.nonzero(G[node])[0]:
+            if not visited[n]:
+                visited[n] = True
+                stack.append(n)
+        for n in np.nonzero(G.T[node])[0]:
             if not visited[n]:
                 visited[n] = True
                 stack.append(n)
@@ -61,8 +67,8 @@ def is_connected_sparse(G: CSR):
     Returns:
         bool: True if graph is connected, False otherwise
     """
-    # TODO: symmetrise first so only checking if weakly
-    # connected
+    # NB only checking weak connectedness
+    G_T = G.transpose()
     visited = np.zeros(G.nrows, dtype=bool_)
     visited[0] = True
     stack = [0]
@@ -72,11 +78,72 @@ def is_connected_sparse(G: CSR):
             if not visited[n]:
                 visited[n] = True
                 stack.append(n)
+        for n in G_T.row_cs(node):
+            if not visited[n]:
+                visited[n] = True
+                stack.append(n)
     return np.all(visited)
 
 
+@njit
+def connected_components(G: np.ndarray) -> Generator[set, None, None]:
+    seen = set()
+    for v in range(G.shape[0]):
+        if v not in seen:
+            c = _plain_bfs(G, v)
+            seen.update(c)
+            yield c
+
+
+@njit
+def _plain_bfs(G: np.ndarray, source: int) -> set:
+    """A fast BFS node generator"""
+    seen = set()
+    nextlevel = {source}
+    while nextlevel:
+        thislevel = nextlevel
+        nextlevel = set()
+        for v in thislevel:
+            if v not in seen:
+                seen.add(v)
+                nextlevel.update(np.nonzero(G[v, :])[0])
+    return seen
+
+
+@njit
+def connected_components_sparse(G: CSR):
+    seen = set()
+    all_comps = []
+    for v in range(G.nrows):
+        v = int32(v)
+        if v not in seen:
+            c = _plain_bfs_sparse(G, v)
+            seen.update(c)
+            # yield c
+            all_comps.append(c)
+    return all_comps
+
+
+@njit
+def _plain_bfs_sparse(G: CSR, source: int):
+    """A fast BFS node generator"""
+    # only seek weak connectivity
+    G_T = G.transpose()
+    seen = set()
+    nextlevel = {source}
+    while nextlevel:
+        thislevel = nextlevel
+        nextlevel = set()
+        for v in thislevel:
+            if v not in seen:
+                seen.add(v)
+                nextlevel.update(G.row_cs(v))
+                nextlevel.update(G_T.row_cs(v))
+    return seen
+
+
 @njit(fastmath=True, error_model="numpy", parallel=True)
-def gammaln_nb_p_vec(z):
+def gammaln_nb_p_vec(z: np.ndarray):
     """Numerical Recipes 6.1
     Code from https://stackoverflow.com/questions/55048299/why-is-this-log-gamma-numba-function-slower-than-scipy-for-large-arrays-but-fas"""
     # Don't use global variables.. (They only can be changed if you recompile the function)

@@ -33,6 +33,9 @@ MANIFEST
 # Jupyter notebooks
 notebooks/
 
+# MLflow artifacts
+mlruns/
+
 # Data
 scopus/
 scopus*
