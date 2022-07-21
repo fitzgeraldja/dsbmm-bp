@@ -1,14 +1,19 @@
 import argparse
+import os
 import pickle
 import time
 from pathlib import Path
 
 import em
+import mlflow
 import numpy as np
 import simulation
 import utils
+from mlflow import log_artifacts, log_metric, log_param
 from numba.typed import List
 from scipy import sparse
+
+mlflow.set_experiment("dsbmm-alpha")
 
 parser = argparse.ArgumentParser(description="Apply model to data.")
 
@@ -22,10 +27,39 @@ parser.add_argument(
     choices=testset_names,
 )
 parser.add_argument(
+    "--scopus_link_choice",
+    type=str,
+    default="ref",
+    help=f"Choice of type of link for Scopus data, options are 'ref' or 'au', default is ref.",
+    choices=["ref", "au"],
+)
+parser.add_argument(
     "--data",
     type=str,
     default="./data",
     help="Specify path to data directory. Default is ./data",
+)
+
+parser.add_argument(
+    "--num_groups",
+    type=int,
+    default=4,
+    help="Number of groups to use in the model. Default is 4.",
+    # NB for scopus, MFVI used 22 if link_choice == "au"
+    # else 19 if link_choice == "ref"
+)
+
+parser.add_argument(
+    "--min_Q",
+    type=int,
+    default=None,
+    help="Minimum number of groups to use, will search from here",
+)
+parser.add_argument(
+    "--max_Q",
+    type=int,
+    default=None,
+    help="Maximum number of groups to use, will search up to here",
 )
 
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
@@ -64,6 +98,9 @@ if args.n_threads is not None:
     set_num_threads(args.n_threads)
 
 if __name__ == "__main__":
+    if not os.path.exists("../../results/mlruns"):
+        os.mkdir("../../results/mlruns")
+    mlflow.set_tracking_uri("file:/../../results/mlruns")
     ## Simulate data (for multiple tests)
     default_test_params = simulation.default_test_params
     og_test_params = simulation.og_test_params
@@ -185,7 +222,7 @@ if __name__ == "__main__":
     if testset_name == "scopus":
         data = {}
         DATA_PATH = Path("../../tests/data/scopus")
-        link_choice = "ref"  # 'ref' or 'au'
+        link_choice = args.scopus_link_choice
         if link_choice == "au":
             with open(DATA_PATH / "col_A.pkl", "rb") as f:
                 data["A"] = [sparse.csr_matrix(A) for A in pickle.load(f)]
@@ -217,7 +254,7 @@ if __name__ == "__main__":
         tmp.append(np.ascontiguousarray(data["X_subjs"]))
         data["X"] = tmp
         data["meta_types"] = ["poisson", "indep bernoulli", "indep bernoulli"]
-        data["Q"] = 22 if link_choice == "au" else 19 if link_choice == "ref" else None
+        data["Q"] = args.num_groups
 
     try_parallel = args.nb_parallel
 
@@ -249,158 +286,185 @@ if __name__ == "__main__":
             # if test_no < 5:
             print()
             print("*" * 15, f"Test {test_no+1}", "*" * 15)
-            for samp_no, sample in enumerate(samples):
-                if samp_no < len(samples):  # can limit num samples considered
-                    if samp_no > 0:
-                        # drop first run as compiling
-                        start_time = time.time()
-                    if verbose:
-                        print("true params:", params)
-                    print()
-                    print("$" * 12, "At sample", samp_no + 1, "$" * 12)
-                    sample.update(params)
-                    # present = calc_present(sample["A"])
-                    # trans_present = calc_trans_present(present)
-                    # print(present)
-                    # print(trans_present)+
-                    ## Initialise model
-                    true_Z = sample.pop("Z")
-                    ## Initialise
-                    if testset_name != "scaling":
-                        model = em.EM(sample, verbose=verbose, use_meta=not args.ignore_meta)
-                    elif testset_name == "align":
-                        print(f"alignment = {params['meta_aligned']}")
-                        model = em.EM(
-                            sample, verbose=verbose, tuning_param=args.tuning_param, use_meta=not args.ignore_meta
-                        )
-                    else:
-                        print(f"N = {params['N']}")
-                        model = em.EM(
-                            sample,
-                            sparse_adj=True,
-                            try_parallel=try_parallel,
-                            verbose=verbose,
-                            use_meta=not args.ignore_meta
-                        )
-                    if samp_no > 0:
-                        init_times[test_no, samp_no - 1] = time.time() - start_time
-                    ## Score from K means
-                    print("Before fitting model, K-means init partition has")
-                    if verbose:
-                        model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
-                    else:
-                        print(
-                            np.round_(
-                                model.ari_score(true_Z, pred_Z=model.k_means_init_Z),
-                                3,
-                            )
-                        )
-                    ## Fit to given data
-                    model.fit(true_Z=true_Z, learning_rate=0.2)
-                    ## Score after fit
-                    try:
-                        test_aris[test_no, samp_no, :] = 0.0
-                        print("BP Z ARI:")
-                        test_aris[test_no, samp_no, :] = model.ari_score(true_Z)
-                        if not verbose:
-                            print(np.round_(test_aris[test_no, samp_no, :], 3))
-                        print("Init Z ARI:")
-                        if verbose:
-                            model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
-                        else:
-                            print(
-                                np.round_(
-                                    model.ari_score(
-                                        true_Z, pred_Z=model.k_means_init_Z
-                                    ),
-                                    3,
+            # Create nested runs for each test + sample
+            with mlflow.start_run(run_name=f"PARENT_RUN_{test_no}") as parent_run:
+                # mlflow.log_param("parent", "yes")
+                for samp_no, sample in enumerate(samples):
+                    with mlflow.start_run(
+                        run_name=f"CHILD_RUN_{test_no}:{samp_no}", nested=True
+                    ) as child_run:
+                        # mlflow.log_param("child", "yes")
+                        if samp_no < len(samples):  # can limit num samples considered
+                            if samp_no > 0:
+                                # drop first run as compiling
+                                start_time = time.time()
+                            if verbose:
+                                print("true params:", params)
+                            print()
+                            print("$" * 12, "At sample", samp_no + 1, "$" * 12)
+                            sample.update(params)
+                            # present = calc_present(sample["A"])
+                            # trans_present = calc_trans_present(present)
+                            # print(present)
+                            # print(trans_present)+
+                            ## Initialise model
+                            true_Z = sample.pop("Z")
+                            ## Initialise
+                            if testset_name != "scaling":
+                                model = em.EM(sample, verbose=verbose)
+                            elif testset_name == "align":
+                                print(f"alignment = {params['meta_aligned']}")
+                                model = em.EM(
+                                    sample,
+                                    verbose=verbose,
+                                    tuning_param=args.tuning_param,
                                 )
-                            )
-                    except Exception:  # IndexError:
-                        print("BP Z ARI:")
-                        test_aris[test_no][samp_no, :] = model.ari_score(true_Z)
-                        if not verbose:
-                            print(np.round_(test_aris[test_no][samp_no, :], 3))
-                        print("Init Z ARI:")
-                        if verbose:
-                            model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
-                        else:
-                            print(
-                                np.round_(
-                                    model.ari_score(
-                                        true_Z, pred_Z=model.k_means_init_Z
-                                    ),
-                                    3,
+                            else:
+                                print(f"N = {params['N']}")
+                                model = em.EM(
+                                    sample,
+                                    sparse_adj=True,
+                                    try_parallel=try_parallel,
+                                    verbose=verbose,
                                 )
+                            if samp_no > 0:
+                                init_times[test_no, samp_no - 1] = (
+                                    time.time() - start_time
+                                )
+                            ## Score from K means
+                            print("Before fitting model, K-means init partition has")
+                            if verbose:
+                                model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
+                            else:
+                                print(
+                                    np.round_(
+                                        model.ari_score(
+                                            true_Z, pred_Z=model.k_means_init_Z
+                                        ),
+                                        3,
+                                    )
+                                )
+                            ## Fit to given data
+                            model.fit(true_Z=true_Z, learning_rate=0.2)
+                            ## Score after fit
+                            try:
+                                test_aris[test_no, samp_no, :] = 0.0  # type: ignore
+                                print("BP Z ARI:")
+                                test_aris[test_no, samp_no, :] = model.ari_score(true_Z)  # type: ignore
+                                if not verbose:
+                                    print(np.round_(test_aris[test_no, samp_no, :], 3))  # type: ignore
+                                print("Init Z ARI:")
+                                if verbose:
+                                    model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
+                                else:
+                                    print(
+                                        np.round_(
+                                            model.ari_score(
+                                                true_Z, pred_Z=model.k_means_init_Z
+                                            ),
+                                            3,
+                                        )
+                                    )
+                            except Exception:  # IndexError:
+                                print("BP Z ARI:")
+                                test_aris[test_no][samp_no, :] = model.ari_score(true_Z)
+                                if not verbose:
+                                    print(np.round_(test_aris[test_no][samp_no, :], 3))
+                                print("Init Z ARI:")
+                                if verbose:
+                                    model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
+                                else:
+                                    print(
+                                        np.round_(
+                                            model.ari_score(
+                                                true_Z, pred_Z=model.k_means_init_Z
+                                            ),
+                                            3,
+                                        )
+                                    )
+                            # print("Z inferred:", model.bp.model.jit_model.Z)
+                            if verbose:
+                                ## Show transition matrix inferred
+                                print("Pi inferred:", model.bp.trans_prob)
+                                try:
+                                    print("Versus true pi:", params["trans_mat"])
+                                except Exception:  # KeyError:
+                                    print(
+                                        "Versus true pi:",
+                                        simulation.gen_trans_mat(
+                                            sample["p_stay"], sample["Q"]
+                                        ),
+                                    )
+                                print("True effective pi:", utils.effective_pi(true_Z))
+                                print(
+                                    "Effective pi from partition inferred:",
+                                    utils.effective_pi(model.bp.model.jit_model.Z),
+                                )
+                                print(
+                                    "True effective beta:",
+                                    utils.effective_beta(
+                                        model.bp.model.jit_model.A, true_Z
+                                    ).transpose(2, 0, 1),
+                                )
+                                print(
+                                    "Pred effective beta:",
+                                    utils.effective_beta(
+                                        model.bp.model.jit_model.A,
+                                        model.bp.model.jit_model.Z,
+                                    ).transpose(2, 0, 1),
+                                )
+                            if samp_no > 0:
+                                test_times[test_no, samp_no - 1] = (
+                                    time.time() - start_time
+                                )
+                                if testset_name == "scaling":
+                                    print(
+                                        f"Sample took ~{test_times[test_no,samp_no-1]:.2f}s"
+                                    )
+                            time.sleep(
+                                0.5
+                            )  # sleep a bit to allow threads to complete, TODO: properly sort this
+                            # save after every sample in case of crash
+                            tp_str = (
+                                "_tp" + str(args.tuning_param)
+                                if args.tuning_param is not None
+                                else ""
                             )
-                    # print("Z inferred:", model.bp.model.jit_model.Z)
-                    if verbose:
-                        ## Show transition matrix inferred
-                        print("Pi inferred:", model.bp.trans_prob)
-                        try:
-                            print("Versus true pi:", params["trans_mat"])
-                        except Exception:  # KeyError:
-                            print(
-                                "Versus true pi:",
-                                simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
-                            )
-                        print("True effective pi:", utils.effective_pi(true_Z))
-                        print(
-                            "Effective pi from partition inferred:",
-                            utils.effective_pi(model.bp.model.jit_model.Z),
-                        )
-                        print(
-                            "True effective beta:",
-                            utils.effective_beta(
-                                model.bp.model.jit_model.A, true_Z
-                            ).transpose(2, 0, 1),
-                        )
-                        print(
-                            "Pred effective beta:",
-                            utils.effective_beta(
-                                model.bp.model.jit_model.A,
-                                model.bp.model.jit_model.Z,
-                            ).transpose(2, 0, 1),
-                        )
-                    if samp_no > 0:
-                        test_times[test_no, samp_no - 1] = time.time() - start_time
-                        if testset_name == "scaling":
-                            print(f"Sample took ~{test_times[test_no,samp_no-1]:.2f}s")
-                    time.sleep(
-                        0.5
-                    )  # sleep a bit to allow threads to complete, TODO: properly sort this
-                    # save after every sample in case of crash
-                    tp_str = (
-                        "_tp" + str(args.tuning_param)
-                        if args.tuning_param is not None
-                        else ""
-                    )
-                    if testset_name == "align":
-                        test_Z[test_no, samp_no, :, :] = model.bp.model.jit_model.Z
-                        with open(
-                            f"../../results/{testset_name}_test_Z{tp_str}.pkl",
-                            "wb",
-                        ) as f:
-                            pickle.dump(test_Z, f)
-                    with open(
-                        f"../../results/{testset_name}_test_aris{tp_str}.pkl", "wb"
-                    ) as f:
-                        pickle.dump(test_aris, f)
-                    with open(
-                        f"../../results/{testset_name}_test_times{tp_str}.pkl", "wb"
-                    ) as f:
-                        pickle.dump(test_times, f)
-                    with open(
-                        f"../../results/{testset_name}_init_times{tp_str}.pkl", "wb"
-                    ) as f:
-                        pickle.dump(init_times, f)
+                            if testset_name == "align":
+                                test_Z[
+                                    test_no, samp_no, :, :
+                                ] = model.bp.model.jit_model.Z
+                                with open(
+                                    f"../../results/{testset_name}_test_Z{tp_str}.pkl",
+                                    "wb",
+                                ) as f:
+                                    pickle.dump(test_Z, f)
+                            with open(
+                                f"../../results/{testset_name}_test_aris{tp_str}.pkl",
+                                "wb",
+                            ) as f:
+                                pickle.dump(test_aris, f)
+                            with open(
+                                f"../../results/{testset_name}_test_times{tp_str}.pkl",
+                                "wb",
+                            ) as f:
+                                pickle.dump(test_times, f)
+                            with open(
+                                f"../../results/{testset_name}_init_times{tp_str}.pkl",
+                                "wb",
+                            ) as f:
+                                pickle.dump(init_times, f)
+            # TODO: finish MLflow logging
+            # Use mlflow.set_tag to mark runs that miss
+            # reasonable accuracy
+
             print(f"Finished test {test_no+1} for true params:")
             print(params)
             print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
         print()
         print("Mean ARIs inferred for each test:")
         try:
-            print(test_aris.mean(axis=(1, 2)))
+            print(test_aris.mean(axis=(1, 2)))  # type: ignore
         except Exception:  # AttributeError:
             print(np.array([aris.mean() for aris in test_aris]))
         print("Mean times for each test:")
@@ -415,6 +479,7 @@ if __name__ == "__main__":
         model = em.EM(
             data,
             sparse_adj=True,
+            try_parallel=try_parallel,
             tuning_param=np.linspace(0.8, 1.8, 11),
             n_runs=n_runs,
             deg_corr=True,

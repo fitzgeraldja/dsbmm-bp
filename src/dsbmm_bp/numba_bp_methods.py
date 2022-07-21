@@ -1,9 +1,8 @@
 # numba reimplementation of all methods for BP class that reasonably stand to gain from doing so (would allow parallelisation + GPU usage)
 # - simply prepend method name with nb_
 import numpy as np
-import yaml
-from numba import njit
-from numba import prange
+import yaml  # type: ignore
+from numba import njit, prange
 from numba.typed import List
 
 with open("config.yaml") as f:
@@ -499,8 +498,10 @@ def nb_update_node_marg(
     _psi_t,
     msg_diff,
 ):
-    """Update all node marginals (in random order), simultaneously updating messages and
-    external fields h(t) - process is as follows:
+    """Update all node marginals (now synchronously to
+    avoid race condition), simultaneously updating
+    messages and external fields h(t) - process is
+    as follows:
         (i) Determine whether large or small degree version of spatial message updates
             should be used
         (ii) Subtract old marginals for i from external field h(t)
@@ -514,14 +515,34 @@ def nb_update_node_marg(
     """
     node_update_order = np.arange(N)
     time_update_order = np.arange(T)
-    if RANDOM_ONLINE_UPDATE_MSG:
-        np.random.shuffle(node_update_order)
-        np.random.shuffle(time_update_order)
+    tmp = List()
+    for t in range(T):
+        tmp2 = List()
+        for i in range(N):
+            n_nbrs = len(all_nbrs[t][i])
+            if n_nbrs > 0:
+                msg = np.empty((n_nbrs, Q), dtype=np.float64)
+                # msg /= msg.sum(axis=1)[:, np.newaxis]
+                # msg_sums = msg.sum(axis=1)
+                # for nbr_idx in range(n_nbrs):
+                #     msg[nbr_idx, :] /= msg_sums[nbr_idx]
+            else:
+                msg = np.empty((1, Q), dtype=np.float64)
+            # assert np.isnan(msg).sum() == 0
+            tmp2.append(msg)
+        # print("Trying to update psi_e")
+        tmp.append(tmp2)
+    _new_psi_e = tmp
+    _new_psi_t = np.empty((N, T - 1, Q, 2))
+    new_node_marg = np.empty((N, T, Q))
+    # if RANDOM_ONLINE_UPDATE_MSG:
+    #     np.random.shuffle(node_update_order)
+    #     np.random.shuffle(time_update_order)
     # with np.errstate(all="ignore"): # not usable in numba
     # necessary as LLVM optimisation seems to result in spurious DividebyZero errors which aren't possible given checks
+    h_diff = np.zeros((Q, T))
+    msg_diff = 0.0
     for iup_idx in prange(N):
-        # TODO: note that parallelising over i in this way will technically cause race condition (different threads using
-        # messages updated at different points) - suggests synchronous updating probably better, or just not a concern
         i = node_update_order[iup_idx]
         for tup_idx in range(T):
             t = time_update_order[tup_idx]
@@ -556,7 +577,7 @@ def nb_update_node_marg(
                         if deg_corr:
                             for q in range(Q):
                                 for r in range(Q):
-                                    _h[q, t] -= (
+                                    h_diff[q, t] -= (
                                         block_edge_prob[r, q, t]
                                         * node_marg[i, t, r]
                                         * degs[i, t, 1]
@@ -564,7 +585,7 @@ def nb_update_node_marg(
                         else:
                             for q in range(Q):
                                 for r in range(Q):
-                                    _h[q, t] -= (
+                                    h_diff[q, t] -= (
                                         block_edge_prob[r, q, t] * node_marg[i, t, r]
                                     )
                         tmp = spatial_msg_term.copy()
@@ -602,7 +623,7 @@ def nb_update_node_marg(
                                     ).mean()
                                     / n_msgs
                                 )
-                                _psi_t[i, t - 1, :, 0] = tmp_backwards_msg
+                                _new_psi_t[i, t - 1, :, 0] = tmp_backwards_msg
                                 forward_term = nb_forward_temp_msg_term(
                                     Q, trans_prob, i, t, _psi_t
                                 )
@@ -660,7 +681,7 @@ def nb_update_node_marg(
                                 * deg_i
                                 / n_msgs
                             )  # NB need to mult by deg_i so weighted correctly
-                        _psi_e[t][i] = tmp_spatial_msg
+                        _new_psi_e[t][i] = tmp_spatial_msg
                         ## UPDATE FORWARDS MESSAGES FROM i AT t ##
                         if t < T - 1 and _pres_trans[i, t]:
                             tmp_forwards_msg = spatial_msg_term
@@ -678,7 +699,7 @@ def nb_update_node_marg(
                                     np.abs(tmp_forwards_msg - _psi_t[i, t, :, 1]).mean()
                                     / n_msgs
                                 )
-                                _psi_t[i, t, :, 1] = tmp_forwards_msg
+                                _new_psi_t[i, t, :, 1] = tmp_forwards_msg
                             ## UPDATE MARGINAL OF i AT t ##
                             tmp_marg = tmp
                             if tmp_marg.sum() > 0:
@@ -688,7 +709,7 @@ def nb_update_node_marg(
                                     tmp_marg[q] = TOL
                             if tmp_marg.sum() > 0:
                                 tmp_marg /= tmp_marg.sum()
-                            node_marg[i, t, :] = tmp_marg
+                            new_node_marg[i, t, :] = tmp_marg
 
                         else:
                             log_field_iter = np.empty((deg_i, Q))
@@ -714,7 +735,7 @@ def nb_update_node_marg(
                             if deg_corr:
                                 for q in range(Q):
                                     for r in range(Q):
-                                        _h[q, t] -= (
+                                        h_diff[q, t] -= (
                                             block_edge_prob[r, q, t]
                                             * node_marg[i, t, r]
                                             * degs[i, t, 1]
@@ -722,7 +743,7 @@ def nb_update_node_marg(
                             else:
                                 for q in range(Q):
                                     for r in range(Q):
-                                        _h[q, t] -= (
+                                        h_diff[q, t] -= (
                                             block_edge_prob[r, q, t]
                                             * node_marg[i, t, r]
                                         )
@@ -761,7 +782,7 @@ def nb_update_node_marg(
                                         ).mean()
                                         / n_msgs
                                     )
-                                    _psi_t[i, t - 1, :, 0] = tmp_backwards_msg
+                                    _new_psi_t[i, t - 1, :, 0] = tmp_backwards_msg
                                     forward_term = np.log(
                                         nb_forward_temp_msg_term(
                                             Q, trans_prob, i, t, _psi_t
@@ -813,7 +834,7 @@ def nb_update_node_marg(
                                         tmp_spatial_msg[nbr_idx, q] /= tmp_spat_sums[
                                             nbr_idx
                                         ]
-                            _psi_e[t][i] = tmp_spatial_msg
+                            _new_psi_e[t][i] = tmp_spatial_msg
                             # ## UPDATE FORWARDS MESSAGES FROM i AT t ##
                             if t < T - 1:
                                 if _pres_trans[i, t]:
@@ -837,7 +858,7 @@ def nb_update_node_marg(
                                         ).mean()
                                         / n_msgs
                                     )
-                                    _psi_t[i, t, :, 1] = tmp_forwards_msg
+                                    _new_psi_t[i, t, :, 1] = tmp_forwards_msg
                             # ## UPDATE MARGINAL OF i AT t ##
                             tmp_marg = np.empty(Q)
                             for q in range(Q):
@@ -849,13 +870,13 @@ def nb_update_node_marg(
                                     tmp_marg[q] = TOL
                             if tmp_marg.sum() > 0:
                                 tmp_marg /= tmp_marg.sum()
-                            node_marg[i, t, :] = tmp_marg
+                            new_node_marg[i, t, :] = tmp_marg
                             # GOOD TO HERE
                     # update h with new values
                     if deg_corr:
                         for q in range(Q):
                             for r in range(Q):
-                                _h[q, t] += (
+                                h_diff[q, t] += (
                                     block_edge_prob[r, q, t]
                                     * node_marg[i, t, r]
                                     * degs[i, t, 1]
@@ -863,28 +884,28 @@ def nb_update_node_marg(
                     else:
                         for q in range(Q):
                             for r in range(Q):
-                                _h[q, t] += (
+                                h_diff[q, t] += (
                                     block_edge_prob[r, q, t] * node_marg[i, t, r]
                                 )
             else:
-                node_marg[i, t, :] = 0.0
+                new_node_marg[i, t, :] = 0.0
 
     if np.isnan(msg_diff):
         for i in range(N):
             for t in range(T - 1):
-                if np.isnan(node_marg[i, t, :]).sum() > 0:
+                if np.isnan(new_node_marg[i, t, :]).sum() > 0:
                     print("nans for node marg @ (i,t)=", i, t)
-                if np.isnan(_psi_e[t][i][:, :]).sum() > 0:
+                if np.isnan(_new_psi_e[t][i][:, :]).sum() > 0:
                     print("nans for spatial msgs @ (i,t)=", i, t)
-                if np.isnan(_psi_t[i, t, :, :]).sum() > 0:
+                if np.isnan(_new_psi_t[i, t, :, :]).sum() > 0:
                     print("nans for temp marg @ (i,t)=", i, t)
-            if np.isnan(node_marg[i, T - 1, :]).sum() > 0:
+            if np.isnan(new_node_marg[i, T - 1, :]).sum() > 0:
                 print("nans for node marg @ (i,t)=", i, T - 1)
-            if np.isnan(_psi_e[T - 1][i][:, :]).sum() > 0:
+            if np.isnan(_new_psi_e[T - 1][i][:, :]).sum() > 0:
                 print("nans for spatial msgs @ (i,t)=", i, T - 1)
         raise RuntimeError("Problem updating messages")
-
-    return node_marg, _psi_e, _psi_t, msg_diff
+    _h += h_diff
+    return new_node_marg, _new_psi_e, _new_psi_t, msg_diff
 
 
 @njit(parallel=True, fastmath=USE_FASTMATH, error_model='numpy')

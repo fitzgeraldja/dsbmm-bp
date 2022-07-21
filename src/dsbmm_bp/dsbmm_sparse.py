@@ -1,18 +1,12 @@
+# type: ignore
 import csr
 import numpy as np
 import yaml
-from numba import float64
-from numba import int32
-from numba import int64
-from numba import typeof
+from numba import float64, int32, int64, typeof
 from numba.experimental import jitclass
 from numba.typed import List
-from numba.types import Array
-from numba.types import bool_
-from numba.types import ListType
-from numba.types import unicode_type
-from utils import nb_ib_lkl
-from utils import nb_poisson_lkl_int
+from numba.types import Array, ListType, bool_, unicode_type
+from utils import nb_ib_lkl, nb_poisson_lkl_int
 
 # from numba import float32
 # from scipy import sparse
@@ -654,7 +648,7 @@ class DSBMMSparseBase:
                         # if r==q: # TODO: special treatment?
                         lam_num[q, r, t] += (
                             self.twopoint_edge_marg[t][i][j_idx, q, r] * val
-                        )
+                        )[0]
                     for t in range(self.T):
                         if lam_num[q, r, t] < TOL:
                             lam_num[q, r, t] = TOL
@@ -668,7 +662,7 @@ class DSBMMSparseBase:
                             # if r==q: # TODO: special treatment?
                             lam_num[q, r, t] += (
                                 self.twopoint_edge_marg[t][i][j_idx, q, r] * val
-                            )
+                            )[0]
 
             # lam_den = np.einsum("itq,it->qt", self.node_marg, self.degs)
             # lam_den = np.einsum("qt,rt->qrt", lam_den, lam_den)
