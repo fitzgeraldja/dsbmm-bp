@@ -4,6 +4,7 @@ import pickle
 import time
 from pathlib import Path
 
+import csr
 import em
 import mlflow
 import numpy as np
@@ -12,8 +13,6 @@ import utils
 from mlflow import log_artifacts, log_metric, log_param
 from numba.typed import List
 from scipy import sparse
-
-mlflow.set_experiment("dsbmm-alpha")
 
 parser = argparse.ArgumentParser(description="Apply model to data.")
 
@@ -100,7 +99,14 @@ if args.n_threads is not None:
 if __name__ == "__main__":
     if not os.path.exists("../../results/mlruns"):
         os.mkdir("../../results/mlruns")
-    mlflow.set_tracking_uri("file:/../../results/mlruns")
+    dir_path = os.path.abspath("../../results/mlruns")
+    mlflow.set_tracking_uri(f"file://{dir_path}")
+    # Set an experiment name, which must be unique
+    # and case-sensitive.
+    experiment = mlflow.set_experiment(f"dsbmm-alpha-{args.test}")
+    # Get Experiment Details
+    # print("Experiment_id: {}".format(experiment.experiment_id))
+
     ## Simulate data (for multiple tests)
     default_test_params = simulation.default_test_params
     og_test_params = simulation.og_test_params
@@ -189,6 +195,54 @@ if __name__ == "__main__":
             else:
                 samples = simulation.gen_test_data(**params)
             # print(samples)
+            try:
+                if not np.all(
+                    [
+                        utils.is_connected_dense(sample["A"][:, :, t])
+                        for sample in samples
+                        for t in range(sample["A"].shape[-1])
+                    ]
+                ):
+                    print(
+                        "WARNING: some matrices not connected in test set for test no. ",
+                        testno,
+                    )
+            except Exception:
+                # assert np.all(
+                #     samples[0]["A"][0].todense() == samples[0]["A"][0].T.todense()
+                # )
+                if not np.all(
+                    [
+                        utils.is_connected_sparse(csr.CSR.from_scipy(sample["A"][t]))
+                        for sample in samples
+                        for t in range(len(sample["A"]))
+                    ]
+                ):
+                    print(
+                        "WARNING: some matrices not connected in test set for test no. ",
+                        testno,
+                    )
+                    # print(f"Components for {samples[0].get('A')[0].shape[0]} nodes:")
+                    # print(
+                    #     *[
+                    #         [
+                    #             list(
+                    #                 map(
+                    #                     len,
+                    #                     list(
+                    #                         utils.connected_components_sparse(
+                    #                             csr.CSR.from_scipy(sample["A"][t])
+                    #                         )
+                    #                     ),
+                    #                 )
+                    #             )
+                    #             for t in range(len(sample["A"]))
+                    #         ]
+                    #         for sample in samples
+                    #     ],
+                    #     sep="\n",
+                    # )
+                    # raise Exception("Stop here for now")
             all_samples.append(samples)
             params_set.append(params)
         print("Successfully simulated data, now initialising model...")
@@ -287,11 +341,15 @@ if __name__ == "__main__":
             print()
             print("*" * 15, f"Test {test_no+1}", "*" * 15)
             # Create nested runs for each test + sample
-            with mlflow.start_run(run_name=f"PARENT_RUN_{test_no}") as parent_run:
+            with mlflow.start_run(
+                run_name=f"PARENT_RUN_{test_no}", experiment_id=experiment.experiment_id
+            ) as parent_run:
                 # mlflow.log_param("parent", "yes")
                 for samp_no, sample in enumerate(samples):
                     with mlflow.start_run(
-                        run_name=f"CHILD_RUN_{test_no}:{samp_no}", nested=True
+                        run_name=f"CHILD_RUN_{test_no}:{samp_no}",
+                        experiment_id=experiment.experiment_id,
+                        nested=True,
                     ) as child_run:
                         # mlflow.log_param("child", "yes")
                         if samp_no < len(samples):  # can limit num samples considered
