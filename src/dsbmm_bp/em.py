@@ -46,10 +46,12 @@ class EM:
         tuning_param=1.0,
         deg_corr=False,
         verbose=True,
+        use_meta=True,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
         self.patience = patience
+        self.use_meta = use_meta
         self.msg_init_mode = msg_init_mode
         self.A = data["A"]
         if type(tuning_param) == float:
@@ -222,6 +224,7 @@ class EM:
                     meta_types=self.meta_types,
                     tuning_param=self.tuning_params[0],
                     verbose=self.verbose,
+                    use_meta=self.use_meta
                 )  # X=X,
                 if self.verbose:
                     print("Successfully instantiated DSBMM...")
@@ -238,6 +241,7 @@ class EM:
                     meta_types=self.meta_types,
                     tuning_param=self.tuning_params[0],
                     verbose=self.verbose,
+                    use_meta=self.use_meta
                 )  # X=X,
                 if self.verbose:
                     print("Successfully instantiated DSBMM...")
@@ -254,6 +258,7 @@ class EM:
                 meta_types=self.meta_types,
                 tuning_param=self.tuning_params[0],
                 verbose=self.verbose,
+                use_meta=self.use_meta
             )  # X=X,
             if self.verbose:
                 print("Successfully instantiated DSBMM...")
@@ -317,6 +322,7 @@ class EM:
                     meta_types=self.meta_types,
                     tuning_param=self.tuning_params[0],
                     verbose=self.verbose,
+                    use_meta=self.use_meta
                 )  # X=X,
                 if self.verbose:
                     print("Successfully reinstantiated DSBMM...")
@@ -333,6 +339,7 @@ class EM:
                     meta_types=self.meta_types,
                     tuning_param=self.tuning_params[0],
                     verbose=self.verbose,
+                    use_meta=self.use_meta
                 )  # X=X,
                 if self.verbose:
                     print("Successfully reinstantiated DSBMM...")
@@ -349,6 +356,7 @@ class EM:
                 meta_types=self.meta_types,
                 tuning_param=tuning_param,
                 verbose=self.verbose,
+                use_meta=self.use_meta
             )  # X=X,
             if self.verbose:
                 print("Successfully reinstantiated DSBMM...")

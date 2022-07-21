@@ -483,7 +483,8 @@ class BPBase:
             msg *= np.exp(-self.model.degs[i, t, 1] * self._h[:, t])
         else:
             msg *= np.exp(-1.0 * self._h[:, t])
-        msg *= self.meta_prob(i, t)
+        if self.use_meta:
+            msg *= self.meta_prob(i, t)
         # try:
         #     assert not np.isinf(msg).sum() > 0
         # except:
@@ -567,7 +568,8 @@ class BPBase:
             msg -= self._h[
                 :, t
             ]  # NB don't need / self.N as using p_ab to calc, not c_ab
-        msg += np.log(self.meta_prob(i, t))
+        if self.use_meta:
+            msg += np.log(self.meta_prob(i, t))
         return msg, max_log_msg, log_field_iter
 
     def meta_prob(self, i, t):

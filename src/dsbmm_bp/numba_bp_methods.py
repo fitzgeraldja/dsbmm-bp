@@ -149,7 +149,7 @@ def nb_init_msgs(
     return _psi_e, _psi_t, node_marg
 
 
-@njit(parallel=True, fastmath=USE_FASTMATH)
+@njit(fastmath=USE_FASTMATH)
 def nb_forward_temp_msg_term(Q, trans_prob, i, t, _psi_t):
     # sum_qprime(trans_prob(qprime,q)*_psi_t[i,t-1,qprime,1])
     # from t-1 to t
@@ -170,7 +170,7 @@ def nb_forward_temp_msg_term(Q, trans_prob, i, t, _psi_t):
     return out
 
 
-@njit(parallel=True, fastmath=USE_FASTMATH)
+@njit(fastmath=USE_FASTMATH)
 def nb_backward_temp_msg_term(Q, T, trans_prob, i, t, _psi_t):
     """Backwards temporal message term for marginal of i at t, coming from i at t + 1
     Much as for spatial messages, by definition
@@ -204,7 +204,7 @@ def nb_backward_temp_msg_term(Q, T, trans_prob, i, t, _psi_t):
     return np.ascontiguousarray(out)
 
 
-@njit(parallel=True, fastmath=USE_FASTMATH)
+@njit(fastmath=USE_FASTMATH)
 def nb_spatial_msg_term_small_deg(
     Q,
     nbrs,
@@ -332,7 +332,7 @@ def nb_spatial_msg_term_small_deg(
     return msg, field_iter
 
 
-@njit(parallel=True, fastmath=USE_FASTMATH)
+@njit(fastmath=USE_FASTMATH)
 def nb_spatial_msg_term_large_deg(
     Q,
     nbrs,
@@ -887,7 +887,7 @@ def nb_update_node_marg(
     return node_marg, _psi_e, _psi_t, msg_diff
 
 
-@njit(parallel=True, fastmath=USE_FASTMATH)
+@njit(parallel=True, fastmath=USE_FASTMATH, error_model='numpy')
 def nb_compute_free_energy(
     N,
     T,

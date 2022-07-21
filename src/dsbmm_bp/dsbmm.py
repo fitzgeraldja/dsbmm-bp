@@ -181,6 +181,14 @@ class DSBMMBase:
                 self._meta_params = tmp2
             else:
                 self.use_meta = False
+                if X is not None:
+                    self.S = len(X)
+                    self.meta_dims = np.zeros(self.S,dtype=np.int32)
+                    tmp = List()
+                    tmp.append(np.zeros((self.Q,self.T,1)))
+                    self.X = tmp 
+                    self._meta_params = tmp
+                    
                 try:
                     assert self.use_meta == use_meta
                 except Exception:  # AssertionError:
@@ -371,10 +379,11 @@ class DSBMMBase:
             self.update_beta(init, learning_rate)
             if self.verbose:
                 print(self._beta)
-        self.update_meta_params(init, learning_rate)
-        if self.verbose:
-            print(self._meta_params)
-        self.calc_meta_lkl()
+        if self.use_meta:
+            self.update_meta_params(init, learning_rate)
+            if self.verbose:
+                print(self._meta_params)
+            self.calc_meta_lkl()
 
     def calc_meta_lkl(self):
         """Use current meta params to calculate meta lkl terms"""
@@ -1064,6 +1073,7 @@ class DSBMM:
         # assume A passed as N x N x T np.ndarray
         self.A = A
         self.tuning_param = tuning_param
+        self.use_meta = use_meta
         self.jit_model = DSBMMBase(
             A,
             X,
@@ -1222,11 +1232,12 @@ class DSBMM:
                     self.jit_model._beta.transpose(1, 0, 2),
                     self.jit_model._beta,
                 )
-        self.jit_model.update_meta_params(init, learning_rate)
-        if self.verbose:
-            # print(self.jit_model._meta_params)
-            print("\tUpdated meta")
-        self.jit_model.calc_meta_lkl()
+        if self.use_meta:
+            self.jit_model.update_meta_params(init, learning_rate)
+            if self.verbose:
+                # print(self.jit_model._meta_params)
+                print("\tUpdated meta")
+            self.jit_model.calc_meta_lkl()
 
     def set_node_marg(self, values):
         self.jit_model.node_marg = values

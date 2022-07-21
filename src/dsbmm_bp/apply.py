@@ -38,14 +38,30 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--n_threads", 
+    type=int,
+    help="Set number of threads used for parallelism"
+)
+
+parser.add_argument(
     "--tuning_param",
     "-tunp",
     type=float,
     default=1.0,
+    help="Set metadata tuning parameter value"
+)
+
+parser.add_argument(
+    "--ignore_meta",
+    action="store_true",
+    help="Ignore metadata, use only network edges for fitting model"
 )
 
 args = parser.parse_args()
 
+if args.n_threads is not None: 
+    from numba import set_num_threads
+    set_num_threads(args.n_threads)
 
 if __name__ == "__main__":
     ## Simulate data (for multiple tests)
@@ -251,11 +267,11 @@ if __name__ == "__main__":
                     true_Z = sample.pop("Z")
                     ## Initialise
                     if testset_name != "scaling":
-                        model = em.EM(sample, verbose=verbose)
+                        model = em.EM(sample, verbose=verbose, use_meta=not args.ignore_meta)
                     elif testset_name == "align":
                         print(f"alignment = {params['meta_aligned']}")
                         model = em.EM(
-                            sample, verbose=verbose, tuning_param=args.tuning_param
+                            sample, verbose=verbose, tuning_param=args.tuning_param, use_meta=not args.ignore_meta
                         )
                     else:
                         print(f"N = {params['N']}")
@@ -264,6 +280,7 @@ if __name__ == "__main__":
                             sparse_adj=True,
                             try_parallel=try_parallel,
                             verbose=verbose,
+                            use_meta=not args.ignore_meta
                         )
                     if samp_no > 0:
                         init_times[test_no, samp_no - 1] = time.time() - start_time
@@ -402,6 +419,7 @@ if __name__ == "__main__":
             n_runs=n_runs,
             deg_corr=True,
             verbose=verbose,
+            use_meta=not args.ignore_meta
         )
         ## Fit to given data
         model.fit(learning_rate=0.2)
