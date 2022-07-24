@@ -1,11 +1,12 @@
 # TODO: Optionally reconvert to numpy for speed comparison
 # - seems like likely faster for smaller nets
-# numba reimplementation of all methods for DSBMM class that reasonably stand to gain from doing so
-# - simply prepend method name with nb_
+# numpy reimplementation of all methods for DSBMM class that reasonably stand to gain from doing so
+# - simply prepend method name with np_
 import numpy as np
 import yaml  # type: ignore
 from numba import njit, prange
-from utils import nb_ib_lkl, nb_poisson_lkl_int
+
+# from utils import nb_ib_lkl, nb_poisson_lkl_int
 
 with open("config.yaml") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
@@ -14,8 +15,6 @@ NON_INFORMATIVE_INIT = config[
     "non_informative_init"
 ]  # initialise alpha, pi as uniform (True), or according to init part passed (False)
 USE_FASTMATH = config["use_fastmath"]
-
-# TODO: annotate all fns
 
 
 @njit(parallel=True, fastmath=USE_FASTMATH)
@@ -139,8 +138,6 @@ def nb_update_pi(
                     if _pres_trans[i, t]:
                         qqprime_trans[Z[i, t], Z[i, t + 1]] += 1
 
-            # TODO: provide different cases for non-uniform init clustering
-            # NB for uniform init clustering this provides too homogeneous pi, and is more important now
             trans_sums = qqprime_trans.sum(axis=1)
             for q in range(Q):
                 if trans_sums[q] > 0:
@@ -216,12 +213,11 @@ def nb_update_lambda(
     lam_den = np.zeros((Q, Q, T))
     if init:
         for t in prange(T):
-            z_q = [(Z[:, t] == q).nonzero()[0] for q in range(Q)]
+            z_q = [np.flatnonzero(Z[:, t] == q) for q in range(Q)]
             for q in range(Q):
                 for r in range(Q):
                     for q_idx in z_q[q]:
                         for r_idx in z_q[r]:
-                            # TODO: write alt sparse version
                             # - probably have to check if r_idx in colinds
                             # so not ideal, but if average degree low then
                             # shouldn't be too detrimental
@@ -248,19 +244,14 @@ def nb_update_lambda(
         # lam_den = np.einsum("tq,tr->tqr", lam_den, lam_den)
         for q in range(Q):
             for t in range(T):
-                # TODO: check if this is correct, as makes vanishing
-                lam_den[q, q, t] = (
-                    kappa[q, t, 1] * kappa[q, t, 0]
-                )  # TODO: check right for r==q6
+                lam_den[q, q, t] = kappa[q, t, 1] * kappa[q, t, 0]
 
                 if lam_num[q, q, t] < TOL:
                     lam_num[q, q, t] = TOL
                 if lam_den[q, q, t] < TOL:
                     lam_den[q, q, t] = 1.0
                 for r in range(q + 1, Q):
-                    lam_den[q, r, t] = (
-                        kappa[q, t, 1] * kappa[r, t, 0]
-                    )  # TODO: check right in directed case
+                    lam_den[q, r, t] = kappa[q, t, 1] * kappa[r, t, 0]
                     if lam_num[q, r, t] < TOL:
                         lam_num[q, r, t] = TOL
                     if lam_den[q, r, t] < TOL:
@@ -270,9 +261,7 @@ def nb_update_lambda(
                         lam_den[r, q, t] = lam_den[q, r, t]
                 if directed:
                     for r in range(q):
-                        lam_den[q, r, t] = (
-                            kappa[q, t, 1] * kappa[r, t, 0]
-                        )  # TODO: check right in directed case
+                        lam_den[q, r, t] = kappa[q, t, 1] * kappa[r, t, 0]
                         if lam_num[q, r, t] < TOL:
                             lam_num[q, r, t] = TOL
                         if lam_den[q, r, t] < TOL:
@@ -298,7 +287,7 @@ def nb_update_lambda(
                     i, j, t, val = _edge_vals[e_idx, :]
                     i, j, t = int(i), int(j), int(t)
                     j_idx = nbrs[t][i] == j
-                    # if r==q: # TODO: special treatment?
+                    # if r==q:
                     lam_num[q, r, t] += (twopoint_edge_marg[t][i][j_idx, q, r] * val)[0]
                 for t in range(T):
                     if lam_num[q, r, t] < TOL:
@@ -311,7 +300,7 @@ def nb_update_lambda(
                         i, j, t, val = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
                         j_idx = nbrs[t][i] == j
-                        # if r==q: # TODO: special treatment?
+                        # if r==q:
                         lam_num[q, r, t] += (
                             twopoint_edge_marg[t][i][j_idx, q, r] * val
                         )[0]
@@ -322,9 +311,7 @@ def nb_update_lambda(
         marg_kappa_in = np.zeros((Q, T))
         for q in range(Q):
             for t in range(T):
-                marg_kappa_out[q, t] = (
-                    node_marg[:, t, q] * degs[:, t, 1]
-                ).sum()  # TODO: again check this uses right deg if directed
+                marg_kappa_out[q, t] = (node_marg[:, t, q] * degs[:, t, 1]).sum()
                 marg_kappa_in[q, t] = (node_marg[:, t, q] * degs[:, t, 0]).sum()
         for q in range(Q):
             for t in range(T):
@@ -403,7 +390,6 @@ def nb_update_beta(
     beta_num = np.zeros((Q, Q, T))
     beta_den = np.ones((Q, Q, T))
     if init:
-        # TODO: consider alt init as random / uniform (both options considered in OG BP SBM code, random seems used in practice)
         if NON_INFORMATIVE_INIT:
             # assign as near uniform - just assume edges twice as likely in comms as out,
             # and that all groups have same average out-degree at each timestep
@@ -457,9 +443,7 @@ def nb_update_beta(
             for q in range(Q):
                 for t in range(T):
                     for r in range(q, Q):
-                        beta_den[q, r, t] = (
-                            _n_qt[q, t] * _n_qt[r, t]
-                        )  # TODO: check right in directed case, and if r==q
+                        beta_den[q, r, t] = _n_qt[q, t] * _n_qt[r, t]
                         # if beta_num[q, r, t] < TOL:
                         #     beta_num[q, r, t] = TOL
                         if beta_den[q, r, t] < TOL:
@@ -469,9 +453,7 @@ def nb_update_beta(
                             # be v. small anyway)
                         if not directed and r != q:
                             beta_den[r, q, t] = beta_den[q, r, t]
-                            beta_num[
-                                q, r, t
-                            ] /= 2.0  # done elsewhere, TODO: check basis
+                            beta_num[q, r, t] /= 2.0
                             beta_num[r, q, t] = beta_num[q, r, t]
                     if directed:
                         for r in range(q):
@@ -496,7 +478,7 @@ def nb_update_beta(
                     for e_idx in prange(_edge_vals.shape[0]):
                         i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
-                        j_idx = np.nonzero(nbrs[t][i] == j)[0]
+                        j_idx = np.flatnonzero(nbrs[t][i] == j)
                         # print(twopoint_edge_marg[t][i][j_idx, q, r])
                         # assert j_idx.sum() == 1
                         val = twopoint_edge_marg[t][i][j_idx, q, r][0]
@@ -517,7 +499,7 @@ def nb_update_beta(
                     for e_idx in prange(_edge_vals.shape[0]):
                         i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
-                        j_idx = np.nonzero(nbrs[t][i] == j)[0]
+                        j_idx = np.flatnonzero(nbrs[t][i] == j)
                         # print(twopoint_edge_marg[t][i][j_idx, q, r])
                         # assert j_idx.sum() == 1
                         val = twopoint_edge_marg[t][i][j_idx, q, r][0]
@@ -529,16 +511,14 @@ def nb_update_beta(
                         #     print("twopoint marg: ", val)
                         #     raise RuntimeError("Problem updating beta")
                         for tprime in range(T):
-                            beta_num[q, r, tprime] += (
-                                val / 2.0
-                            )  # TODO: check if this should also be here
+                            beta_num[q, r, tprime] += val / 2.0
 
             if directed:
                 for r in range(q):
                     for e_idx in prange(_edge_vals.shape[0]):
                         i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
-                        j_idx = np.nonzero(nbrs[t][i] == j)[0]
+                        j_idx = np.flatnonzero(nbrs[t][i] == j)
                         val = twopoint_edge_marg[t][i][j_idx, q, r][0]
                         beta_num[q, r, t] += val
 
@@ -547,9 +527,7 @@ def nb_update_beta(
         group_marg = np.zeros((Q, T))
         for q in range(Q):
             for t in range(T):
-                group_marg[q, t] = node_marg[
-                    :, t, q
-                ].sum()  # TODO: again check this is right if directed
+                group_marg[q, t] = node_marg[:, t, q].sum()
         for q in range(Q):
             for t in range(T):
                 for r in range(q, Q):
@@ -567,7 +545,6 @@ def nb_update_beta(
                                 group_marg[q, tprime] * group_marg[r, tprime]
                             )
 
-    # TODO: fix for case where beta_den very small (just consider using logs)
     # correct for numerical stability
     tmp = beta_num / beta_den
     for q in range(Q):
@@ -715,8 +692,6 @@ def nb_update_poisson_meta(
                 if zeta[q, t, 0] < TOL:
                     zeta[q, t, 0] = TOL
     # NB again use relative error here as could be large
-    # TODO: fix for case where xi small - rather than just setting as 1 when less than
-    # 1e-50 (just consider using logs)
     tmp = zeta / xi
     if not init:
         tmp = learning_rate * tmp + (1 - learning_rate) * _mt_params
@@ -796,7 +771,6 @@ def nb_update_indep_bern_meta(
                 for l_idx in range(L):
                     if rho[q, t, l_idx] < TOL:
                         rho[q, t, l_idx] = TOL
-    # TODO: fix for xi very small (just use logs)
     tmp = rho / xi
     for q in range(Q):
         for t in range(T):

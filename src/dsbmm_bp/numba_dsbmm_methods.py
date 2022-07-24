@@ -1,11 +1,9 @@
 # numba reimplementation of all methods for DSBMM class that reasonably stand to gain from doing so
 # - simply prepend method name with nb_
 import numpy as np
-import yaml
-from numba import njit
-from numba import prange
-from utils import nb_ib_lkl
-from utils import nb_poisson_lkl_int
+import yaml  # type: ignore
+from numba import njit, prange
+from utils import nb_ib_lkl, nb_poisson_lkl_int
 
 with open("config.yaml") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
@@ -53,9 +51,22 @@ def nb_calc_meta_lkl(
                             )
             if verbose:
                 print("\tUpdated IB lkl contribution")
+        elif mt == "categorical":
+            cat_params = _meta_params[
+                s
+            ]  # shape (Q x T x L), where now sum_l = 1 for all q,t
+            for t in range(T):
+                for i in range(N):
+                    if _pres_nodes[i, t]:
+                        for q in range(Q):
+                            meta_lkl[i, t, q] *= cat_params[
+                                q, t, np.flatnonzero(X[s][i, t, :])
+                            ]
+            if verbose:
+                print("\tUpdated categorical lkl contribution")
         else:
             raise NotImplementedError(
-                "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
+                "Yet to implement metadata distribution of given type \nOptions are 'poisson', 'indep bernoulli', or 'categorical'"
             )  # NB can't use string formatting for print in numba
     for i in prange(N):
         for t in range(T):
@@ -483,7 +494,7 @@ def nb_update_beta(
                     for e_idx in prange(_edge_vals.shape[0]):
                         i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
-                        j_idx = np.nonzero(nbrs[t][i] == j)[0]
+                        j_idx = np.flatnonzero(nbrs[t][i] == j)
                         # print(twopoint_edge_marg[t][i][j_idx, q, r])
                         # assert j_idx.sum() == 1
                         val = twopoint_edge_marg[t][i][j_idx, q, r][0]
@@ -504,7 +515,7 @@ def nb_update_beta(
                     for e_idx in prange(_edge_vals.shape[0]):
                         i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
-                        j_idx = np.nonzero(nbrs[t][i] == j)[0]
+                        j_idx = np.flatnonzero(nbrs[t][i] == j)
                         # print(twopoint_edge_marg[t][i][j_idx, q, r])
                         # assert j_idx.sum() == 1
                         val = twopoint_edge_marg[t][i][j_idx, q, r][0]
@@ -525,7 +536,7 @@ def nb_update_beta(
                     for e_idx in prange(_edge_vals.shape[0]):
                         i, j, t, _ = _edge_vals[e_idx, :]
                         i, j, t = int(i), int(j), int(t)
-                        j_idx = np.nonzero(nbrs[t][i] == j)[0]
+                        j_idx = np.flatnonzero(nbrs[t][i] == j)
                         val = twopoint_edge_marg[t][i][j_idx, q, r][0]
                         beta_num[q, r, t] += val
 
@@ -560,10 +571,10 @@ def nb_update_beta(
     for q in range(Q):
         for r in range(Q):
             for t in range(T):
-                if tmp[q, r, t] < TOL:
-                    tmp[q, r, t] = TOL
-                elif tmp[q, r, t] > 1 - TOL:
-                    tmp[q, r, t] = 1 - TOL
+                if tmp[q, r, t] < TOL:  # type: ignore
+                    tmp[q, r, t] = TOL  # type: ignore
+                elif tmp[q, r, t] > 1 - TOL:  # type: ignore
+                    tmp[q, r, t] = 1 - TOL  # type: ignore
     if not init:
         tmp = learning_rate * tmp + (1 - learning_rate) * _beta
         tmp_diff = np.abs(tmp - _beta).mean()
@@ -636,9 +647,26 @@ def nb_update_meta_params(
             )
             if verbose:
                 print("\tUpdated IB")
+        elif meta_types[s] == "categorical":
+            _meta_params[s], diff = nb_update_cat_meta(
+                init,
+                learning_rate,
+                N,
+                T,
+                Q,
+                Z,
+                X[s],
+                _meta_params[s],
+                _pres_nodes,
+                node_marg,
+                diff,
+                verbose,
+            )
+            if verbose:
+                print("\tUpdated categorical")
         else:
             raise NotImplementedError(
-                "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
+                "Yet to implement metadata distribution of given type \nOptions are 'poisson', 'indep bernoulli', or 'categorical'"
             )  # NB can't use string formatting for print in numba
     return _meta_params, diff
 
@@ -799,6 +827,87 @@ def nb_update_indep_bern_meta(
             raise RuntimeError("Problem updating IB params")
         if verbose:
             print("IB diff: ", np.round_(tmp_diff, 3))
+        diff += tmp_diff
+        _mt_params = tmp
+    else:
+        _mt_params = tmp
+    return _mt_params, diff
+
+
+@njit(parallel=True, fastmath=USE_FASTMATH)
+def nb_update_cat_meta(
+    init,
+    learning_rate,
+    N,
+    T,
+    Q,
+    Z,
+    X_s,
+    _mt_params,
+    _pres_nodes,
+    node_marg,
+    diff,
+    verbose,
+):
+    L = X_s.shape[-1]
+    rho = np.zeros((Q, T, L))
+    if init:
+        # xi = np.array(
+        #     [
+        #         [(Z[:, t] == q).sum() for t in range(T)]
+        #         for q in range(Q)
+        #     ]
+        # )
+        for t in range(T):
+            for i in prange(N):
+                if _pres_nodes[i, t]:
+                    rho[Z[i, t], t, np.flatnonzero(X_s[i, t, :])] += 1
+            for q in range(Q):
+                for l_idx in range(L):
+                    if rho[q, t, l_idx] < TOL:
+                        rho[q, t, l_idx] = TOL
+
+        # rho = np.array(
+        #     [
+        #         [
+        #             X[s][Z[:, t] == q, t, :].sum(axis=0)
+        #             for t in range(T)
+        #         ]
+        #         for q in range(Q)
+        #     ]
+        # )
+    else:
+        # rho = np.einsum("itq,itl->qtl", node_marg, X[s])
+        for t in range(T):
+            for i in prange(N):
+                if _pres_nodes[i, t]:
+                    for q in range(Q):
+                        rho[q, t, np.flatnonzero(X_s[i, t, :])] += node_marg[i, t, q]
+            for q in range(Q):
+                for l_idx in range(L):
+                    if rho[q, t, l_idx] < TOL:
+                        rho[q, t, l_idx] = TOL
+    for q in range(Q):
+        for t in range(T):
+            norm_rho = rho[q, t, :].sum()
+            for l_idx in range(L):
+                rho[q, t, l_idx] /= norm_rho
+    for q in range(Q):
+        for t in range(T):
+            for l_idx in range(L):
+                if rho[q, t, l_idx] < TOL:
+                    rho[q, t, l_idx] = TOL
+            norm_rho = rho[q, t, :].sum()
+            for l_idx in range(L):
+                if rho[q, t, l_idx] < TOL:
+                    rho[q, t, l_idx] = TOL
+    if not init:
+        tmp = learning_rate * rho + (1 - learning_rate) * _mt_params
+        tmp_diff = np.abs(tmp - _mt_params).mean()
+        if np.isnan(tmp_diff):
+            raise RuntimeError("Problem updating categorical params")
+        if verbose:
+            print("Categorical diff: ", np.round_(tmp_diff, 3))
         diff += tmp_diff
         _mt_params = tmp
     else:

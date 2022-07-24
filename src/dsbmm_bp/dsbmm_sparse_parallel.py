@@ -1,18 +1,12 @@
 import csr
 import numba_dsbmm_methods as parmeth
 import numpy as np
-import yaml
-from numba import float64
-from numba import int32
-from numba import int64
-from numba import set_num_threads
-from numba import typeof
+import yaml  # type: ignore
+from dsbmm_base import DSBMMTemplate
+from numba import float64, int32, int64, set_num_threads, typeof
 from numba.experimental import jitclass
 from numba.typed import List
-from numba.types import Array
-from numba.types import bool_
-from numba.types import ListType
-from numba.types import unicode_type
+from numba.types import Array, ListType, bool_, unicode_type
 
 # from numba import float32
 
@@ -77,11 +71,11 @@ sparse_A_type = typeof(sparse_A_ex)
 @jitclass  # (base_spec)
 class DSBMMSparseParallelBase:
     # A: np.ndarray  # assume N x N x T array s.t. (i,j,t)th position confers information about connection from i to j at time t
-    A: sparse_A_type
+    A: sparse_A_type  # type: ignore
     _pres_nodes: bool_[:, ::1]
     _pres_trans: bool_[:, ::1]
     _tot_N_pres: int64
-    X: X_type
+    X: X_type  # type: ignore
     # X: list
     # [
     #     np.ndarray
@@ -94,7 +88,7 @@ class DSBMMSparseParallelBase:
     E: int64[::1]  # num_edges in each timestep
     Q: int
     # meta_types: list[str]
-    meta_types: meta_types_type
+    meta_types: meta_types_type  # type: ignore
     meta_dims: int32[::1]
     deg_corr: bool
     directed: bool
@@ -102,26 +96,26 @@ class DSBMMSparseParallelBase:
     tuning_param: float64
     degs: float64[:, :, ::1]  # N x T x [in,out]
     kappa: float64[:, :, ::1]  # Q x T x [in,out]
-    _n_qt: int64[:, ::1]  # Q x T
     # deg_entropy: float
     _alpha: float64[::1]  # init group probs
     # group transition mat
-    _pi: Array(float64, ndim=2, layout="C")  # noqa: F821
+    _pi: Array(float64, ndim=2, layout="C")  # type: ignore # noqa: F821
     _lam: float64[:, :, ::1]  # block pois params in DC case
     # block edge probs in binary NDC case
-    _beta: Array(float64, ndim=3, layout="C")  # noqa: F821
+    _beta: Array(float64, ndim=3, layout="C")  # type: ignore # noqa: F821
     # _meta_params: list[np.ndarray]  # params for metadata dists
-    _meta_params: meta_params_type
+    _meta_params: meta_params_type  # type: ignore
     node_marg: float64[:, :, ::1]
     twopoint_time_marg: float64[:, :, :, ::1]  # assume N x T - 1 x Q x Q (i,t,q,qprime)
     # twopoint_edge_marg: float64[:, :, :, :, ::1]  # assume N x N x T x Q x Q (i,j,t,q,r)
-    twopoint_edge_marg: tp_e_marg_type  # [t][i][j_idx,q,r] where j_idx is idx where nbrs[t][i]==j
+    twopoint_edge_marg: tp_e_marg_type  # type: ignore # [t][i][j_idx,q,r] where j_idx is idx where nbrs[t][i]==j
     dc_lkl: float64[:, :, ::1]  # E x Q x Q array of DC lkl of edge belonging to q, r
     meta_lkl: float64[:, :, ::1]  # N x T x Q array of meta lkl term for i at t in q
-    nbrs: nbrs_type
+    nbrs: nbrs_type  # type: ignore
     _edge_vals: float64[:, ::1]
     diff: float64
     verbose: bool
+    frozen: bool
 
     def __init__(
         self,
@@ -135,6 +129,7 @@ class DSBMMSparseParallelBase:
         meta_types,
         tuning_param,
         verbose,
+        frozen,
     ):
         self.A = A  # assuming list of T sparse adjacency matrices (N x N) (made in right format already by Python wrapper)
         self.N = A[0].nrows
@@ -276,6 +271,7 @@ class DSBMMSparseParallelBase:
 
         self.diff = 1.0
         self.verbose = verbose
+        self.frozen = frozen
 
     @property
     def num_nodes(self):
@@ -382,121 +378,123 @@ class DSBMMSparseParallelBase:
         Args:
             messages (_type_): _description_
         """
-        # first init of parameters given initial groups if init=True, else use provided marginals
-        self._alpha, self.diff = parmeth.nb_update_alpha(
-            init,
-            learning_rate,
-            self.N,
-            self.T,
-            self.Q,
-            self.Z,
-            self._tot_N_pres,
-            self._alpha,
-            self.node_marg,
-            self.diff,
-            self.verbose,
-        )
-        if self.verbose:
-            print(self._alpha)
-            print("\tUpdated alpha")
-        self._pi, self.diff = parmeth.nb_update_pi(
-            init,
-            learning_rate,
-            self.N,
-            self.T,
-            self.Q,
-            self.Z,
-            self._pres_trans,
-            self._pi,
-            self.twopoint_time_marg,
-            self.diff,
-            self.verbose,
-        )
-        if self.verbose:
-            print(self._pi)
-            print("\tUpdated pi")
-        if self.deg_corr:
-            self._lam, self.diff = parmeth.nb_update_lambda(
+        if not self.frozen:
+            # first init of parameters given initial groups if init=True, else use provided marginals
+            self._alpha, self.diff = parmeth.nb_update_alpha(
                 init,
                 learning_rate,
-                self.directed,
-                self._edge_vals,
-                self.nbrs,
-                self.degs,
-                self.kappa,
+                self.N,
                 self.T,
                 self.Q,
                 self.Z,
-                self._lam,
+                self._tot_N_pres,
+                self._alpha,
                 self.node_marg,
-                self.twopoint_edge_marg,
                 self.diff,
                 self.verbose,
             )
             if self.verbose:
-                print(self._lam)
-                print("\tUpdated lambda")
-        else:
-            # NB only implemented for binary case
-            self._beta, self.diff = parmeth.nb_update_beta(
+                print(self._alpha)
+                print("\tUpdated alpha")
+            self._pi, self.diff = parmeth.nb_update_pi(
                 init,
                 learning_rate,
-                self.directed,
-                self._edge_vals,
-                self._pres_nodes,
-                self.nbrs,
-                self.degs,
-                self._n_qt,
+                self.N,
                 self.T,
                 self.Q,
                 self.Z,
-                self._beta,
-                self.node_marg,
-                self.twopoint_edge_marg,
+                self._pres_trans,
+                self._pi,
+                self.twopoint_time_marg,
                 self.diff,
                 self.verbose,
             )
-            # NB only implemented for binary case
             if self.verbose:
-                print(self._beta.transpose(2, 0, 1))
-                print("\tUpdated beta")
-            if not self.directed:
-                assert np.all(
-                    np.abs(self._beta.transpose(1, 0, 2) - self._beta) < 1e-10
+                print(self._pi)
+                print("\tUpdated pi")
+            if self.deg_corr:
+                self._lam, self.diff = parmeth.nb_update_lambda(
+                    init,
+                    learning_rate,
+                    self.directed,
+                    self._edge_vals,
+                    self.nbrs,
+                    self.degs,
+                    self.kappa,
+                    self.T,
+                    self.Q,
+                    self.Z,
+                    self._lam,
+                    self.node_marg,
+                    self.twopoint_edge_marg,
+                    self.diff,
+                    self.verbose,
                 )
-        self._meta_params, self.diff = parmeth.nb_update_meta_params(
-            init,
-            learning_rate,
-            self.meta_types,
-            self.N,
-            self.T,
-            self.Q,
-            self.Z,
-            self.X,
-            self._meta_params,
-            self._pres_nodes,
-            self.node_marg,
-            self.diff,
-            self.verbose,
-        )
-        if self.verbose:
-            # print(self.jit_model._meta_params)
-            print("\tUpdated meta")
-        self.meta_lkl = parmeth.nb_calc_meta_lkl(
-            self.N,
-            self.T,
-            self.Q,
-            self.meta_types,
-            self._meta_params,
-            self.X,
-            self.tuning_param,
-            self._pres_nodes,
-            self.verbose,
-        )
-        if self.deg_corr:
-            self.dc_lkl = parmeth.nb_compute_DC_lkl(
-                self._edge_vals, self.Q, self.degs, self._lam
+                if self.verbose:
+                    print(self._lam)
+                    print("\tUpdated lambda")
+            else:
+                # NB only implemented for binary case
+                self._beta, self.diff = parmeth.nb_update_beta(
+                    init,
+                    learning_rate,
+                    self.directed,
+                    self._edge_vals,
+                    self._pres_nodes,
+                    self.nbrs,
+                    self.degs,
+                    self._n_qt,
+                    self.T,
+                    self.Q,
+                    self.Z,
+                    self._beta,
+                    self.node_marg,
+                    self.twopoint_edge_marg,
+                    self.diff,
+                    self.verbose,
+                )
+                # NB only implemented for binary case
+                if self.verbose:
+                    print(self._beta.transpose(2, 0, 1))
+                    print("\tUpdated beta")
+                if not self.directed:
+                    assert np.all(
+                        np.abs(self._beta.transpose(1, 0, 2) - self._beta) < 1e-10
+                    )
+            self._meta_params, self.diff = parmeth.nb_update_meta_params(
+                init,
+                learning_rate,
+                self.meta_types,
+                self.N,
+                self.T,
+                self.Q,
+                self.Z,
+                self.X,
+                self._meta_params,
+                self._pres_nodes,
+                self.node_marg,
+                self.diff,
+                self.verbose,
             )
+            if self.verbose:
+                # print(self.jit_model._meta_params)
+                print("\tUpdated meta")
+        if not self.frozen or init:
+            self.meta_lkl = parmeth.nb_calc_meta_lkl(
+                self.N,
+                self.T,
+                self.Q,
+                self.meta_types,
+                self._meta_params,
+                self.X,
+                self.tuning_param,
+                self._pres_nodes,
+                self.verbose,
+            )
+            if self.deg_corr:
+                self.dc_lkl = parmeth.nb_compute_DC_lkl(
+                    self._edge_vals, self.Q, self.degs, self._lam
+                )
 
     def set_node_marg(self, values):
         self.node_marg = values
@@ -518,8 +516,25 @@ class DSBMMSparseParallelBase:
                 else:
                     self.Z[i, t] = -1
 
+    def set_alpha(self, params: float64[:]):
+        self._alpha = params
 
-class DSBMMSparseParallel:
+    def set_pi(self, params: float64[:, :]):
+        self._pi = params
+
+    def set_beta(self, params: float64[:, :, :]):
+        self._beta = params
+
+    def set_lambda(self, params: float64[:, :, :]):
+        self._lam = params
+
+    def set_meta_params(self, params: meta_params_type):  # type: ignore
+        assert len(params) == len(self._meta_params)
+        for s, param in enumerate(params):  # type: ignore
+            self._meta_params[s] = params[s]  # type: ignore
+
+
+class DSBMMSparseParallel(DSBMMTemplate):
     """Pure Python wrapper around DSBMMSparseParallelBase to allow optional/keyword arguments
     Note the class this wraps is itself now a wrapper for separately njit'd functions, so as to allow
     parallelisation
@@ -539,8 +554,9 @@ class DSBMMSparseParallel:
         tuning_param=1.0,
         verbose=False,
         n_threads=None,
+        frozen=False,
     ):
-        """Initalise the class
+        """Initialise the class
 
         Args:
             A (list[scipy.sparse.csr_matrix], optional): (Sparse) adjacency matrices at each timestep,
@@ -571,6 +587,8 @@ class DSBMMSparseParallel:
         A = tmp
         self.A = A
         self.tuning_param = tuning_param
+        self.frozen = frozen
+        self.deg_corr = deg_corr
         self.jit_model = DSBMMSparseParallelBase(
             A,
             X,
@@ -582,247 +600,7 @@ class DSBMMSparseParallel:
             meta_types,
             tuning_param,
             verbose,
+            frozen,
         )
         self.directed = directed
         self.verbose = verbose
-
-    @property
-    def num_nodes(self):
-        return self.jit_model.N
-
-    @property
-    def num_groups(self):
-        return self.jit_model.Q
-
-    @property
-    def num_timesteps(self):
-        return self.jit_model.T
-
-    @property
-    def get_deg_entropy(self):
-        return self.jit_model.deg_entropy
-
-    @property
-    def num_edges(self):
-        # return number of edges in each slice - important as expect to affect BP computational complexity linearly
-        return self.jit_model.E
-
-    @property
-    def alpha(self):
-        return self.jit_model._alpha
-
-    @property
-    def pi(self):
-        return self.jit_model._pi
-
-    @property
-    def lam(self):
-        return self.jit_model._lam
-
-    @property
-    def beta(self):
-        return self.jit_model._beta
-
-    @property
-    def meta_params(self):
-        return self.jit_model._meta_params
-
-    def get_degree(self, i, t):
-        return self.jit_model.degs[i, t, :]
-
-    def get_degree_vec(self, t):
-        return self.jit_model.degs[:, t, :]
-
-    def get_groups(self, t):
-        return self.jit_model.Z[:, t]
-
-    def get_entropy(self):
-        pass
-
-    def compute_group_counts(self):
-        return self.jit_model.compute_group_counts()
-
-    def compute_degs(self, A=None):
-        """Compute in-out degree matrix from given temporal adjacency mat
-
-        Args:
-            A (_type_): _description_
-
-        Returns:
-            _type_: _description_
-        """
-        if A is None:
-            A = self.A
-        return self.jit_model.compute_degs(A)
-
-    def compute_group_degs(self):
-        """Compute group in- and out-degrees for current node memberships"""
-        return self.jit_model.compute_group_degs()
-
-    def compute_log_likelihood(self):
-        """Compute log likelihood of model for given memberships
-
-            In DC case this corresponds to usual DSBMM with exception of each timelice now has log lkl
-                \\sum_{q,r=1}^Q m_{qr} \\log\frac{m_{qr}}{\\kappa_q^{out}\\kappa_r^{in}},
-            (ignoring constants w.r.t. node memberships)
-
-        Returns:
-            _type_: _description_
-        """
-        return self.jit_model.compute_log_likelihood()
-
-    def update_params(self, init=False, learning_rate=0.2):
-        """Given marginals, update parameters suitably
-
-        Args:
-            init (bool, optional): _description_. Defaults to False.
-            learning_rate (float, optional): _description_. Defaults to 0.2.
-        """
-        # first init of parameters given initial groups if init=True, else use provided marginals
-        self.jit_model.update_params(init, learning_rate)
-
-    def set_node_marg(self, values):
-        self.jit_model.node_marg = values
-
-    def set_twopoint_time_marg(self, values):
-        self.jit_model.twopoint_time_marg = values
-
-    def set_twopoint_edge_marg(self, values):
-        self.jit_model.twopoint_edge_marg = values
-
-    def update_alpha(self, init=False):
-        self.jit_model.update_alpha(init)
-
-    def update_pi(
-        self,
-        init=False,
-    ):
-        self.jit_model.update_pi(init)
-        # qqprime_trans = np.array(
-        #     [
-        #         [
-        #             [
-        #                 ((self.Z[:, t - 1] == q) * (self.Z[:, t] == qprime)).sum()
-        #                 for qprime in range(self.Q)
-        #             ]
-        #             for q in range(self.Q)
-        #         ]
-        #         for t in range(1, self.T)
-        #     ]
-        # ).sum(axis=-1)
-        # print("Before norm:", qqprime_trans)
-        # qqprime_trans[qqprime_trans < TOL] = TOL # can't use 2d bools in numba
-        # print("After:", qqprime_trans)
-
-    def update_lambda(self, init=False):
-        # np.array(
-        #     [
-        #         [
-        #             [
-        #                 self.A[self.Z[:, t] == q, self.Z[:, t] == r, t].sum()
-        #                 for r in range(self.Q)
-        #             ]
-        #             for q in range(self.Q)
-        #         ]
-        #         for t in range(self.T)
-        #     ]
-        # )
-        # lam_den = np.array(
-        #     [
-        #         [self.degs[self.Z[:, t] == q].sum() for q in range(self.Q)]
-        #         for t in range(self.T)
-        #     ]
-        # )
-        # lam_den = np.einsum("tq,tr->tqr", lam_den, lam_den)
-        # lam_den = np.array(
-        #     [
-        #         [
-        #             [
-        #                 self.kappa[q, t, 0] * self.kappa[r, t, 0]
-        #                 for t in range(self.T)
-        #             ]
-        #             for r in range(self.Q)
-        #         ]
-        #         for q in range(self.Q)
-        #     ]
-        # )
-        # or
-        # lam_num = np.einsum("ijtqr,ijt->qrt", self.twopoint_edge_marg, self.A)
-        # lam_den = np.einsum("itq,it->qt", self.node_marg, self.degs)
-        # lam_den = np.einsum("qt,rt->qrt", lam_den, lam_den)
-        self.jit_model.update_lambda(init)
-
-    def update_beta(self, init=False):
-        # beta_num = np.array(
-        #     [
-        #         [
-        #             [
-        #                 (self.A[self.Z[:, t] == q, self.Z[:, t] == r, t] > 0).sum()
-        #                 for r in range(self.Q)
-        #             ]
-        #             for q in range(self.Q)
-        #         ]
-        #         for t in range(self.T)
-        #     ]
-        # )
-
-        # beta_den = np.array(
-        #     [
-        #         [self.degs[self.Z[:, t] == q].sum() for q in range(self.Q)]
-        #         for t in range(self.T)
-        #     ]
-        # )
-        # beta_den = np.einsum("tq,tr->tqr", beta_den, beta_den)
-        # or
-        # beta_num = np.einsum(
-        #     "ijtqr,ijt->qrt", self.twopoint_edge_marg, (self.A > 0)
-        # )
-        # beta_den = np.einsum("itq,it->qt", self.node_marg, self.degs)
-        # beta_den = np.einsum("qt,rt->qrt", beta_den, beta_den)
-        self.jit_model.update_beta(init)
-
-    def update_meta_params(self, init=False):
-        self.jit_model.update_meta_params(init)
-
-    def update_poisson_meta(self, s, init=False):
-        # xi = np.array(
-        #     [
-        #         [(self.Z[:, t] == q).sum() for t in range(self.T)]
-        #         for q in range(self.Q)
-        #     ]
-        # )
-        # zeta = np.array(
-        #     [
-        #         [self.X[s][self.Z[:, t] == q, t, 0].sum() for t in range(self.T)]
-        #         for q in range(self.Q)
-        #     ]
-        # )
-
-        # zeta = np.einsum("itq,itd->qt", self.node_marg, self.X[s])
-        self.jit_model.update_poisson_meta(s, init)
-
-    def update_indep_bern_meta(self, s, init=False):
-        # xi = np.array(
-        #     [
-        #         [(self.Z[:, t] == q).sum() for t in range(self.T)]
-        #         for q in range(self.Q)
-        #     ]
-        # )
-        # rho = np.array(
-        #     [
-        #         [
-        #             self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
-        #             for t in range(self.T)
-        #         ]
-        #         for q in range(self.Q)
-        #     ]
-        # )
-        # rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s])
-        self.jit_model.update_indep_bern_meta(s, init)
-
-    def zero_diff(self):
-        self.jit_model.zero_diff()
-
-    def set_Z_by_MAP(self):
-        self.jit_model.set_Z_by_MAP()
-        self.Z = self.jit_model.Z
