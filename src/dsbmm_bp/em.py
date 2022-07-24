@@ -10,8 +10,7 @@ import dsbmm_sparse_parallel
 import numpy as np
 from numba.typed import List
 from scipy import sparse
-from sklearn.cluster import KMeans
-from sklearn.cluster import MiniBatchKMeans
+from sklearn.cluster import KMeans, MiniBatchKMeans
 from sklearn.metrics import adjusted_rand_score as ari
 
 # from utils import nb_ari_local  # , nb_nmi_local
@@ -19,10 +18,10 @@ from sklearn.metrics import adjusted_rand_score as ari
 faulthandler.enable()
 
 import matplotlib.pyplot as plt
+import yaml  # type: ignore # for reading config file
 
 # plt.ion()
 
-import yaml  # for reading config file
 
 with open("config.yaml") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
@@ -47,12 +46,16 @@ class EM:
         deg_corr=False,
         verbose=True,
         use_meta=True,
+        max_iter=30,
+        max_msg_iter=10,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
         self.patience = patience
         self.use_meta = use_meta
         self.msg_init_mode = msg_init_mode
+        self.max_iter = max_iter
+        self.max_msg_iter = max_msg_iter
         self.A = data["A"]
         if type(tuning_param) == float:
             self.tuning_params = [tuning_param]
@@ -102,7 +105,7 @@ class EM:
             except Exception:  # KeyError:
                 print(self.X)
                 raise KeyError(
-                    "X given as dict - expected test run with keys 'poisson' and 'indep bernoulli'"
+                    "X given as dict - expected test run with keys 'poisson' and 'indep bernoulli', or 'categorical'"
                 )
 
         ## Sort init partition
@@ -224,7 +227,7 @@ class EM:
                     meta_types=self.meta_types,
                     tuning_param=self.tuning_params[0],
                     verbose=self.verbose,
-                    use_meta=self.use_meta
+                    use_meta=self.use_meta,
                 )  # X=X,
                 if self.verbose:
                     print("Successfully instantiated DSBMM...")
@@ -241,7 +244,7 @@ class EM:
                     meta_types=self.meta_types,
                     tuning_param=self.tuning_params[0],
                     verbose=self.verbose,
-                    use_meta=self.use_meta
+                    use_meta=self.use_meta,
                 )  # X=X,
                 if self.verbose:
                     print("Successfully instantiated DSBMM...")
@@ -258,7 +261,7 @@ class EM:
                 meta_types=self.meta_types,
                 tuning_param=self.tuning_params[0],
                 verbose=self.verbose,
-                use_meta=self.use_meta
+                use_meta=self.use_meta,
             )  # X=X,
             if self.verbose:
                 print("Successfully instantiated DSBMM...")
@@ -286,7 +289,7 @@ class EM:
             (self.lines,) = self.ax.plot([], [], "o")
             # Autoscale on unknown axis and known lims on the other
             self.ax.set_autoscaley_on(True)
-            self.ax.set_xlim(0, MAX_ITER)
+            self.ax.set_xlim(0, self.max_iter)
             # Other stuff
             self.ax.grid()
             # ...
@@ -322,7 +325,7 @@ class EM:
                     meta_types=self.meta_types,
                     tuning_param=self.tuning_params[0],
                     verbose=self.verbose,
-                    use_meta=self.use_meta
+                    use_meta=self.use_meta,
                 )  # X=X,
                 if self.verbose:
                     print("Successfully reinstantiated DSBMM...")
@@ -339,7 +342,7 @@ class EM:
                     meta_types=self.meta_types,
                     tuning_param=self.tuning_params[0],
                     verbose=self.verbose,
-                    use_meta=self.use_meta
+                    use_meta=self.use_meta,
                 )  # X=X,
                 if self.verbose:
                     print("Successfully reinstantiated DSBMM...")
@@ -356,7 +359,7 @@ class EM:
                 meta_types=self.meta_types,
                 tuning_param=tuning_param,
                 verbose=self.verbose,
-                use_meta=self.use_meta
+                use_meta=self.use_meta,
             )  # X=X,
             if self.verbose:
                 print("Successfully reinstantiated DSBMM...")
@@ -384,7 +387,7 @@ class EM:
             (self.lines,) = self.ax.plot([], [], "o")
             # Autoscale on unknown axis and known lims on the other
             self.ax.set_autoscaley_on(True)
-            self.ax.set_xlim(0, MAX_ITER)
+            self.ax.set_xlim(0, self.max_iter)
             # Other stuff
             self.ax.grid()
             # ...
@@ -392,8 +395,6 @@ class EM:
 
     def fit(
         self,
-        max_iter=MAX_ITER,
-        max_msg_iter=MAX_MSG_ITER,
         conv_tol=CONV_TOL,
         msg_conv_tol=MSG_CONV_TOL,
         true_Z=None,
@@ -409,13 +410,17 @@ class EM:
         while self.run_idx < self.n_runs - 1:
             if self.verbose:
                 print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
-            self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
+            self.do_run(
+                self.max_iter, self.max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+            )
             self.bp.model.set_Z_by_MAP()
             self.reinit()
         if self.verbose:
             print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
         # final random init run
-        self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
+        self.do_run(
+            self.max_iter, self.max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+        )
         if len(self.tuning_params) > 1:
             for tuning_param in self.tuning_params[1:]:
                 if self.verbose:
@@ -429,8 +434,8 @@ class EM:
                 self.reinit(tuning_param=tuning_param)
                 while self.run_idx < self.n_runs - 1:
                     self.do_run(
-                        max_iter,
-                        max_msg_iter,
+                        self.max_iter,
+                        self.max_msg_iter,
                         conv_tol,
                         msg_conv_tol,
                         learning_rate,
@@ -439,8 +444,8 @@ class EM:
                     self.reinit(tuning_param=tuning_param)
                 # final random init run
                 self.do_run(
-                    max_iter,
-                    max_msg_iter,
+                    self.max_iter,
+                    self.max_msg_iter,
                     conv_tol,
                     msg_conv_tol,
                     learning_rate,
@@ -453,14 +458,20 @@ class EM:
         except Exception:  # AttributeError:
             # no tuning param used
             self.reinit(set_Z=self.best_Z)
-        self.do_run(max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate)
+        self.do_run(
+            self.max_iter, self.max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+        )
 
-    def do_run(self, max_iter, max_msg_iter, conv_tol, msg_conv_tol, learning_rate):
-        for n_iter in range(max_iter):
+    def do_run(self, conv_tol, msg_conv_tol, learning_rate):
+        for n_iter in range(self.max_iter):
             if self.verbose:
                 print(f"\n##### At iteration {n_iter+1} #####")
                 self.xdata.append(n_iter)
-            for msg_iter in range(max_msg_iter):
+            for msg_iter in range(self.max_msg_iter):
+                if n_iter < 5:
+                    if msg_iter > self.max_msg_iter // 3:
+                        # Use fewer max msg updates for first few EM steps, where params usually inaccurate
+                        break
                 if self.verbose:
                     print(f"Message update iter {msg_iter + 1}...")
                 self.bp.update_node_marg()  # dumping rate?

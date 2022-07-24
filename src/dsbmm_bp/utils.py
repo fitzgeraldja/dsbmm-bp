@@ -111,7 +111,8 @@ def _plain_bfs(G: np.ndarray, source: int) -> set:
 
 
 @njit
-def connected_components_sparse(G: CSR):
+def connected_components_sparse(G: CSR) -> Generator[set, None, None]:
+    # TODO: consider return to generator formulation
     seen = set()
     all_comps = []
     for v in range(G.nrows):
@@ -121,7 +122,7 @@ def connected_components_sparse(G: CSR):
             seen.update(c)
             # yield c
             all_comps.append(c)
-    return all_comps
+    return all_comps  # type: ignore
 
 
 @njit

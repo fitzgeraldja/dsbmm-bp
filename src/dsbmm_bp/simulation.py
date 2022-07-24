@@ -167,31 +167,34 @@ def gen_ppm(
     return A
 
 
-@njit
+@njit(cache=False)
 def rand_choice_nb(arr, prob):
     """numba alternative to np random choice
     :param arr: A 1D numpy array of values to sample from.
     :param prob: A 1D numpy array of probabilities for the given samples.
     :return: A random sample from the given array with a given probability.
     """
+    prob = prob / prob.sum()
     return arr[np.searchsorted(np.cumsum(prob), np.random.random(), side="right")]
 
 
 @njit
 def pick_category(p_dist, n_samps):
-    if n_samps > 1:
-        print("Not implemented")
-    else:
-        return rand_choice_nb(np.arange(len(p_dist)), p_dist)
+    p_dist = p_dist / p_dist.sum()
+    cat_array = np.array(
+        [rand_choice_nb(np.arange(len(p_dist)), p_dist) for _ in range(n_samps)]
+    )
+    return cat_array
 
 
 @njit
 def evolve_Z(Z_1, trans_prob, T):
     Z = np.zeros((len(Z_1), T))
     Z[:, 0] = Z_1
+    Q = trans_prob.shape[0]
     for t in range(T - 1):
         Z[:, t + 1] = np.array(
-            [pick_category(trans_prob[int(zi), :], 1) for zi in Z[:, t]]
+            [rand_choice_nb(np.arange(Q), trans_prob[int(zi), :]) for zi in Z[:, t]]
         )
     return Z.astype(np.int32)
 
@@ -727,6 +730,46 @@ def gen_test_data(
             pickle.dump(tests, f)
 
     return tests
+
+
+def toy_model(
+    p_in=0.4, p_out=0.1, p_stay=0.8, rho_in=0.8, Q=2, T=5, N=100, verbose=False
+):
+    """Generate simplest possible model with given
+    parameters:
+
+    :param p_in: Prob of connection within groups,
+                 defaults to 0.4
+    :type p_in: float, optional
+    :param p_out: Prob of connection between groups,
+                  defaults to 0.1
+    :type p_out: float, optional
+    :param p_stay: Prob of group, defaults to 0.8
+    :type p_stay: float, optional
+    :param rho_in: _description_, defaults to 0.8
+    :type rho_in: float, optional
+    :param Q: _description_, defaults to 2
+    :type Q: int, optional
+    :param T: _description_, defaults to 5
+    :type T: int, optional
+    :param N: _description_, defaults to 100
+    :type N: int, optional
+    :param verbose: _description_, defaults to False
+    :type verbose: bool, optional
+    """
+    Z_1 = np.random.randint(0, high=Q, size=N)
+    meta_params = np.tile(np.expand_dims(gen_trans_mat(rho_in, Q), 2), (1, 1, T))
+    return sample_dynsbm_meta(
+        Z_1,
+        Q=Q,
+        T=T,
+        trans_prob=gen_trans_mat(p_stay, Q),
+        p_in=p_in,
+        p_out=p_out,
+        meta_types=["categorical"],
+        meta_dims=[Q],
+        meta_params=[meta_params],
+    )
 
 
 ################################################################

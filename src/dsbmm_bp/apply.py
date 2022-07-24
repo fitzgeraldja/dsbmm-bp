@@ -61,6 +61,20 @@ parser.add_argument(
     help="Maximum number of groups to use, will search up to here",
 )
 
+parser.add_argument(
+    "--max_iter",
+    type=int,
+    default=30,
+    help="Maximum number of EM iterations to run. Default is 30.",
+)
+
+parser.add_argument(
+    "--max_msg_iter",
+    type=int,
+    default=10,
+    help="Maximum number of message updates to run each EM iteration. Default is 10. Early iterations will use //3 of this value.",
+)
+
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
 
 parser.add_argument(
@@ -71,9 +85,11 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--n_threads", 
-    type=int,
-    help="Set number of threads used for parallelism"
+    "--n_threads", type=int, help="Set number of threads used for parallelism"
+)
+
+parser.add_argument(
+    "--n_runs", type=int, default=5, help="Set number of runs, default = 5"
 )
 
 parser.add_argument(
@@ -81,19 +97,26 @@ parser.add_argument(
     "-tunp",
     type=float,
     default=1.0,
-    help="Set metadata tuning parameter value"
+    help="Set metadata tuning parameter value",
 )
 
 parser.add_argument(
     "--ignore_meta",
     action="store_true",
-    help="Ignore metadata, use only network edges for fitting model"
+    help="Ignore metadata, use only network edges for fitting model",
+)
+
+parser.add_argument(
+    "--freeze",
+    action="store_true",
+    help="Supply model true DSBMM parameters with exception of group labels, and do not update these",
 )
 
 args = parser.parse_args()
 
-if args.n_threads is not None: 
+if args.n_threads is not None:
     from numba import set_num_threads
+
     set_num_threads(args.n_threads)
 
 if __name__ == "__main__":
@@ -368,14 +391,23 @@ if __name__ == "__main__":
                             ## Initialise model
                             true_Z = sample.pop("Z")
                             ## Initialise
-                            if testset_name != "scaling":
-                                model = em.EM(sample, verbose=verbose)
+                            if testset_name not in ["scaling", "align"]:
+                                model = em.EM(
+                                    sample,
+                                    verbose=verbose,
+                                    n_runs=args.n_runs,
+                                    max_iter=args.max_iter,
+                                    max_msg_iter=args.max_msg_iter,
+                                )
                             elif testset_name == "align":
                                 print(f"alignment = {params['meta_aligned']}")
                                 model = em.EM(
                                     sample,
                                     verbose=verbose,
                                     tuning_param=args.tuning_param,
+                                    n_runs=args.n_runs,
+                                    max_iter=args.max_iter,
+                                    max_msg_iter=args.max_msg_iter,
                                 )
                             else:
                                 print(f"N = {params['N']}")
@@ -384,6 +416,7 @@ if __name__ == "__main__":
                                     sparse_adj=True,
                                     try_parallel=try_parallel,
                                     verbose=verbose,
+                                    n_runs=args.n_runs,
                                 )
                             if samp_no > 0:
                                 init_times[test_no, samp_no - 1] = (
@@ -402,6 +435,33 @@ if __name__ == "__main__":
                                         3,
                                     )
                                 )
+                            if args.freeze:
+                                if testset_name == "og":
+                                    raise NotImplementedError(
+                                        "Freeze not implemented for OG testset"
+                                    )
+                                else:
+                                    # "n_samps": test_params["n_samps"],
+                                    print("Freezing params...")
+                                    alpha = 1 / params["Q"]
+                                    beta = simulation.gen_beta_mat(
+                                        params["Q"], params["p_in"], params["p_out"]
+                                    )
+                                    pi = simulation.gen_trans_mat(
+                                        params["p_stay"], params["Q"]
+                                    )
+                                    meta_params = [
+                                        params["pois_params"],
+                                        params["indep_bern_params"],
+                                    ]
+                                    true_params = {
+                                        "alpha": alpha,
+                                        "beta": beta,
+                                        "pi": pi,
+                                        "meta_params": meta_params,
+                                    }
+
+                                model.dsbmm.set_params(params, freeze=True)
                             ## Fit to given data
                             model.fit(true_Z=true_Z, learning_rate=0.2)
                             ## Score after fit
@@ -519,6 +579,10 @@ if __name__ == "__main__":
             print(f"Finished test {test_no+1} for true params:")
             print(params)
             print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
+            mlflow.log_params(params)
+            mlflow.log_metric(
+                key=f"Test {params['test_no']} ARI", value=test_aris[test_no].mean()
+            )
         print()
         print("Mean ARIs inferred for each test:")
         try:
@@ -542,7 +606,7 @@ if __name__ == "__main__":
             n_runs=n_runs,
             deg_corr=True,
             verbose=verbose,
-            use_meta=not args.ignore_meta
+            use_meta=not args.ignore_meta,
         )
         ## Fit to given data
         model.fit(learning_rate=0.2)
