@@ -126,7 +126,13 @@ if __name__ == "__main__":
     mlflow.set_tracking_uri(f"file://{dir_path}")
     # Set an experiment name, which must be unique
     # and case-sensitive.
-    experiment = mlflow.set_experiment(f"dsbmm-alpha-{args.test}")
+    log_runs = False 
+    if log_runs:
+        try:
+            experiment_id = mlflow.create_experiment(f"dsbmm-alpha-{args.test}") 
+            experiment = mlflow.get_experiment(experiment_id)
+        except:
+            experiment = mlflow.set_experiment(f"dsbmm-alpha-{args.test}")
     # Get Experiment Details
     # print("Experiment_id: {}".format(experiment.experiment_id))
 
@@ -364,14 +370,16 @@ if __name__ == "__main__":
             print()
             print("*" * 15, f"Test {test_no+1}", "*" * 15)
             # Create nested runs for each test + sample
+            if log_runs: experiment_id = experiment.experiment_id
+            else: experiment_id = 0
             with mlflow.start_run(
-                run_name=f"PARENT_RUN_{test_no}", experiment_id=experiment.experiment_id
+                run_name=f"PARENT_RUN_{test_no}", experiment_id=experiment_id
             ) as parent_run:
                 # mlflow.log_param("parent", "yes")
                 for samp_no, sample in enumerate(samples):
                     with mlflow.start_run(
                         run_name=f"CHILD_RUN_{test_no}:{samp_no}",
-                        experiment_id=experiment.experiment_id,
+                        experiment_id=experiment_id,
                         nested=True,
                     ) as child_run:
                         # mlflow.log_param("child", "yes")
