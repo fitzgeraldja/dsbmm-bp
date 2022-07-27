@@ -461,7 +461,7 @@ if __name__ == "__main__":
                                         "meta_params": meta_params,
                                     }
 
-                                model.dsbmm.set_params(params, freeze=True)
+                                model.dsbmm.set_params(true_params, freeze=True)
                             ## Fit to given data
                             model.fit(true_Z=true_Z, learning_rate=0.2)
                             ## Score after fit
