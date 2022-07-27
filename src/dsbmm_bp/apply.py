@@ -587,7 +587,13 @@ if __name__ == "__main__":
             print(f"Finished test {test_no+1} for true params:")
             print(params)
             print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
-            mlflow.log_params(params)
+            logging_params = {
+                'test_no':params['test_no'],
+                'meta_aligned':params['meta_aligned'],
+                'p_in':params['p_in'],
+                'p_stay':params['p_stay']
+                }
+            mlflow.log_params(logging_params)
             mlflow.log_metric(
                 key=f"Test {params['test_no']} ARI", value=test_aris[test_no].mean()
             )
