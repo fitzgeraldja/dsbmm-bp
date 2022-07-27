@@ -411,7 +411,7 @@ class EM:
             if self.verbose:
                 print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
             self.do_run(
-                self.max_iter, self.max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+                conv_tol, msg_conv_tol, learning_rate
             )
             self.bp.model.set_Z_by_MAP()
             self.reinit()
@@ -419,7 +419,7 @@ class EM:
             print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
         # final random init run
         self.do_run(
-            self.max_iter, self.max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+            conv_tol, msg_conv_tol, learning_rate
         )
         if len(self.tuning_params) > 1:
             for tuning_param in self.tuning_params[1:]:
@@ -434,8 +434,6 @@ class EM:
                 self.reinit(tuning_param=tuning_param)
                 while self.run_idx < self.n_runs - 1:
                     self.do_run(
-                        self.max_iter,
-                        self.max_msg_iter,
                         conv_tol,
                         msg_conv_tol,
                         learning_rate,
@@ -444,8 +442,6 @@ class EM:
                     self.reinit(tuning_param=tuning_param)
                 # final random init run
                 self.do_run(
-                    self.max_iter,
-                    self.max_msg_iter,
                     conv_tol,
                     msg_conv_tol,
                     learning_rate,
@@ -459,7 +455,7 @@ class EM:
             # no tuning param used
             self.reinit(set_Z=self.best_Z)
         self.do_run(
-            self.max_iter, self.max_msg_iter, conv_tol, msg_conv_tol, learning_rate
+            conv_tol, msg_conv_tol, learning_rate
         )
 
     def do_run(self, conv_tol, msg_conv_tol, learning_rate):
