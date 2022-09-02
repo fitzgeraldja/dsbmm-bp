@@ -124,7 +124,7 @@ def nb_init_msgs(
                 if n_nbrs > 0:
                     msg = (1 - p) * np.random.rand(n_nbrs, Q)
                     for nbr_idx in range(msg.shape[0]):
-                        msg[nbr_idx, :] *= p * one_hot_Z[i, t, :]
+                        msg[nbr_idx, :] += p * one_hot_Z[i, t, :]
                         msg[nbr_idx, :] /= msg[nbr_idx, :].sum()
                 else:
                     # print("WARNING: empty nodes not properly handled yet")
@@ -834,6 +834,15 @@ def nb_update_node_marg(
                                         tmp_spatial_msg[nbr_idx, q] /= tmp_spat_sums[
                                             nbr_idx
                                         ]
+                            for nbr_idx in range(deg_i):
+                                msg_diff += (
+                                    np.abs(
+                                        tmp_spatial_msg[nbr_idx, :]
+                                        - _psi_e[t][i][nbr_idx, :]
+                                    ).mean()
+                                    * deg_i
+                                    / n_msgs
+                                )  # NB need to mult by deg_i so weighted correctly
                             _new_psi_e[t][i] = tmp_spatial_msg
                             # ## UPDATE FORWARDS MESSAGES FROM i AT t ##
                             if t < T - 1:
@@ -908,7 +917,7 @@ def nb_update_node_marg(
     return new_node_marg, _new_psi_e, _new_psi_t, msg_diff
 
 
-@njit(parallel=True, fastmath=USE_FASTMATH, error_model='numpy')
+@njit(parallel=True, fastmath=USE_FASTMATH, error_model="numpy")
 def nb_compute_free_energy(
     N,
     T,

@@ -951,6 +951,10 @@ class DSBMMBase:
         # TODO: fix for case where xi small - rather than just setting as 1 when less than
         # 1e-50 (just consider using logs)
         tmp = zeta / xi
+        for t in range(T):
+            for q in range(Q):
+                if tmp[q, t, 0] < TOL:
+                    tmp[q, t, 0] = TOL
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
             tmp_diff = np.abs(

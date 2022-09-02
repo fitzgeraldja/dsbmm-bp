@@ -126,10 +126,10 @@ if __name__ == "__main__":
     mlflow.set_tracking_uri(f"file://{dir_path}")
     # Set an experiment name, which must be unique
     # and case-sensitive.
-    log_runs = False 
+    log_runs = False
     if log_runs:
         try:
-            experiment_id = mlflow.create_experiment(f"dsbmm-alpha-{args.test}") 
+            experiment_id = mlflow.create_experiment(f"dsbmm-alpha-{args.test}")
             experiment = mlflow.get_experiment(experiment_id)
         except:
             experiment = mlflow.set_experiment(f"dsbmm-alpha-{args.test}")
@@ -370,8 +370,10 @@ if __name__ == "__main__":
             print()
             print("*" * 15, f"Test {test_no+1}", "*" * 15)
             # Create nested runs for each test + sample
-            if log_runs: experiment_id = experiment.experiment_id
-            else: experiment_id = 0
+            if log_runs:
+                experiment_id = experiment.experiment_id
+            else:
+                experiment_id = 0
             with mlflow.start_run(
                 run_name=f"PARENT_RUN_{test_no}", experiment_id=experiment_id
             ) as parent_run:
@@ -588,11 +590,11 @@ if __name__ == "__main__":
             print(params)
             print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
             logging_params = {
-                'test_no':params['test_no'],
-                'meta_aligned':params['meta_aligned'],
-                'p_in':params['p_in'],
-                'p_stay':params['p_stay']
-                }
+                "test_no": params["test_no"],
+                "meta_aligned": params["meta_aligned"],
+                "p_in": params["p_in"],
+                "p_stay": params["p_stay"],
+            }
             mlflow.log_params(logging_params)
             mlflow.log_metric(
                 key=f"Test {params['test_no']} ARI", value=test_aris[test_no].mean()
