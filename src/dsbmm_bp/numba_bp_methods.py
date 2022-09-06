@@ -941,8 +941,9 @@ def nb_compute_free_energy(
     _psi_t,
 ):
     f_site = 0.0
+    # TODO: fix along numpy lines
     f_link = 0.0
-    last_term = 0.0  # something like average degree, but why?
+    last_term = 0.0
     for i in prange(N):
         for t in range(T):
             if _pres_nodes[i, t]:
@@ -984,7 +985,7 @@ def nb_compute_free_energy(
                         if t > 0:
                             if _pres_trans[i, t - 1]:
                                 # add back message to f_link
-                                f_link += tmp.sum()
+                                f_link += np.log(tmp.sum())
                                 forward_term = nb_forward_temp_msg_term(
                                     Q, trans_prob, i, t, _psi_t
                                 )
@@ -1012,15 +1013,15 @@ def nb_compute_free_energy(
                             tmp_spat_sums[nbr_idx] = tmp_spatial_msg[nbr_idx, :].sum()
                         for nbr_idx in range(deg_i):
                             # add spatial messages to f_link
-                            f_link += tmp_spat_sums[nbr_idx]
+                            f_link += np.log(tmp_spat_sums[nbr_idx])
                         if t < T - 1 and _pres_trans[i, t]:
                             # add forwards messages to f_link
                             tmp_forwards_msg = spatial_msg_term
                             if t > 0:
                                 tmp_forwards_msg *= forward_term
-                            f_link += tmp_forwards_msg.sum()
+                            f_link += np.log(tmp_forwards_msg.sum())
                         # add marg to f_site
-                        f_site += tmp.sum()
+                        f_site += np.log(tmp.sum())
                     else:
                         (
                             spatial_msg_term,
@@ -1060,7 +1061,7 @@ def nb_compute_free_energy(
                                     tmp - max_log_spatial_msg_term
                                 )
                                 # add backwards msg to f_link
-                                f_link += tmp_backwards_msg.sum()
+                                f_link += np.log(tmp_backwards_msg.sum())
 
                                 forward_term = np.log(
                                     nb_forward_temp_msg_term(
@@ -1090,7 +1091,7 @@ def nb_compute_free_energy(
                             tmp_spat_sums[nbr_idx] = tmp_spatial_msg[nbr_idx, :].sum()
                         # add spatial msgs to f_link
                         for nbr_idx in range(deg_i):
-                            f_link += tmp_spat_sums[nbr_idx]
+                            f_link += np.log(tmp_spat_sums[nbr_idx])
 
                         # add forwards msg to f_link
                         if t < T - 1:
@@ -1098,10 +1099,10 @@ def nb_compute_free_energy(
                                 tmp_forwards_msg = np.exp(
                                     tmp - max_log_spatial_msg_term - back_term
                                 )
-                                f_link += tmp_forwards_msg.sum()
+                                f_link += np.log(tmp_forwards_msg.sum())
                         # add marg to f_site
                         tmp_marg = np.exp(tmp - max_log_spatial_msg_term)
-                        f_site += tmp_marg.sum()
+                        f_site += np.log(tmp_marg.sum())
                 else:
                     # print("WARNING: disconnected nodes not yet handled properly")
                     # print("i,t:", i, t)

@@ -665,6 +665,7 @@ class BPBase:
         pass
 
     def compute_free_energy(self):
+        # TODO: fix along lines of numba + np version
         f_site = 0.0
         f_link = 0.0
         last_term = 0.0  # something like average degree, but why?

@@ -32,6 +32,7 @@ class NumpyBP:
         self.directed = self.model.directed
         self.use_meta = self.model.use_meta
         self.verbose = self.model.verbose
+        self.frozen = self.model.frozen
         self.A = self.model.A
         self.n_msgs = self.model.E.sum() + self.N * (self.T - 1) * 2
         self.X = self.model.X
@@ -45,8 +46,9 @@ class NumpyBP:
         # self._zero_twopoint_e_marg()
         self.node_marg = np.zeros((self.N, self.T, self.Q))
         self.construct_edge_idxs_and_inv()
-        self.twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
-        self.twopoint_t_marg = np.zeros((self.N, self.T - 1, self.Q, self.Q))
+        if not self.frozen:
+            self.twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
+            self.twopoint_t_marg = np.zeros((self.N, self.T - 1, self.Q, self.Q))
         self.msg_diff = 0.0
 
     def zero_diff(self):
@@ -61,7 +63,7 @@ class NumpyBP:
 
     def init_messages(
         self,
-        mode="random",
+        mode="planted",
     ):
         # construct msgs as T*Q*N,N sparse matrix,
         # where (Q*N*t + N*q + i, j) gives \psi_q^{i\to j}(t),
@@ -139,10 +141,17 @@ class NumpyBP:
                 shape=self._psi_e.shape,
             )
             Z_idxs = np.flatnonzero(one_hot_Z.transpose(1, 2, 0))
-            tmp[Z_idxs, :] *= p
+            # column indices for row i are stored in
+            # indices[indptr[i]:indptr[i+1]]
+            # and corresponding values are stored in
+            # data[indptr[i]:indptr[i+1]]
+            tmp_indptr = tmp.indptr
+            for i in Z_idxs:
+                tmp.data[tmp_indptr[i] : tmp_indptr[i + 1]] *= p
             other_idxs = np.arange(self.N * self.T * self.Q)
-            other_idxs[(other_idxs - Z_idxs) != 0]
-            tmp[other_idxs, :] = 0
+            other_idxs = np.setdiff1d(other_idxs, Z_idxs)
+            for i in other_idxs:
+                tmp.data[tmp_indptr[i] : tmp_indptr[i + 1]] = 0
             self._psi_e.data = np.random.rand(len(self._psi_e.data))
 
             sums = sparse.vstack(
@@ -165,8 +174,29 @@ class NumpyBP:
             self._psi_e.data /= sums.data  # normalise noise
             self._psi_e.data *= 1 - p
             self._psi_e.data += tmp.data
+            # renormalise just in case
+            sums = sparse.vstack(
+                [
+                    sparse.csr_matrix(
+                        self._psi_e[
+                            np.arange(self.N * self.T * self.Q)
+                            .reshape(self.T, self.Q, self.N)[t]
+                            .T.flatten(),
+                            :,
+                        ]
+                        .T.reshape(self.N * self.N, self.Q)
+                        .sum(axis=-1)
+                        .reshape(self.N, self.N)
+                    )
+                    for t in range(self.T)
+                    for _ in range(self.Q)
+                ]
+            )
+            self._psi_e.data /= sums.data
 
-            self._psi_t = (1 - p) * np.random.rand(self.N, self.T - 1, self.Q, 2)
+            self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, 2)
+            self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
+            self._psi_t *= 1 - p
             self._psi_t[..., 0] += p * one_hot_Z[:, 1:, :]
             self._psi_t[..., 1] += p * one_hot_Z[:, : self.T - 1, :]
             self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
@@ -629,12 +659,12 @@ class NumpyBP:
         )
         tmp_marg[tmp_marg < TOL] = TOL
         tmp_marg /= tmp_marg.sum(axis=-1)[:, :, np.newaxis]
-        new_node_marg = tmp_marg
+        self.node_marg = tmp_marg
 
         if np.isnan(self.msg_diff).sum() > 0:
-            if np.isnan(new_node_marg).sum() > 0:
+            if np.isnan(self.node_marg).sum() > 0:
                 print("nans for node marg @ (i,t):")
-                print(*np.array(np.nonzero(np.isnan(new_node_marg))), sep="\n")
+                print(*np.array(np.nonzero(np.isnan(self.node_marg))), sep="\n")
             if np.isnan(self._psi_e).sum() > 0:
                 print("nans for psi_e @ (i,t):")
                 print(*np.array(np.nonzero(np.isnan(self._psi_e))), sep="\n")
@@ -647,9 +677,16 @@ class NumpyBP:
     def compute_free_energy(
         self,
     ):
-        f_site = 0.0
-        f_link = 0.0
-        last_term = 0.0  # something like average degree, but why?
+        # see e.g. https://arxiv.org/pdf/1109.3041.pdf
+        f_site = 0.0  # = \sum_{i,t} log(Z^{i,t}) for Z normalising marginal of i at t
+        f_spatlink = 0.0  # = \sum_{ijt \in \mathcal{E}} log(Z^{ij,t}) for Z normalising the twopoint marginal
+        f_templink = 0.0  # = \sum_{i,t \in 0:T-1} log(Z^{i,t,t+1})  for Z normalising the twopoint spatial marginal between i at t and t+1
+        last_term = 0.0  # = \sum_{ij,t \not\in \mathcal{E}} log(\tilde{Z}^{ijt}) where \tilde{Z} is the normalising constant for the twopoint marginal between i and j at t
+        # where now i is not connected to j, and so single marginals are used
+        # - approximating the sum to all ij, as the net is sparse
+        # and using log(1-x) \approx -x for small x
+        # in the static case adding this reduces to subtracting the average degree
+        # (as MLE for \alpha is 1/N \sum_i \psi^{i,0}), but not for us
 
         # get spatial
         spatial_field_terms = self.spatial_field_terms()
@@ -685,89 +722,93 @@ class NumpyBP:
             ]  # NB don't need / N as using p_ab to calc, not c_ab
         log_spatial_msg += np.log(self.meta_prob)
 
-        tmp = log_spatial_msg.copy()
+        tmp = log_spatial_msg
+        # add alpha
         tmp[:, 0, :] += np.log(self.model._alpha)[np.newaxis, :]
+        # include backward msgs
         log_back_term = np.log(self.backward_temp_msg_term())
         log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
-        ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
-        tmp_backwards_msg = np.exp(tmp[:, 1:, :])
-        f_link += tmp_backwards_msg.sum()
-
-        # include forward term now backwards term updated
+        # include forward term
         log_forward_term = np.log(self.forward_temp_msg_term())
         # use alpha where i not present at t-1
         log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
         tmp[:, 1:, :] += log_forward_term
-
-        ## UPDATE SPATIAL MESSAGES FROM i AT t ##
-        tmp_spatial_msg = -1.0 * np.log(spatial_field_terms).copy()
-        for t in range(self.T):
-            # need inv idxs for locs where i sends msgs to j
-            # all_inv_idxs[t] gives order of field_term s.t.
-            # all_inv_idxs[t][nz_idxs[i,t]:nz_idxs[i+1],t]
-            # gives idxs of field terms corresponding to
-            # messages FROM i to j in the correct order to
-            # align with the block field_terms[E_idxs[t]:E_idxs[t+1]][nz_idxs[i, t] : nz_idxs[i + 1]]
-            # which contains all terms corresponding to messages
-            # TO i, from each j
-            i_idxs = self.flat_i_idxs[t]
-            inv_idxs = self.all_inv_idxs[t]
-            tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]] = (
-                tmp[i_idxs, t, :]
-                + tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]][inv_idxs, :]
-            )
-        tmp_spatial_msg = np.exp(tmp_spatial_msg)
-        f_link += tmp_spatial_msg.sum()
-
-        ## UPDATE FORWARDS MESSAGES FROM i AT t ##
-        # just need to remove back term previously added
-        tmp_forwards_msg = np.exp(tmp[:, :-1, :] - log_back_term)
-        f_link += tmp_forwards_msg.sum()
-
-        ## UPDATE MARGINAL OF i AT t ##
         tmp_marg = np.exp(tmp)
-        f_site = tmp_marg.sum()
-
-        # ... basically in static case, f_site = 1/N \sum_i log(Z_i) for Z_i the norm factors of marginals
-        # similarly then calc f_link = 1/2N \sum_{ij} log(Z_{ij}) for the twopoint marg norms (for us these will include time margs)
-        # then final term is something like 1/2 \sum_{qr} p_{qr} * alpha_q * alpha_r  (average degree)
-        # and free energy approx F_{bethe} = f_link - f_site - last_term, and lower better
-
-        # Assuming now instead f_site = 1/NT \sum_{it} log(Z_i), f_link = 1/NT \sum_{ijt} log(Z_{ij}), and still want av deg
+        f_site += np.log(tmp_marg.sum(axis=-1)).sum()
         f_site /= self.N * self.T
-        f_link /= self.N * self.T
-        last_term += np.einsum(
-            "q,r,qr->", self.model._alpha, self.model._alpha, self.model._beta[:, :, 0]
+
+        # calc twopoint marg terms
+        unnorm_twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
+        for t in range(self.T):
+            i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
+            inv_idxs = self.all_inv_idxs[t]
+            jtoi_msgs = self._psi_e[j_idxs, i_idxs].reshape(-1, self.Q)
+            itoj_msgs = jtoi_msgs[inv_idxs, :]
+            unnorm_twopoint_e_marg[
+                self.E_idxs[t] : self.E_idxs[t + 1], :, :
+            ] += np.einsum("iq,ir->iqr", jtoi_msgs, itoj_msgs)
+            if not self.directed:
+                tmp = np.einsum("iq,ir->iqr", itoj_msgs, jtoi_msgs)
+                diags = np.diag_indices(self.Q, ndim=2)
+                # don't double diagonals
+                tmp[:, diags] = 0
+                unnorm_twopoint_e_marg[self.E_idxs[t] : self.E_idxs[t + 1]] += tmp
+
+            if self.deg_corr:
+                # NB make sure dc lkl is suitably symmetrised if undirected
+                unnorm_twopoint_e_marg *= self.dc_lkl
+            else:
+                for t in range(self.T):
+                    unnorm_twopoint_e_marg[
+                        self.E_idxs[t] : self.E_idxs[t + 1]
+                    ] *= self.block_edge_prob[np.newaxis, :, :, t]
+        f_spatlink = (
+            np.log(unnorm_twopoint_e_marg.sum(axis=(-2, -1))).sum() / self.N * self.T
         )
-        old_alpha = self.model._alpha.copy()
-        for t in range(self.T - 1):
-            new_alpha = self.model._pi.T @ old_alpha
-            last_term += np.einsum(
-                "q,r,qr->", new_alpha, new_alpha, self.model._beta[:, :, t + 1]
-            )
-            old_alpha = new_alpha
-        last_term /= 2 * self.T
-        self.free_energy = f_link - f_site - last_term
+        unnorm_twopoint_t_marg = np.einsum(
+            "itq,itr,qr->itqr",
+            self._psi_t[..., 1],
+            self._psi_t[..., 0],
+            self.trans_prob,
+        )
+        f_templink = (
+            np.log(unnorm_twopoint_t_marg.sum(axis=(-2, -1))).sum() / self.N * self.T
+        )
+
+        # calc last term
+        marg_sums = self.node_marg.sum(axis=0)
+        last_term = np.einsum("qrt,tq,tr->", self.model._beta, marg_sums, marg_sums)
+        last_term /= self.N * self.T
+
+        # if self.verbose:
+        # print("Spatial link energy: ", f_spatlink)
+        # print("Temporal link energy: ", f_templink)
+        # print("Site energy: ", f_site)
+        # print("Non-link energy: ", last_term)
+        self.free_energy = f_spatlink + f_templink - f_site - last_term
         return self.free_energy
 
     def update_twopoint_marginals(
         self,
     ):
         # node_marg = None
-        self.update_twopoint_spatial_marg()
-        if self.verbose:
-            print("\tUpdated twopoint spatial marg")
-        self.update_twopoint_temp_marg()
-        if self.verbose:
-            print("\tUpdated twopoint temp marg")
-        # twopoint_marginals = [twopoint_e_marg, twopoint_t_marg]
-        return (self.twopoint_e_marg, self.twopoint_t_marg)
+        if not self.frozen:
+            self.update_twopoint_spatial_marg()
+            if self.verbose:
+                print("\tUpdated twopoint spatial marg")
+            self.update_twopoint_temp_marg()
+            if self.verbose:
+                print("\tUpdated twopoint temp marg")
+            # twopoint_marginals = [twopoint_e_marg, twopoint_t_marg]
+            return (self.twopoint_e_marg, self.twopoint_t_marg)
+        else:
+            if self.verbose:
+                print("\tDSBMM params frozen, no need to update twopoint marginals")
 
     def update_twopoint_spatial_marg(self):
-        T = len(self.E_idxs) - 1
         self.twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
-        for t in range(T):
+        for t in range(self.T):
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
             inv_idxs = self.all_inv_idxs[t]
             jtoi_msgs = self._psi_e[j_idxs, i_idxs].reshape(-1, self.Q)
@@ -786,7 +827,7 @@ class NumpyBP:
                 # NB make sure dc lkl is suitably symmetrised if undirected
                 self.twopoint_e_marg *= self.dc_lkl
             else:
-                for t in range(T):
+                for t in range(self.T):
                     self.twopoint_e_marg[
                         self.E_idxs[t] : self.E_idxs[t + 1]
                     ] *= self.block_edge_prob[np.newaxis, :, :, t]

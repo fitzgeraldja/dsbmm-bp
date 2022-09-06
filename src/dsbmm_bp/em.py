@@ -8,6 +8,8 @@ import dsbmm
 import dsbmm_sparse
 import dsbmm_sparse_parallel
 import numpy as np
+from np_par_bp_methods import NumpyBP
+from np_par_dsbmm_methods import NumpyDSBMM
 from numba.typed import List
 from scipy import sparse
 from sklearn.cluster import KMeans, MiniBatchKMeans
@@ -39,6 +41,7 @@ class EM:
         init_Z_mode="A",
         msg_init_mode="planted",
         sparse_adj=False,
+        use_numba=False,
         try_parallel=False,
         n_runs=5,
         patience=3,
@@ -53,6 +56,7 @@ class EM:
         self.parallel = try_parallel
         self.patience = patience
         self.use_meta = use_meta
+        self.use_numba = use_numba
         self.msg_init_mode = msg_init_mode
         self.max_iter = max_iter
         self.max_msg_iter = max_msg_iter
@@ -71,7 +75,8 @@ class EM:
             raise ValueError("Must specify Q in data")
         self.sparse = sparse_adj
         try:
-            if not self.sparse:
+            if not self.sparse and self.use_numba:
+                # NB numpy version takes sparse by default
                 assert np.allclose(self.A, self.A.transpose(1, 0, 2))
             else:
                 # TODO: fix properly - currently just force symmetrising and binarising
@@ -86,7 +91,7 @@ class EM:
             )
             self.A = ((self.A + self.A.transpose(1, 0, 2)) > 0) * 1.0
         # NB expecting A in shape N x N x T
-        if not self.sparse:
+        if not self.sparse and self.use_numba:
             self.N = self.A.shape[0]
             self.T = self.A.shape[2]
         else:
@@ -122,7 +127,7 @@ class EM:
             )  # done for fixing labels over time
         else:
             try:
-                if not self.sparse:
+                if not self.sparse and self.use_numba:
                     kmeans_mat = np.concatenate(
                         [self.A[:, :, t] for t in range(self.T)], axis=1
                     )  # done for fixing labels over time
@@ -153,7 +158,7 @@ class EM:
                 .reshape(-1, 1)
             )
         self.k_means_init_Z = np.tile(kmeans_labels, (1, self.T))
-        if not self.sparse:
+        if not self.sparse and self.use_numba:
             self._pres_nodes = (self.A.sum(axis=1) > 0) | (self.A.sum(axis=0) > 0)
         else:
             self._pres_nodes = np.zeros(
@@ -212,90 +217,7 @@ class EM:
         except Exception:  # AttributeError:
             if self.verbose:
                 print("No p_in / p_out provided")
-        if self.sparse:
-            # TODO: [clean-up] make abstract wrapper with separate dense / sparse impl
-            # so can remove redundant code below
-            if try_parallel:
-                olderr = np.seterr(all="ignore")
-                print(f"{olderr} all changed to 'ignore'")
-                self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
-                    A=self.A,
-                    X=self.X,
-                    Z=self.init_Z.copy(),
-                    Q=self.Q,
-                    deg_corr=self.deg_corr,
-                    meta_types=self.meta_types,
-                    tuning_param=self.tuning_params[0],
-                    verbose=self.verbose,
-                    use_meta=self.use_meta,
-                )  # X=X,
-                if self.verbose:
-                    print("Successfully instantiated DSBMM...")
-                self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
-                if self.verbose:
-                    print("Successfully instantiated BP system...")
-            else:
-                self.dsbmm = dsbmm_sparse.DSBMMSparse(
-                    A=self.A,
-                    X=self.X,
-                    Z=self.init_Z.copy(),
-                    Q=self.Q,
-                    deg_corr=self.deg_corr,
-                    meta_types=self.meta_types,
-                    tuning_param=self.tuning_params[0],
-                    verbose=self.verbose,
-                    use_meta=self.use_meta,
-                )  # X=X,
-                if self.verbose:
-                    print("Successfully instantiated DSBMM...")
-                self.bp = bp_sparse.BPSparse(self.dsbmm)
-                if self.verbose:
-                    print("Successfully instantiated BP system...")
-        else:
-            self.dsbmm = dsbmm.DSBMM(
-                A=self.A,
-                X=self.X,
-                Z=self.init_Z.copy(),
-                Q=self.Q,
-                deg_corr=self.deg_corr,
-                meta_types=self.meta_types,
-                tuning_param=self.tuning_params[0],
-                verbose=self.verbose,
-                use_meta=self.use_meta,
-            )  # X=X,
-            if self.verbose:
-                print("Successfully instantiated DSBMM...")
-            self.bp = bp.BP(self.dsbmm)
-            if self.verbose:
-                print("Successfully instantiated BP system...")
-        ## Initialise model params
-        if self.verbose:
-            print("Now initialising model:")
-        self.bp.model.update_params(init=True)
-        if self.verbose:
-            print("\tInitialised all DSBMM params!")
-        self.bp.init_messages(mode=msg_init_mode)
-        if self.verbose:
-            print(f"\tInitialised messages and marginals ({msg_init_mode})")
-        self.bp.init_h()
-        if self.verbose:
-            print("\tInitialised corresponding external fields")
-        if self.verbose:
-            print("Done, can now run updates")
-        if self.verbose:
-            # make updating plot of average score (e.g. ARI) if ground truth known
-            self.xdata, self.ydata = [], []
-            self.figure, self.ax = plt.subplots(dpi=200)
-            (self.lines,) = self.ax.plot([], [], "o")
-            # Autoscale on unknown axis and known lims on the other
-            self.ax.set_autoscaley_on(True)
-            self.ax.set_xlim(0, self.max_iter)
-            # Other stuff
-            self.ax.grid()
-            # ...
-        self.best_Z = None
-        self.best_val = 0.0
-        self.poor_run_ctr = 0  # ctr for runs without reduction in free energy
+        self.reset_model(self.tuning_params[0], reinit=False)
 
     def perturb_init_Z(self, pert_prop=0.05):
         # add some noise to init clustering
@@ -314,72 +236,99 @@ class EM:
 
     def reinit(self, tuning_param=1.0, set_Z=None):
         self.perturb_init_Z()
-        if self.sparse:
-            if self.parallel:
-                self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
-                    A=self.A,
-                    X=self.X,
-                    Z=self.init_Z.copy(),
-                    Q=self.Q,
-                    deg_corr=self.deg_corr,
-                    meta_types=self.meta_types,
-                    tuning_param=self.tuning_params[0],
-                    verbose=self.verbose,
-                    use_meta=self.use_meta,
-                )  # X=X,
-                if self.verbose:
-                    print("Successfully reinstantiated DSBMM...")
-                self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
-                if self.verbose:
-                    print("Successfully reinstantiated BP system...")
+        self.reset_model(tuning_param, set_Z=set_Z)
+
+    def reset_model(self, tuning_param, set_Z=None, reinit=True):
+        retext = "re" if reinit else ""
+        if self.use_numba:
+            if self.sparse:
+                if self.parallel:
+                    self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
+                        A=self.A,
+                        X=self.X,
+                        Z=self.init_Z.copy() if set_Z is None else set_Z,
+                        Q=self.Q,
+                        deg_corr=self.deg_corr,
+                        meta_types=self.meta_types,
+                        tuning_param=tuning_param,
+                        verbose=self.verbose,
+                        use_meta=self.use_meta,
+                    )  # X=X,
+                    if self.verbose:
+                        print(f"Successfully {retext}instantiated DSBMM...")
+                    self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
+                    if self.verbose:
+                        print(f"Successfully {retext}instantiated BP system...")
+                else:
+                    self.dsbmm = dsbmm_sparse.DSBMMSparse(
+                        A=self.A,
+                        X=self.X,
+                        Z=self.init_Z.copy() if set_Z is None else set_Z,
+                        Q=self.Q,
+                        deg_corr=self.deg_corr,
+                        meta_types=self.meta_types,
+                        tuning_param=tuning_param,
+                        verbose=self.verbose,
+                        use_meta=self.use_meta,
+                    )  # X=X,
+                    if self.verbose:
+                        print(f"Successfully {retext}instantiated DSBMM...")
+                    self.bp = bp_sparse.BPSparse(self.dsbmm)
+                    if self.verbose:
+                        print(f"Successfully {retext}instantiated BP system...")
             else:
-                self.dsbmm = dsbmm_sparse.DSBMMSparse(
+                self.dsbmm = dsbmm.DSBMM(
                     A=self.A,
                     X=self.X,
-                    Z=self.init_Z.copy(),
+                    Z=self.init_Z.copy() if set_Z is None else set_Z,
                     Q=self.Q,
                     deg_corr=self.deg_corr,
                     meta_types=self.meta_types,
-                    tuning_param=self.tuning_params[0],
+                    tuning_param=tuning_param,
                     verbose=self.verbose,
                     use_meta=self.use_meta,
                 )  # X=X,
                 if self.verbose:
-                    print("Successfully reinstantiated DSBMM...")
-                self.bp = bp_sparse.BPSparse(self.dsbmm)
+                    print(f"Successfully {retext}instantiated DSBMM...")
+                self.bp = bp.BP(self.dsbmm)
                 if self.verbose:
-                    print("Successfully reinstantiated BP system...")
+                    print(f"Successfully {retext}instantiated BP system...")
         else:
-            self.dsbmm = dsbmm.DSBMM(
+            if self.verbose:
+                print(f"Successfully {retext}instantiated DSBMM...")
+            self.dsbmm = NumpyDSBMM(
                 A=self.A,
                 X=self.X,
-                Z=self.init_Z.copy() if set_Z is None else set_Z,
+                Z=self.init_Z.copy(),
                 Q=self.Q,
                 deg_corr=self.deg_corr,
+                # directed=self.directed,
                 meta_types=self.meta_types,
                 tuning_param=tuning_param,
                 verbose=self.verbose,
-                use_meta=self.use_meta,
-            )  # X=X,
+            )
             if self.verbose:
-                print("Successfully reinstantiated DSBMM...")
-            self.bp = bp.BP(self.dsbmm)
-            if self.verbose:
-                print("Successfully reinstantiated BP system...")
+                print(f"Successfully {retext}instantiated BP system...")
+            self.bp = NumpyBP(self.dsbmm)
+
         ## Initialise model params
         if self.verbose:
-            print("Now reinitialising model:")
+            print(f"Now {retext}initialising model:")
         self.bp.model.update_params(init=True)
         if self.verbose:
-            print("\tReinitialised all DSBMM params!")
+            print("\tInitialised all DSBMM params!")
         self.bp.init_messages(mode=self.msg_init_mode)
         if self.verbose:
-            print(f"\tReinitialised messages and marginals ({self.msg_init_mode})")
-        self.bp.init_h()
+            print(f"\tInitialised messages and marginals ({self.msg_init_mode})")
+        if self.use_numba:
+            self.bp.init_h()
+        else:
+            self.bp.calc_h()
         if self.verbose:
-            print("\tReinitialised corresponding external fields")
+            print("\tInitialised corresponding external fields")
         if self.verbose:
-            print("Done, can now run updates again")
+            print("Done, can now run updates")
+
         if self.verbose:
             # make updating plot of average score (e.g. ARI) if ground truth known
             self.xdata, self.ydata = [], []
@@ -391,7 +340,12 @@ class EM:
             # Other stuff
             self.ax.grid()
             # ...
-        self.run_idx += 1
+        if not reinit:
+            self.best_Z = None
+            self.best_val = 0.0
+            self.poor_run_ctr = 0  # ctr for runs without reduction in free energy
+        else:
+            self.run_idx += 1
 
     def fit(
         self,
@@ -410,17 +364,13 @@ class EM:
         while self.run_idx < self.n_runs - 1:
             if self.verbose:
                 print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
-            self.do_run(
-                conv_tol, msg_conv_tol, learning_rate
-            )
+            self.do_run(conv_tol, msg_conv_tol, learning_rate)
             self.bp.model.set_Z_by_MAP()
-            self.reinit()
+            self.reinit(tuning_param=self.tuning_params[0])
         if self.verbose:
             print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
         # final random init run
-        self.do_run(
-            conv_tol, msg_conv_tol, learning_rate
-        )
+        self.do_run(conv_tol, msg_conv_tol, learning_rate)
         if len(self.tuning_params) > 1:
             for tuning_param in self.tuning_params[1:]:
                 if self.verbose:
@@ -454,9 +404,7 @@ class EM:
         except Exception:  # AttributeError:
             # no tuning param used
             self.reinit(set_Z=self.best_Z)
-        self.do_run(
-            conv_tol, msg_conv_tol, learning_rate
-        )
+        self.do_run(conv_tol, msg_conv_tol, learning_rate)
 
     def do_run(self, conv_tol, msg_conv_tol, learning_rate):
         for n_iter in range(self.max_iter):
@@ -473,35 +421,44 @@ class EM:
                 self.bp.update_node_marg()  # dumping rate?
                 if self.verbose:
                     print("\tUpdated node marginals, messages and external fields")
-                msg_diff = self.bp.jit_model.msg_diff
+                if self.use_numba:
+                    msg_diff = self.bp.jit_model.msg_diff
+                else:
+                    msg_diff = self.bp.msg_diff
                 if self.verbose:
-                    print(f"\tmsg differences: {msg_diff:.4f}")
+                    print(f"\tmsg differences: {msg_diff:.4g}")
                 if msg_diff < msg_conv_tol:
                     break
                 self.bp.zero_diff()
             self.bp.update_twopoint_marginals()  # dumping rate?
             if self.verbose:
                 print("Initialised corresponding twopoint marginals")
-            self.bp.model.set_node_marg(self.bp.jit_model.node_marg)
-            self.bp.model.set_twopoint_edge_marg(self.bp.jit_model.twopoint_e_marg)
-            self.bp.model.set_twopoint_time_marg(self.bp.jit_model.twopoint_t_marg)
+            if self.use_numba:
+                self.bp.model.set_node_marg(self.bp.jit_model.node_marg)
+                self.bp.model.set_twopoint_edge_marg(self.bp.jit_model.twopoint_e_marg)
+                self.bp.model.set_twopoint_time_marg(self.bp.jit_model.twopoint_t_marg)
+            else:
+                self.bp.model.set_node_marg(self.bp.node_marg)
+                self.bp.model.set_twopoint_edge_marg(self.bp.twopoint_e_marg)
+                self.bp.model.set_twopoint_time_marg(self.bp.twopoint_t_marg)
             if self.verbose:
                 print("\tPassed marginals to DSBMM")
             self.bp.model.update_params(init=False, learning_rate=learning_rate)
             if self.verbose:
                 print("\tUpdated DSBMM params given marginals")
-            diff = self.bp.model.jit_model.diff
+            if self.use_numba:
+                diff = self.bp.model.jit_model.diff
+            else:
+                diff = self.bp.model.diff
             if self.verbose:
                 print(f"Successfully completed update! Diff = {diff:.4f}")
-            if diff < conv_tol:
-                if self.verbose:
-                    print("~~~~~~ CONVERGED ~~~~~~")
-                break
+
             self.bp.model.zero_diff()
             if self.true_Z is None:
                 current_energy = self.bp.compute_free_energy()
                 if self.best_val == 0.0:
                     # first iter, first run
+                    self.poor_run_ctr = 0
                     self.best_val = current_energy
                     self.bp.model.set_Z_by_MAP()
                     self.best_Z = self.bp.model.Z
@@ -516,8 +473,9 @@ class EM:
                 else:
                     self.poor_run_ctr += 1
                     if self.poor_run_ctr >= self.patience:
-                        if self.verbose:
-                            print("~~~~~~ OUT OF PATIENCE, STOPPING EARLY ~~~~~~")
+                        print(
+                            f"~~~~~~ OUT OF PATIENCE, STOPPING EARLY in run {self.run_idx+1} ~~~~~~"
+                        )
                         break
             else:
                 self.bp.model.set_Z_by_MAP()
@@ -532,18 +490,27 @@ class EM:
                     self.ydata.append(current_score.mean())
                     self.update_score_plot()
                     print()
+            if diff < conv_tol:
+                print(f"~~~~~~ CONVERGED in run {self.run_idx+1} ~~~~~~")
+                break
+            if n_iter == self.max_iter - 1:
+                print(f"~~~~~~ MAX ITERATIONS REACHED in run {self.run_idx+1} ~~~~~~")
 
     def ari_score(self, true_Z, pred_Z=None):
-        # wait for a second to execute in case of parallelisation issues
-        time.sleep(0.5)
+        if self.use_numba:
+            # wait for a second to execute in case of parallelisation issues
+            time.sleep(0.5)
         if pred_Z is None:
             try:
                 # could try and replace with numba again but seemed
                 # to cause issues
+                pred_Z = (
+                    self.bp.model.jit_model.Z if self.use_numba else self.bp.model.Z
+                )
                 aris = np.array(
                     [
                         ari(true[pred > -1], pred[pred > -1])
-                        for true, pred in zip(self.bp.model.jit_model.Z.T, true_Z.T)
+                        for true, pred in zip(pred_Z.T, true_Z.T)
                     ]
                 )
                 if self.verbose:

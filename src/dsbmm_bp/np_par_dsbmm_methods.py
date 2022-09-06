@@ -38,7 +38,6 @@ class NumpyDSBMM:
         tuning_param=1.0,
         verbose=False,
         n_threads=None,
-        learning_rate=0.2,
         frozen=False,
     ):
         """Initialise the class
@@ -63,7 +62,6 @@ class NumpyDSBMM:
         self.tuning_param = tuning_param
         self.frozen = frozen
         self.deg_corr = deg_corr
-        self.learning_rate = learning_rate
 
         self.directed = directed
         self.verbose = verbose
@@ -255,7 +253,7 @@ class NumpyDSBMM:
         """
         pass
 
-    def update_params(self, init=False):
+    def update_params(self, init=False, learning_rate=0.2):
         """Given marginals, update parameters suitably
 
         Args:
@@ -263,22 +261,22 @@ class NumpyDSBMM:
         """
         if not self.frozen:
             # first init of parameters given initial groups if init=True, else use provided marginals
-            self.update_alpha(init=init)
+            self.update_alpha(init=init, learning_rate=learning_rate)
             if self.verbose:
                 print(self._alpha)
                 print("\tUpdated alpha")
-            self.update_pi(init=init)
+            self.update_pi(init=init, learning_rate=learning_rate)
             if self.verbose:
                 print(self._pi)
                 print("\tUpdated pi")
             if self.deg_corr:
-                self.update_lambda(init=init)
+                self.update_lambda(init=init, learning_rate=learning_rate)
                 if self.verbose:
                     print(self._lam)
                     print("\tUpdated lambda")
             else:
                 # NB only implemented for binary case
-                self.update_beta(init=init)
+                self.update_beta(init=init, learning_rate=learning_rate)
                 # NB only implemented for binary case
                 if self.verbose:
                     print(self._beta.transpose(2, 0, 1))
@@ -287,7 +285,7 @@ class NumpyDSBMM:
                     assert np.all(
                         np.abs(self._beta.transpose(1, 0, 2) - self._beta) < 1e-10
                     )
-            self.update_meta_params(init=init)
+            self.update_meta_params(init=init, learning_rate=learning_rate)
             if self.verbose:
                 # print(self.jit_model._meta_params)
                 print("\tUpdated meta")
@@ -402,7 +400,7 @@ class NumpyDSBMM:
         self.meta_lkl[self.meta_lkl < TOL] = TOL
         self.meta_lkl[self.meta_lkl > TOL] = TOL
 
-    def update_alpha(self, init=False):
+    def update_alpha(self, init=False, learning_rate=0.2):
         if init:
             if NON_INFORMATIVE_INIT:
                 self._alpha = np.ones(self.Q) / self.Q
@@ -426,7 +424,7 @@ class NumpyDSBMM:
             tmp /= tmp.sum()
             # tmp[tmp > 1 - TOL] = 1 - TOL
 
-            tmp = self.learning_rate * tmp + (1 - self.learning_rate) * self._alpha
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._alpha
             tmp_diff = np.abs(tmp - self._alpha).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating alpha")
@@ -435,10 +433,7 @@ class NumpyDSBMM:
             self.diff += tmp_diff
             self._alpha = tmp
 
-    def update_pi(
-        self,
-        init=False,
-    ):
+    def update_pi(self, init=False, learning_rate=0.2):
         qqprime_trans = np.zeros((self.Q, self.Q))
         if init:
             if NON_INFORMATIVE_INIT:
@@ -484,9 +479,7 @@ class NumpyDSBMM:
         qqprime_trans[qqprime_trans < TOL] = TOL
         qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis]
         if not init:
-            tmp = (
-                self.learning_rate * qqprime_trans + (1 - self.learning_rate) * self._pi
-            )
+            tmp = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
             tmp_diff = np.abs(tmp - self._pi).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating pi")
@@ -497,10 +490,7 @@ class NumpyDSBMM:
         else:
             self._pi = qqprime_trans
 
-    def update_lambda(
-        self,
-        init=False,
-    ):
+    def update_lambda(self, init=False, learning_rate=0.2):
         lam_num = np.zeros((self.Q, self.Q, self.T))
         lam_den = np.zeros((self.Q, self.Q, self.T))
         if init:
@@ -554,7 +544,7 @@ class NumpyDSBMM:
         # NB use relative rather than absolute difference here as lam could be large
         tmp = lam_num / lam_den
         if not init:
-            tmp = self.learning_rate * tmp + (1 - self.learning_rate) * self._lam
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._lam
             tmp_diff = np.abs((tmp - self._lam) / self._lam).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating lambda")
@@ -565,7 +555,7 @@ class NumpyDSBMM:
         else:
             self._lam = tmp
 
-    def update_beta(self, init: bool = False):
+    def update_beta(self, init: bool = False, learning_rate=0.2):
         beta_num = np.zeros((self.Q, self.Q, self.T))
         beta_den = np.ones((self.Q, self.Q, self.T))
         if init:
@@ -650,7 +640,7 @@ class NumpyDSBMM:
         tmp[tmp > 1 - TOL] = 1 - TOL
 
         if not init:
-            tmp = self.learning_rate * tmp + (1 - self.learning_rate) * self._beta
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._beta
             tmp_diff = np.abs(tmp - self._beta).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating beta")
@@ -661,10 +651,7 @@ class NumpyDSBMM:
         else:
             self._beta = tmp
 
-    def update_meta_params(
-        self,
-        init=False,
-    ):
+    def update_meta_params(self, init=False, learning_rate=0.2):
         # NB can't internally parallelise as need to aggregate
         # on diff, but would need to write entirely within this
         # fn to do so (less clear) - marginal benefit anyway
@@ -673,12 +660,12 @@ class NumpyDSBMM:
             # print(f"Updating params for {mt} dist")
             if self.meta_types[s] == "poisson":
                 # print("In Poisson")
-                self.update_poisson_meta(init, s)
+                self.update_poisson_meta(init, s, learning_rate=learning_rate)
                 if self.verbose:
                     print("\tUpdated Poisson")
             elif self.meta_types[s] == "indep bernoulli":
                 # print("In IB")
-                self.update_indep_bern_meta(init, s)
+                self.update_indep_bern_meta(init, s, learning_rate=learning_rate)
                 if self.verbose:
                     print("\tUpdated IB")
             else:
@@ -686,15 +673,11 @@ class NumpyDSBMM:
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
                 )  # NB can't use string formatting for print in numba
 
-    def update_poisson_meta(
-        self,
-        init,
-        s,
-    ):
+    def update_poisson_meta(self, init, s, learning_rate=0.2):
         xi = np.ones((self.Q, self.T, 1))
         zeta = np.zeros((self.Q, self.T, 1))
         if init:
-            xi = np.array(
+            xi[:, :, 0] = np.array(
                 [
                     [(self.Z[:, t] == q).sum() for t in range(self.T)]
                     for q in range(self.Q)
@@ -709,7 +692,7 @@ class NumpyDSBMM:
             xi[xi < TOL] = 1.0
             zeta[zeta < TOL] = TOL
         else:
-            xi = self.node_marg.sum(axis=0).T
+            xi[:, :, 0] = self.node_marg.sum(axis=0).T
             zeta = np.einsum("itq,itd->qtd", self.node_marg, self.X[s])
             xi[xi < TOL] = 1.0
             zeta[zeta < TOL] = TOL
@@ -717,10 +700,7 @@ class NumpyDSBMM:
         tmp = zeta / xi
         tmp[tmp < TOL] = TOL
         if not init:
-            tmp = (
-                self.learning_rate * tmp
-                + (1 - self.learning_rate) * self.meta_params[s]
-            )
+            tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
             tmp_diff = np.abs((tmp - self.meta_params[s]) / self.meta_params[s]).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating poisson params")
@@ -731,11 +711,7 @@ class NumpyDSBMM:
         else:
             self.meta_params[s] = tmp
 
-    def update_indep_bern_meta(
-        self,
-        init,
-        s,
-    ):
+    def update_indep_bern_meta(self, init, s, learning_rate=0.2):
         xi = np.ones((self.Q, self.T, 1))
         L = self.X[s].shape[-1]
         rho = np.zeros((self.Q, self.T, L))
@@ -768,10 +744,7 @@ class NumpyDSBMM:
         tmp[tmp < TOL] = TOL
         tmp[tmp > 1 - TOL] = 1 - TOL
         if not init:
-            tmp = (
-                self.learning_rate * tmp
-                + (1 - self.learning_rate) * self.meta_params[s]
-            )
+            tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
             tmp_diff = np.abs(tmp - self.meta_params[s]).mean()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating IB params")
@@ -800,3 +773,11 @@ class NumpyDSBMM:
         #                 a_ijt, degs[i, t, 1] * degs[j, t, 0] * _lam[q, r, t]
         #             )
         self.dc_lkl = dc_lkl
+
+    def set_params(self, true_params, freeze=True):
+        self.frozen = freeze
+        self._alpha = true_params["alpha"]
+        self._beta = true_params.get("beta", None)
+        self._lam = true_params.get("lam", None)
+        self._pi = true_params["pi"]
+        self._meta_params = true_params["meta_params"]

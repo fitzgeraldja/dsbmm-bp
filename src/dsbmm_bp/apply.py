@@ -43,7 +43,7 @@ parser.add_argument(
     "--num_groups",
     type=int,
     default=4,
-    help="Number of groups to use in the model. Default is 4.",
+    help="Number of groups to use in the model. Default is 4, or whatever suitable for specified testset.",
     # NB for scopus, MFVI used 22 if link_choice == "au"
     # else 19 if link_choice == "ref"
 )
@@ -64,8 +64,8 @@ parser.add_argument(
 parser.add_argument(
     "--max_iter",
     type=int,
-    default=30,
-    help="Maximum number of EM iterations to run. Default is 30.",
+    default=150,
+    help="Maximum number of EM iterations to run. Default is 50.",
 )
 
 parser.add_argument(
@@ -78,10 +78,17 @@ parser.add_argument(
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
 
 parser.add_argument(
+    "--use-numba",
+    "-nb",
+    action="store_true",
+    help="Try with numba rather than numpy - currently seems slower for all, maybe other than v large nets",
+)
+
+parser.add_argument(
     "--nb_parallel",
     "-nbp",
     action="store_true",
-    help="Try with numba parallelism (currently slower)",
+    help="Try with numba parallelism",
 )
 
 parser.add_argument(
@@ -223,6 +230,14 @@ if __name__ == "__main__":
                         pickle.dump(samples, f)
             else:
                 samples = simulation.gen_test_data(**params)
+            if not args.use_numba and testset_name != "scaling":
+                for i, sample in enumerate(samples):
+                    print(f"...converting sample {i+1} to sparse format")
+                    sample["A"] = [
+                        sparse.csr_matrix(sample["A"][:, :, t])
+                        for t in range(params["T"])
+                    ]
+                print("...done")
             # print(samples)
             try:
                 if not np.all(
@@ -408,6 +423,10 @@ if __name__ == "__main__":
                                     n_runs=args.n_runs,
                                     max_iter=args.max_iter,
                                     max_msg_iter=args.max_msg_iter,
+                                    use_numba=args.use_numba,
+                                    tuning_param=args.tuning_param
+                                    if args.tuning_param is not None
+                                    else 1.0,
                                 )
                             elif testset_name == "align":
                                 print(f"alignment = {params['meta_aligned']}")
@@ -418,8 +437,10 @@ if __name__ == "__main__":
                                     n_runs=args.n_runs,
                                     max_iter=args.max_iter,
                                     max_msg_iter=args.max_msg_iter,
+                                    use_numba=args.use_numba,
                                 )
                             else:
+                                # scaling tests
                                 print(f"N = {params['N']}")
                                 model = em.EM(
                                     sample,
@@ -427,6 +448,10 @@ if __name__ == "__main__":
                                     try_parallel=try_parallel,
                                     verbose=verbose,
                                     n_runs=args.n_runs,
+                                    use_numba=args.use_numba,
+                                    tuning_param=args.tuning_param
+                                    if args.tuning_param is not None
+                                    else 1.0,
                                 )
                             if samp_no > 0:
                                 init_times[test_no, samp_no - 1] = (
@@ -549,9 +574,10 @@ if __name__ == "__main__":
                                     print(
                                         f"Sample took ~{test_times[test_no,samp_no-1]:.2f}s"
                                     )
-                            time.sleep(
-                                0.5
-                            )  # sleep a bit to allow threads to complete, TODO: properly sort this
+                            if args.use_numba:
+                                time.sleep(
+                                    0.5
+                                )  # sleep a bit to allow threads to complete, TODO: properly sort this
                             # save after every sample in case of crash
                             tp_str = (
                                 "_tp" + str(args.tuning_param)
@@ -623,6 +649,7 @@ if __name__ == "__main__":
             deg_corr=True,
             verbose=verbose,
             use_meta=not args.ignore_meta,
+            use_numba=args.use_numba,
         )
         ## Fit to given data
         model.fit(learning_rate=0.2)
