@@ -1,3 +1,4 @@
+# type: ignore
 # Immediate way of making sparse is to create an E x 4 matrix much as before, i.e. i,j,t, val rows
 # edge list, as don't actually need any matrix operations (can implement directly - faster
 # in numba and more clear anyway)
@@ -43,17 +44,11 @@
 import csr
 import numpy as np
 import yaml
-from dsbmm_sparse import DSBMMSparse
-from dsbmm_sparse import DSBMMSparseBase
-from numba import bool_
-from numba import float64
-from numba import int32
-from numba import int64
-from numba import typeof
+from dsbmm_sparse import DSBMMSparse, DSBMMSparseBase
+from numba import bool_, float64, int32, int64, typeof
 from numba.experimental import jitclass
 from numba.typed import List
-from numba.types import Array
-from numba.types import ListType
+from numba.types import Array, ListType
 
 # from numba import float32
 
@@ -1086,6 +1081,13 @@ class BPSparseBase:
                                     tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
                                     # tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = TOL
                                     tmp_backwards_msg /= tmp_backwards_msg.sum()
+                                    self.msg_diff += (
+                                        np.abs(
+                                            tmp_backwards_msg
+                                            - self._psi_t[i, t - 1, :, 0]
+                                        ).mean()
+                                        / self.n_msgs
+                                    )
                                     self._psi_t[i, t - 1, :, 0] = tmp_backwards_msg
                                     forward_term = np.log(
                                         self.forward_temp_msg_term(i, t)
@@ -1128,6 +1130,11 @@ class BPSparseBase:
                             #     print("unnorm spatial:", spatial_msg_term)
                             #     print("field iters:", field_iter)
                             #     raise RuntimeError("Problem with spatial msg")
+                            self.msg_diff += (
+                                np.abs(tmp_spatial_msg - self._psi_e[t][i]).mean()
+                                * deg_i
+                                / self.n_msgs
+                            )  # NB need to mult by deg_i so weighted correctly
                             self._psi_e[t][i] = tmp_spatial_msg
                             ## UPDATE FORWARDS MESSAGES FROM i AT t ##
                             if t < self.T - 1:
@@ -1150,6 +1157,12 @@ class BPSparseBase:
                                     #     print("forward_term:", forward_term)
                                     #     print("unnorm spatial:", spatial_msg_term)
                                     #     raise RuntimeError("Problem with forward msg")
+                                    self.msg_diff += (
+                                        np.abs(
+                                            tmp_forwards_msg - self._psi_t[i, t, :, 1]
+                                        ).mean()
+                                        / self.n_msgs
+                                    )
                                     self._psi_t[i, t, :, 1] = tmp_forwards_msg
                             ## UPDATE MARGINAL OF i AT t ##
                             tmp_marg = np.exp(tmp - max_log_spatial_msg_term)

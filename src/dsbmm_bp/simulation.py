@@ -772,6 +772,50 @@ def toy_model(
     )
 
 
+def toy_tests(
+    N=100,
+    T=5,
+    Q=2,
+    c=10,
+    n_samps=10,
+    eps_grid=np.linspace(0.3, 0.6, 10),
+    eta_grid=np.linspace(0.4, 0.8, 10),
+    rho_grid=np.linspace(0.6, 1.0, 10),
+):
+    # c = (c_in + (Q-1)*c_out)/Q
+    # so c_in = Q*c - (Q-1)*c_out
+    # eps = c_out/c_in => c_out = eps*c_in
+    # so c_in = Q*c - (Q-1)*eps*c_in
+    # i.e. c_in = Q*c/(1+(Q-1)*eps)
+    # then by def we have c_out = eps*c_in
+    def get_p_in(eps):
+        return Q * c / N * (1 + (Q - 1) * eps)
+
+    def get_p_out(eps):
+        return eps * Q * c / N * (1 + (Q - 1) * eps)
+
+    # p_outs=eps_grid*p_in
+    p_stays = eta_grid
+    rho_ins = rho_grid
+    param_grid = np.array(np.meshgrid(eps_grid, eta_grid, rho_grid)).T.reshape(-1, 3)
+    samps = [
+        [
+            toy_model(
+                p_in=get_p_in(eps),
+                p_out=get_p_out(eps),
+                p_stay=eta,
+                rho_in=rho,
+                Q=Q,
+                T=T,
+                N=N,
+            )
+            for _ in range(n_samps)
+        ]
+        for eps, eta, rho in param_grid
+    ]
+    return samps, param_grid
+
+
 ################################################################
 ##################   SPECIFY TESTSET PARAMS   ##################
 ################################################################

@@ -1,18 +1,13 @@
+# type: ignore
 # TODO: Allow X to be ordinal categorical encoding rather than OHE for memory efficiency,
 # TODO: think about how could allow batching.
 import numpy as np
 import yaml
-from dsbmm import DSBMM
-from dsbmm import DSBMMBase
-from numba import bool_
-from numba import float64
-from numba import int32
-from numba import int64
-from numba import typeof
+from dsbmm import DSBMM, DSBMMBase
+from numba import bool_, float64, int32, int64, typeof
 from numba.experimental import jitclass
 from numba.typed import List
-from numba.types import Array
-from numba.types import ListType
+from numba.types import Array, ListType
 
 # from numba import float32
 
@@ -670,6 +665,7 @@ class BPBase:
         pass
 
     def compute_free_energy(self):
+        # TODO: fix along lines of numba + np version
         f_site = 0.0
         f_link = 0.0
         last_term = 0.0  # something like average degree, but why?
@@ -1040,6 +1036,13 @@ class BPBase:
                                     tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
                                     # tmp_backwards_msg[tmp_backwards_msg > 1 - TOL] = TOL
                                     tmp_backwards_msg /= tmp_backwards_msg.sum()
+                                    self.msg_diff += (
+                                        np.abs(
+                                            tmp_backwards_msg
+                                            - self._psi_t[i, t - 1, :, 0]
+                                        ).mean()
+                                        / self.n_msgs
+                                    )
                                     self._psi_t[i, t - 1, :, 0] = tmp_backwards_msg
                                     forward_term = np.log(
                                         self.forward_temp_msg_term(i, t)
@@ -1071,6 +1074,11 @@ class BPBase:
                             tmp_spatial_msg /= np.expand_dims(
                                 tmp_spatial_msg.sum(axis=1), 1
                             )
+                            self.msg_diff += (
+                                np.abs(tmp_spatial_msg - self._psi_e[t][i]).mean()
+                                * deg_i
+                                / self.n_msgs
+                            )  # NB need to mult by deg_i so weighted correctly
                             # try:
                             #     assert np.isnan(tmp_spatial_msg).sum() == 0
                             #     assert np.isinf(tmp_spatial_msg).sum() == 0
@@ -1104,6 +1112,12 @@ class BPBase:
                                     #     print("forward_term:", forward_term)
                                     #     print("unnorm spatial:", spatial_msg_term)
                                     #     raise RuntimeError("Problem with forward msg")
+                                    self.msg_diff += (
+                                        np.abs(
+                                            tmp_forwards_msg - self._psi_t[i, t, :, 1]
+                                        ).mean()
+                                        / self.n_msgs
+                                    )
                                     self._psi_t[i, t, :, 1] = tmp_forwards_msg
                             ## UPDATE MARGINAL OF i AT t ##
                             tmp_marg = np.exp(tmp - max_log_spatial_msg_term)
