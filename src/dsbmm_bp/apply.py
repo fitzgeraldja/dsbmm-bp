@@ -549,50 +549,70 @@ if __name__ == "__main__":
                                 ),
                             )
                         print("True effective pi:", utils.effective_pi(true_Z))
-                        print(
-                            "Effective pi from partition inferred:",
-                            utils.effective_pi(model.bp.model.jit_model.Z),
-                        )
-                        print(
-                            "True effective beta:",
-                            utils.effective_beta(
-                                model.bp.model.jit_model.A, true_Z
-                            ).transpose(2, 0, 1),
-                        )
-                        print(
-                            "Pred effective beta:",
-                            utils.effective_beta(
-                                model.bp.model.jit_model.A,
-                                model.bp.model.jit_model.Z,
-                            ).transpose(2, 0, 1),
-                        )
+                        if args.use_numba:
+                            print(
+                                "Effective pi from partition inferred:",
+                                utils.effective_pi(model.bp.model.jit_model.Z),
+                            )
+                            print(
+                                "True effective beta:",
+                                utils.effective_beta(
+                                    model.bp.model.jit_model.A, true_Z
+                                ).transpose(2, 0, 1),
+                            )
+                            print(
+                                "Pred effective beta:",
+                                utils.effective_beta(
+                                    model.bp.model.jit_model.A,
+                                    model.bp.model.jit_model.Z,
+                                ).transpose(2, 0, 1),
+                            )
+                        else:
+                            print(
+                                "Effective pi from partition inferred:",
+                                utils.effective_pi(model.bp.model.Z),
+                            )
+                            print(
+                                "True effective beta:",
+                                utils.effective_beta(
+                                    model.bp.model.A, true_Z
+                                ).transpose(2, 0, 1),
+                            )
+                            print(
+                                "Pred effective beta:",
+                                utils.effective_beta(
+                                    model.bp.model.A,
+                                    model.bp.model.Z,
+                                ).transpose(2, 0, 1),
+                            )
                     if samp_no > 0:
                         test_times[test_no, samp_no - 1] = (
                             time.time() - start_time
                         )
-                        if testset_name == "scaling":
-                            print(
-                                f"Sample took ~{test_times[test_no,samp_no-1]:.2f}s"
-                            )
-                    if args.use_numba:
-                        time.sleep(
-                            0.5
-                        )  # sleep a bit to allow threads to complete, TODO: properly sort this
+                    if args.use_numba: 
+                        # wait a bit for numba to stop thread errors 
+                        time.sleep(0.5)
                     # save after every sample in case of crash
                     tp_str = (
-                        "_tp" + str(args.tuning_param)
-                        if args.tuning_param is not None
-                        else ""
+                        "_tp" + str(args.tuning_param) if args.tuning_param is not None else ""
                     )
                     if testset_name == "align":
-                        test_Z[
-                            test_no, samp_no, :, :
-                        ] = model.bp.model.jit_model.Z
-                        with open(
-                            f"../../results/{testset_name}_test_Z{tp_str}.pkl",
-                            "wb",
-                        ) as f:
-                            pickle.dump(test_Z, f)
+                        if args.use_numba:
+                            test_Z[
+                                test_no, samp_no, :, :
+                            ] = model.bp.model.jit_model.Z
+                            with open(
+                                f"../../results/{testset_name}_test_Z{tp_str}.pkl",
+                                "wb",
+                            ) as f:
+                                pickle.dump(test_Z, f)
+                        else:
+                            test_Z[test_no, samp_no, :, :] = model.bp.model.Z
+                            with open(
+                                f"../../results/{testset_name}_test_Z{tp_str}.pkl",
+                                "wb",
+                            ) as f:
+                                pickle.dump(test_Z, f)
                     with open(
                         f"../../results/{testset_name}_test_aris{tp_str}.pkl",
                         "wb",
@@ -617,8 +637,8 @@ if __name__ == "__main__":
             print(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
             logging_params = {
                 "test_no": params["test_no"],
-                "meta_aligned": params["meta_aligned"],
-                "p_in": params["p_in"],
+                "meta_aligned": params.get("meta_aligned", None),
+                "p_in": params.get("p_in", None),
                 "p_stay": params["p_stay"],
             }
             # mlflow.log_params(logging_params)
@@ -653,7 +673,7 @@ if __name__ == "__main__":
         )
         ## Fit to given data
         model.fit(learning_rate=0.2)
-        pred_Z = model.bp.model.jit_model.Z
+        pred_Z = model.bp.model.jit_model.Z if args.use_numba else model.bp.model.Z
         print(f"Best tuning param: {model.best_tun_param}")
         with open(f"../../results/{testset_name}_{link_choice}_Z.pkl", "wb") as f:
             pickle.dump(pred_Z, f)
