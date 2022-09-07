@@ -299,7 +299,7 @@ class EM:
             self.dsbmm = NumpyDSBMM(
                 A=self.A,
                 X=self.X,
-                Z=self.init_Z.copy(),
+                Z=self.init_Z.copy() if set_Z is None else set_Z,
                 Q=self.Q,
                 deg_corr=self.deg_corr,
                 # directed=self.directed,
@@ -371,6 +371,7 @@ class EM:
             print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
         # final random init run
         self.do_run(conv_tol, msg_conv_tol, learning_rate)
+        self.bp.model.set_Z_by_MAP()
         if len(self.tuning_params) > 1:
             for tuning_param in self.tuning_params[1:]:
                 if self.verbose:
@@ -396,6 +397,7 @@ class EM:
                     msg_conv_tol,
                     learning_rate,
                 )
+                self.bp.model.set_Z_by_MAP()
         # now reinit with best part found from these runs
         if self.best_Z is None:
             self.best_Z = self.bp.model.Z
@@ -405,6 +407,7 @@ class EM:
             # no tuning param used
             self.reinit(set_Z=self.best_Z)
         self.do_run(conv_tol, msg_conv_tol, learning_rate)
+        self.bp.model.set_Z_by_MAP()
 
     def do_run(self, conv_tol, msg_conv_tol, learning_rate):
         for n_iter in range(self.max_iter):
