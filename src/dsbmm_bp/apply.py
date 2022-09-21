@@ -380,7 +380,7 @@ if __name__ == "__main__":
         )
         net_files = list(DATA_DIR.glob("net_*.pkl"))
         print(
-            f"Found {len(net_files)} network files, for timestamps {list(map(lambda x: int(x.stem.split('_')[1]), net_files))}"
+            f"Found {len(net_files)} network files, for timestamps {sorted(list(map(lambda x: int(x.stem.split('_')[1]), net_files)))}"
         )
         net_files = sorted(
             net_files, key=lambda x: int(x.stem.split("_")[-1])
@@ -430,6 +430,7 @@ if __name__ == "__main__":
             )
             for meta_idx, mn in enumerate(meta_names)
         ]
+        print([x.shape for x in X])
         data["X"] = X
         # get sparse adj mats
         A = [
