@@ -380,7 +380,7 @@ if __name__ == "__main__":
         )
         net_files = list(DATA_DIR.glob("net_*.pkl"))
         net_files = sorted(
-            net_files, key=lambda x: int(str(x).split("_")[1].split(".")[0])
+            net_files, key=lambda x: int(x.stem.split("_")[-1])
         )  # sort by timestamp
         meta_file = DATA_DIR / "meta_dists.pkl"
         nets = []
