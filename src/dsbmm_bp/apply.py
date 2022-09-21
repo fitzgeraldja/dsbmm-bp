@@ -366,6 +366,8 @@ if __name__ == "__main__":
 
     elif testset_name == "empirical":
         DATA_DIR = Path(args.data)
+        data = {}
+        data["Q"] = args.num_groups
         print(f"Loading data from {DATA_DIR}:")
         print(
             "\tNB data must be pickled networkx graph in form 'net_[timestamp: int].pkl', with all metadata as node attributes."
@@ -390,6 +392,7 @@ if __name__ == "__main__":
             meta_info = pickle.load(f)
         meta_names = list(meta_info.keys())
         meta_types = [meta_info[mn][0] for mn in meta_names]
+        data["meta_types"] = meta_types
         meta_dims = [int(meta_info[mn][1]) for mn in meta_names]
         try:
             assert set(next(iter(nets[0].nodes.data(default=np.nan)))[1].keys()) == set(
@@ -422,11 +425,13 @@ if __name__ == "__main__":
             )
             for meta_idx, mn in enumerate(meta_names)
         ]
+        data["X"] = X
         # get sparse adj mats
         A = [
             nx.to_scipy_array(net, nodelist=node_order, weight=args.edge_weight)
             for net in nets
         ]
+        data["A"] = A
 
     try_parallel = args.nb_parallel
 
@@ -728,7 +733,7 @@ if __name__ == "__main__":
         N = data["A"][0].shape[0]
         n_runs = 5
         test_Z = np.zeros((n_runs, N, T))
-        print("*" * 15, "Running Scopus data", "*" * 15)
+        print("*" * 15, "Running empirical data", "*" * 15)
         ## Initialise
         model = em.EM(
             data,
@@ -736,7 +741,7 @@ if __name__ == "__main__":
             try_parallel=try_parallel,
             tuning_param=np.linspace(0.8, 1.8, 11),
             n_runs=n_runs,
-            deg_corr=True,
+            deg_corr=True if args.use_numba else False,
             verbose=verbose,
             use_meta=not args.ignore_meta,
             use_numba=args.use_numba,
@@ -745,8 +750,12 @@ if __name__ == "__main__":
         model.fit(learning_rate=0.2)
         pred_Z = model.bp.model.jit_model.Z if args.use_numba else model.bp.model.Z
         print(f"Best tuning param: {model.best_tun_param}")
-        with open(f"../../results/{testset_name}_{link_choice}_Z.pkl", "wb") as f:
-            pickle.dump(pred_Z, f)
+        if testset_name == "scopus":
+            with open(f"../../results/{testset_name}_{link_choice}_Z.pkl", "wb") as f:
+                pickle.dump(pred_Z, f)
+        else:
+            with open(f"../../results/{testset_name}_Z.pkl", "wb") as f:
+                pickle.dump(pred_Z, f)
 
     # TODO: clean up code and improve documentation, then
     # run poetry publish
