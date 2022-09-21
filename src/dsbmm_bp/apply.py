@@ -413,7 +413,13 @@ if __name__ == "__main__":
         # mats
         for net in nets:
             missing_nodes = set(node_order) - set(net.nodes)
-            net.add_nodes_from(missing_nodes, **{mn: np.nan for mn in meta_names})
+            net.add_nodes_from(
+                missing_nodes,
+                **{
+                    mn: np.nan * np.ones(meta_dims[meta_idx])
+                    for meta_idx, mn in enumerate(meta_names)
+                },
+            )
         # get metadata
         metas = [[nx.get_node_attributes(net, mn) for net in nets] for mn in meta_names]
         X = [
