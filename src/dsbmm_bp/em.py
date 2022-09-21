@@ -354,7 +354,8 @@ class EM:
         true_Z=None,
         learning_rate=0.2,
     ):
-        self.true_Z = true_Z
+        if true_Z is not None:
+            self.true_Z = true_Z
         if self.verbose:
             print(
                 "#" * 15,
@@ -460,9 +461,10 @@ class EM:
             if self.true_Z is None:
                 current_energy = self.bp.compute_free_energy()
                 if self.best_val == 0.0:
+                    self.max_energy = current_energy
                     # first iter, first run
-                    self.poor_run_ctr = 0
                     self.best_val = current_energy
+                    self.poor_run_ctr = 0
                     self.bp.model.set_Z_by_MAP()
                     self.best_Z = self.bp.model.Z
                     self.best_tun_param = self.dsbmm.tuning_param
@@ -480,6 +482,9 @@ class EM:
                             f"~~~~~~ OUT OF PATIENCE, STOPPING EARLY in run {self.run_idx+1} ~~~~~~"
                         )
                         break
+                if current_energy > self.max_energy:
+                    self.max_energy = current_energy
+                    self.max_energy_Z = self.bp.model.Z
             else:
                 self.bp.model.set_Z_by_MAP()
                 current_score = self.ari_score(self.true_Z)
