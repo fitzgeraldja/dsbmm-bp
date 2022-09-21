@@ -429,6 +429,8 @@ if __name__ == "__main__":
                         metas[meta_idx][net_idx].get(
                             node, np.nan * np.ones(meta_dims[meta_idx])
                         )
+                        if meta_dims[meta_idx] > 1
+                        else np.array([metas[meta_idx][net_idx].get(node, np.nan)])
                         for net_idx, net in enumerate(nets)
                     ]
                     for node in node_order
