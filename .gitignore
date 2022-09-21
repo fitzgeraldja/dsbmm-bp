@@ -37,6 +37,7 @@ notebooks/
 mlruns/
 
 # Data
+data/
 results/
 scopus/
 scopus*
