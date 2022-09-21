@@ -379,6 +379,9 @@ if __name__ == "__main__":
             "\twhere dist_name is one of the accepted metadata distribution types, and dim is the corresponding dimension."
         )
         net_files = list(DATA_DIR.glob("net_*.pkl"))
+        print(
+            f"Found {len(net_files)} network files, for timestamps {list(map(lambda x: int(x.stem.split('_')[1]), net_files))}"
+        )
         net_files = sorted(
             net_files, key=lambda x: int(x.stem.split("_")[-1])
         )  # sort by timestamp
@@ -417,7 +420,9 @@ if __name__ == "__main__":
             np.array(
                 [
                     [
-                        metas[meta_idx][net_idx].get(node, np.nan)
+                        metas[meta_idx][net_idx].get(
+                            node, np.nan * np.ones(meta_dims[meta_idx])
+                        )
                         for net_idx, net in enumerate(nets)
                     ]
                     for node in node_order
@@ -428,7 +433,7 @@ if __name__ == "__main__":
         data["X"] = X
         # get sparse adj mats
         A = [
-            nx.to_scipy_array(net, nodelist=node_order, weight=args.edge_weight)
+            nx.to_scipy_sparse_array(net, nodelist=node_order, weight=args.edge_weight)
             for net in nets
         ]
         data["A"] = A
