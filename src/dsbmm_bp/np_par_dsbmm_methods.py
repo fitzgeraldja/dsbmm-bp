@@ -388,8 +388,15 @@ class NumpyDSBMM:
                 # print("In IB")
                 ib_params = self._meta_params[s]  # shape (Q x T x L)
                 # recall X[s] has shape (N x T x Ds), w Ds = L here
-                self.meta_lkl *= np.einsum("itl,qtl->itq", self.X[s], ib_params)
-                self.meta_lkl *= np.einsum("itl,qtl->itq", 1 - self.X[s], 1 - ib_params)
+                self.meta_lkl *= (
+                    np.prod(
+                        np.power(ib_params, self.X[s][:, np.newaxis, :, :]), axis=-1
+                    )
+                    * np.prod(
+                        np.power(1 - ib_params, 1 - self.X[s][:, np.newaxis, :, :]),
+                        axis=-1,
+                    )
+                ).transpose(0, 2, 1)
                 if self.verbose:
                     print("\tUpdated IB lkl contribution")
             else:
