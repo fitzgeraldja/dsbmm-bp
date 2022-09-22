@@ -240,9 +240,15 @@ class NumpyBP:
         self.bin_degs = np.array(
             np.vstack([(self.A[t] != 0).sum(axis=0).squeeze() for t in range(self.T)]).T
         )
-        self.nz_idxs = np.vstack(
-            (np.zeros(self.T, dtype=int), np.cumsum(self.bin_degs, axis=0))
-        )
+        self.nz_idxs = {}
+        self.nz_is = {}
+        cumdegs = np.cumsum(self.bin_degs, axis=0)
+        for t in range(self.T):
+            unq_cumdeg, nz_is = np.unique(
+                cumdegs[:, t], return_index=True
+            )  # unique necessary for missing nodes
+            self.nz_idxs[t] = np.concatenate([[0], unq_cumdeg])
+            self.nz_is[t] = nz_is
         self.E_idxs = np.concatenate([[0], self.bin_degs.sum(axis=0).cumsum()])
         self.all_idxs = {}
         self.flat_i_idxs = {}
@@ -275,13 +281,23 @@ class NumpyBP:
             just_js = inv_j_idxs[:: self.Q]
             self.all_inv_idxs[t] = np.array(
                 [
-                    self.nz_idxs[j, t]
+                    self.nz_idxs[t][self.nz_is[t] == j]
                     # only using these to index within each timestep, so don't need to place within full _psi_e
                     + np.flatnonzero(
-                        just_js[self.nz_idxs[j, t] : self.nz_idxs[j + 1, t]] == i
+                        just_js[
+                            self.nz_idxs[t][self.nz_is[t] == j] : self.nz_idxs[t][
+                                np.flatnonzero(self.nz_is[t] == j) + 1
+                            ]
+                        ]
+                        == i
                     )[0]
                     # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
                     for i, j in zip(just_is, just_js)
+                    if i in np.flatnonzero(self._pres_nodes[:, t])
+                    and j
+                    in np.flatnonzero(
+                        self._pres_nodes[:, t]
+                    )  # necessary in case of missing nodes
                 ]
             ).squeeze()
 
@@ -534,13 +550,19 @@ class NumpyBP:
                             np.log(
                                 spatial_field_terms[
                                     self.E_idxs[t]
-                                    + self.nz_idxs[i, t] : self.E_idxs[t]
-                                    + self.nz_idxs[i + 1, t],
+                                    + self.nz_idxs[t][self.nz_is[t] == i] : self.E_idxs[
+                                        t
+                                    ]
+                                    + self.nz_idxs[t][
+                                        np.flatnonzero(self.nz_is[t] == i) + 1
+                                    ],
                                     :,
                                 ]
                             ),
                             axis=0,
                         )
+                        if self._pres_nodes[i, t]
+                        else np.empty(self.Q)
                         for i in range(self.N)
                     ]
                 )
@@ -699,8 +721,12 @@ class NumpyBP:
                             np.log(
                                 spatial_field_terms[
                                     self.E_idxs[t]
-                                    + self.nz_idxs[i, t] : self.E_idxs[t]
-                                    + self.nz_idxs[i + 1, t],
+                                    + self.nz_idxs[t][self.nz_is[t] == i] : self.E_idxs[
+                                        t
+                                    ]
+                                    + self.nz_idxs[t][
+                                        np.flatnonzero(self.nz_is[t] == i) + 1
+                                    ],
                                     :,
                                 ]
                             ),
