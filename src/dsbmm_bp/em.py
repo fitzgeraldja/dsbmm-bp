@@ -365,7 +365,7 @@ class EM:
         if true_Z is not None:
             self.true_Z = true_Z
 
-        self.all_best_Zs = np.empty(len(self.trial_Qs), self.N, self.T)
+        self.all_best_Zs = np.empty((len(self.trial_Qs), self.N, self.T))
         self.best_tun_pars = np.ones_like(self.trial_Qs)
         for current_Q in enumerate(self.trial_Qs):
             self.best_val_q = 0.0
