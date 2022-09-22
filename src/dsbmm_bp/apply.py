@@ -417,28 +417,34 @@ if __name__ == "__main__":
                 missing_nodes,
                 **{
                     mn: np.nan * np.ones(meta_dims[meta_idx])
+                    if meta_dims[meta_idx] > 1
+                    else np.nan
                     for meta_idx, mn in enumerate(meta_names)
                 },
             )
         # get metadata
         metas = [[nx.get_node_attributes(net, mn) for net in nets] for mn in meta_names]
         X = [
-            np.array(
+            np.stack(
                 [
-                    [
-                        metas[meta_idx][net_idx].get(
-                            node, np.nan * np.ones(meta_dims[meta_idx])
-                        )
-                        if meta_dims[meta_idx] > 1
-                        else np.array([metas[meta_idx][net_idx].get(node, np.nan)])
-                        for net_idx, net in enumerate(nets)
-                    ]
+                    np.stack(
+                        [
+                            metas[meta_idx][net_idx].get(
+                                node, np.nan * np.ones(meta_dims[meta_idx])
+                            )
+                            if meta_dims[meta_idx] > 1
+                            else np.array([metas[meta_idx][net_idx].get(node, np.nan)])
+                            for net_idx in range(len(nets))
+                        ],
+                        axis=0,
+                    )
                     for node in node_order
-                ]
+                ],
+                axis=0,
             )
             for meta_idx, mn in enumerate(meta_names)
         ]
-        print([x.shape for x in X])
+        # print([x.shape for x in X])
         data["X"] = X
         # get sparse adj mats
         A = [
