@@ -72,6 +72,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--ret_best_only",
+    action="store_true",
+    help="Only return single best overall inferred partition, else return best partition for each Q trialled.",
+)
+
+parser.add_argument(
     "--max_iter",
     type=int,
     default=150,
@@ -768,8 +774,30 @@ if __name__ == "__main__":
     else:
         T = len(data["A"])
         N = data["A"][0].shape[0]
-        n_runs = 5
-        test_Z = np.zeros((n_runs, N, T))
+        n_runs = args.n_runs
+        pred_Z = (
+            np.zeros((args.max_trials, N, T))
+            if not args.ret_best_only
+            else np.zeros((N, T))
+        )
+        if (
+            args.min_Q is not None
+            or args.max_Q is not None
+            or args.max_trials is not None
+        ):
+            try:
+                assert args.min_Q is not None
+                assert args.max_Q is not None
+                assert args.max_trials is not None
+            except AssertionError:
+                raise ValueError(
+                    "If specifying search for Q, must specify all of --min_Q, --max_Q, and --max_trials"
+                )
+            trial_Qs = np.linspace(args.min_Q, args.max_Q, args.max_trials, dtype=int)
+            data["Q"] = trial_Qs[0]
+        else:
+            trial_Qs = None
+
         print("*" * 15, "Running empirical data", "*" * 15)
         ## Initialise
         model = em.EM(
@@ -782,11 +810,25 @@ if __name__ == "__main__":
             verbose=verbose,
             use_meta=not args.ignore_meta,
             use_numba=args.use_numba,
+            trial_Qs=trial_Qs,
         )
         ## Fit to given data
         model.fit(learning_rate=0.2)
-        pred_Z = model.bp.model.jit_model.Z if args.use_numba else model.bp.model.Z
-        print(f"Best tuning param: {model.best_tun_param}")
+        if args.ret_best_only:
+            pred_Z = model.best_Z
+        else:
+            pred_Z = model.all_best_Zs
+        if args.ret_best_only:
+            print(f"Best tuning param: {model.best_tun_param}")
+        else:
+            print(f"Best tuning params for each Q:")
+            print(
+                *[
+                    f"Q = {q}:  {tunpar}"
+                    for q, tunpar in zip(trial_Qs, model.best_tun_pars)
+                ],
+                sep="\n",
+            )
         if testset_name == "scopus":
             with open(f"../../results/{testset_name}_{link_choice}_Z.pkl", "wb") as f:
                 pickle.dump(pred_Z, f)
