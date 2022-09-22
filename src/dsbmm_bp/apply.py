@@ -46,7 +46,7 @@ parser.add_argument(
     "--num_groups",
     type=int,
     default=4,
-    help="Number of groups to use in the model. Default is 4, or whatever suitable for specified testset.",
+    help="Number of groups to use in the model. Default is 4, or whatever suitable for specified testset. Irrelevant if specify search over range of Q using min_Q etc.",
     # NB for scopus, MFVI used 22 if link_choice == "au"
     # else 19 if link_choice == "ref"
 )
