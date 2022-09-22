@@ -395,10 +395,12 @@ class NumpyDSBMM:
             else:
                 raise NotImplementedError(
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
-                )  # NB can't use string formatting for print in numba
+                )
+        # enforce all vals +ve prior to taking power
+        self.meta_lkl[self.meta_lkl < TOL] = TOL
         self.meta_lkl = self.meta_lkl**self.tuning_param
         self.meta_lkl[self.meta_lkl < TOL] = TOL
-        self.meta_lkl[self.meta_lkl > TOL] = TOL
+        self.meta_lkl[self.meta_lkl > 1 - TOL] = 1 - TOL
 
     def update_alpha(self, init=False, learning_rate=0.2):
         if init:

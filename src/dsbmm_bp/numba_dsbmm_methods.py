@@ -72,6 +72,8 @@ def nb_calc_meta_lkl(
         for t in range(T):
             if _pres_nodes[i, t]:
                 for q in range(Q):
+                    if meta_lkl[i, t, q] < TOL:
+                        meta_lkl[i, t, q] = TOL
                     meta_lkl[i, t, q] = meta_lkl[i, t, q] ** tuning_param
                     if meta_lkl[i, t, q] < TOL:
                         meta_lkl[i, t, q] = TOL
