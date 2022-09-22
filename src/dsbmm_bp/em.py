@@ -51,6 +51,7 @@ class EM:
         use_meta=True,
         max_iter=30,
         max_msg_iter=10,
+        trial_Qs=None,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
@@ -60,6 +61,7 @@ class EM:
         self.msg_init_mode = msg_init_mode
         self.max_iter = max_iter
         self.max_msg_iter = max_msg_iter
+        self.init_Z_mode = init_Z_mode
         self.A = data["A"]
         if type(tuning_param) == float:
             self.tuning_params = [tuning_param]
@@ -73,6 +75,7 @@ class EM:
             self.Q = data["Q"]
         except Exception:  # KeyError:
             raise ValueError("Must specify Q in data")
+        self.trial_Qs = trial_Qs if trial_Qs is not None else [self.Q]
         self.sparse = sparse_adj
         try:
             if not self.sparse and self.use_numba:
@@ -113,51 +116,6 @@ class EM:
                     "X given as dict - expected test run with keys 'poisson' and 'indep bernoulli', or 'categorical'"
                 )
 
-        ## Sort init partition
-        if init_Z_mode in ["AX", "XA"]:
-            kmeans_mat = np.concatenate(
-                [
-                    *[self.A[:, :, t] for t in range(self.T)],
-                    *[
-                        Xs.transpose(1, 2, 0).reshape(self.N, -1)
-                        for Xs in self.X.values()
-                    ],
-                ],
-                axis=1,
-            )  # done for fixing labels over time
-        else:
-            try:
-                if not self.sparse and self.use_numba:
-                    kmeans_mat = np.concatenate(
-                        [self.A[:, :, t] for t in range(self.T)], axis=1
-                    )  # done for fixing labels over time
-                else:
-                    kmeans_mat = sparse.hstack(self.A)
-            except Exception:  # ValueError:
-                print("A:", self.A.shape, "T:", self.T)
-                raise ValueError("Problem with A passed")
-        if self.N > 1e5:
-            kmeans_labels = (
-                MiniBatchKMeans(
-                    n_clusters=self.Q,
-                    #   random_state=0, # TODO: consider allowing fixing this for reproducibility
-                    batch_size=100,
-                    max_iter=10,
-                )
-                .fit_predict(kmeans_mat)
-                .reshape(-1, 1)
-            )
-        else:
-            kmeans_labels = (
-                KMeans(
-                    n_clusters=self.Q,
-                    #   random_state=0, # TODO: consider allowing fixing this for reproducibility
-                    max_iter=10,
-                )
-                .fit_predict(kmeans_mat)
-                .reshape(-1, 1)
-            )
-        self.k_means_init_Z = np.tile(kmeans_labels, (1, self.T))
         if not self.sparse and self.use_numba:
             self._pres_nodes = (self.A.sum(axis=1) > 0) | (self.A.sum(axis=0) > 0)
         else:
@@ -174,13 +132,8 @@ class EM:
                     self._pres_nodes[val_locs, t] = True
                     val_locsT = idxsT[indptrsT[i] : indptrsT[i + 1]]
                     self._pres_nodes[val_locsT, t] = True
-        self.k_means_init_Z[~self._pres_nodes] = -1
-        try:
-            assert self.k_means_init_Z.shape == (self.N, self.T)
-        except Exception:  # AssertionError:
-            print(self.k_means_init_Z.shape)
-            print((self.N, self.T))
-            raise ValueError("Wrong partition shape")
+
+        self.initialise_partition(self.Q, init_Z_mode=self.init_Z_mode)
         self.perturb_init_Z()
 
         try:
@@ -219,18 +172,73 @@ class EM:
                 print("No p_in / p_out provided")
         self.reset_model(self.tuning_params[0], reinit=False)
 
+    def initialise_partition(self, Q, init_Z_mode="A"):
+        # set self Q to specified Q as well as initialising Z
+        self.Q = Q
+        ## Sort init partition
+        if init_Z_mode in ["AX", "XA"]:
+            kmeans_mat = np.concatenate(
+                [
+                    *[self.A[:, :, t] for t in range(self.T)],
+                    *[
+                        Xs.transpose(1, 2, 0).reshape(self.N, -1)
+                        for Xs in self.X.values()
+                    ],
+                ],
+                axis=1,
+            )  # done for fixing labels over time
+        else:
+            try:
+                if not self.sparse and self.use_numba:
+                    kmeans_mat = np.concatenate(
+                        [self.A[:, :, t] for t in range(self.T)], axis=1
+                    )  # done for fixing labels over time
+                else:
+                    kmeans_mat = sparse.hstack(self.A)
+            except Exception:  # ValueError:
+                print("A:", self.A.shape, "T:", self.T)
+                raise ValueError("Problem with A passed")
+        if self.N > 1e5:
+            kmeans_labels = (
+                MiniBatchKMeans(
+                    n_clusters=self.Q,
+                    #   random_state=0, # TODO: consider allowing fixing this for reproducibility
+                    batch_size=100,
+                    max_iter=10,
+                )
+                .fit_predict(kmeans_mat)
+                .reshape(-1, 1)
+            )
+        else:
+            kmeans_labels = (
+                KMeans(
+                    n_clusters=self.Q,
+                    #   random_state=0, # likewise consider allowing fixing this for reproducibility
+                    max_iter=10,
+                )
+                .fit_predict(kmeans_mat)
+                .reshape(-1, 1)
+            )
+        self.k_means_init_Z = np.tile(kmeans_labels, (1, self.T))
+        self.k_means_init_Z[~self._pres_nodes] = -1
+        try:
+            assert self.k_means_init_Z.shape == (self.N, self.T)
+        except Exception:  # AssertionError:
+            print(self.k_means_init_Z.shape)
+            print((self.N, self.T))
+            raise ValueError("Wrong partition shape")
+
     def perturb_init_Z(self, pert_prop=0.05):
         # add some noise to init clustering
-        # prop = 0.1  # proportion of noise to add
+        # w specified proportion of noise to add
         mask = np.random.rand(*self.k_means_init_Z.shape) < pert_prop
         init_Z = self.k_means_init_Z.copy()
         init_Z[mask] += np.random.randint(
-            -self.Q // 2,
-            self.Q // 2 + 1,
+            0,
+            self.Q,
             size=(self.N, self.T),
         )[mask]
-        init_Z[init_Z < 0] = 0
-        init_Z[init_Z > self.Q - 1] = self.Q - 1
+        init_Z[mask] = np.mod(init_Z, self.Q)[mask]
         init_Z[~self._pres_nodes] = -1
         self.init_Z = init_Z
 
@@ -356,59 +364,69 @@ class EM:
     ):
         if true_Z is not None:
             self.true_Z = true_Z
-        if self.verbose:
-            print(
-                "#" * 15,
-                f"Using tuning_param {self.tuning_params[0]}",
-                "#" * 15,
-            )
-        while self.run_idx < self.n_runs - 1:
+
+        self.all_best_Zs = np.empty(len(self.trial_Qs, self.N, self.T))
+        self.best_tun_pars = np.ones_like(self.trial_Qs)
+        for current_Q in enumerate(self.trial_Qs):
+            self.best_val_q = 0.0
+            print("\tCurrent Q:", current_Q)
+            print()
+            if current_Q != self.Q:
+                self.initialise_partition(current_Q, init_Z_mode=self.init_Z_mode)
+                self.reinit(tuning_param=self.tuning_params[0])
+            if self.verbose:
+                print(
+                    "#" * 15,
+                    f"Using tuning_param {self.tuning_params[0]}",
+                    "#" * 15,
+                )
+            while self.run_idx < self.n_runs - 1:
+                if self.verbose:
+                    print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
+                self.do_run(conv_tol, msg_conv_tol, learning_rate)
+                self.bp.model.set_Z_by_MAP()
+                self.reinit(tuning_param=self.tuning_params[0])
             if self.verbose:
                 print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
+            # final random init run
             self.do_run(conv_tol, msg_conv_tol, learning_rate)
             self.bp.model.set_Z_by_MAP()
-            self.reinit(tuning_param=self.tuning_params[0])
-        if self.verbose:
-            print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
-        # final random init run
-        self.do_run(conv_tol, msg_conv_tol, learning_rate)
-        self.bp.model.set_Z_by_MAP()
-        if len(self.tuning_params) > 1:
-            for tuning_param in self.tuning_params[1:]:
-                if self.verbose:
-                    print(
-                        "#" * 15,
-                        f"Using tuning_param {tuning_param}",
-                        "#" * 15,
-                    )
-                    time.sleep(1)
-                self.run_idx = 0
-                self.reinit(tuning_param=tuning_param)
-                while self.run_idx < self.n_runs - 1:
+            if len(self.tuning_params) > 1:
+                for tuning_param in self.tuning_params[1:]:
+                    if self.verbose:
+                        print(
+                            "#" * 15,
+                            f"Using tuning_param {tuning_param}",
+                            "#" * 15,
+                        )
+                        time.sleep(1)
+                    self.run_idx = 0
+                    self.reinit(tuning_param=tuning_param)
+                    while self.run_idx < self.n_runs - 1:
+                        self.do_run(
+                            conv_tol,
+                            msg_conv_tol,
+                            learning_rate,
+                        )
+                        self.bp.model.set_Z_by_MAP()
+                        self.reinit(tuning_param=tuning_param)
+                    # final random init run
                     self.do_run(
                         conv_tol,
                         msg_conv_tol,
                         learning_rate,
                     )
                     self.bp.model.set_Z_by_MAP()
-                    self.reinit(tuning_param=tuning_param)
-                # final random init run
-                self.do_run(
-                    conv_tol,
-                    msg_conv_tol,
-                    learning_rate,
-                )
-                self.bp.model.set_Z_by_MAP()
-        # now reinit with best part found from these runs
-        if self.best_Z is None:
-            self.best_Z = self.bp.model.Z
-        try:
-            self.reinit(tuning_param=self.best_tun_param, set_Z=self.best_Z)
-        except Exception:  # AttributeError:
-            # no tuning param used
-            self.reinit(set_Z=self.best_Z)
-        self.do_run(conv_tol, msg_conv_tol, learning_rate)
-        self.bp.model.set_Z_by_MAP()
+            # now reinit with best part found from these runs
+            if self.best_Z is None:
+                self.best_Z = self.bp.model.Z
+            try:
+                self.reinit(tuning_param=self.best_tun_param, set_Z=self.best_Z)
+            except Exception:  # AttributeError:
+                # no tuning param used
+                self.reinit(set_Z=self.best_Z)
+            self.do_run(conv_tol, msg_conv_tol, learning_rate)
+            self.bp.model.set_Z_by_MAP()
 
     def do_run(self, conv_tol, msg_conv_tol, learning_rate):
         for n_iter in range(self.max_iter):
@@ -460,22 +478,32 @@ class EM:
             self.bp.model.zero_diff()
             if self.true_Z is None:
                 current_energy = self.bp.compute_free_energy()
-                if self.best_val == 0.0:
-                    self.max_energy = current_energy
+                if self.best_val_q == 0.0:
+                    self.max_energy_q = current_energy
                     # first iter, first run
+                    self.best_val_q = current_energy
                     self.best_val = current_energy
                     self.poor_run_ctr = 0
                     self.bp.model.set_Z_by_MAP()
                     self.best_Z = self.bp.model.Z
                     self.best_tun_param = self.dsbmm.tuning_param
                     self.max_energy_Z = self.bp.model.Z
-                elif current_energy < self.best_val:
-                    # new best
+                elif current_energy < self.best_val_q:
+                    # new best for q
                     self.poor_run_ctr = 0
-                    self.best_val = current_energy
+                    self.best_val_q = current_energy
                     self.bp.model.set_Z_by_MAP()
-                    self.best_Z = self.bp.model.Z
-                    self.best_tun_param = self.dsbmm.tuning_param
+                    self.all_best_Zs[
+                        np.flatnonzero(self.trial_Qs == self.Q)[0], :, :
+                    ] = self.bp.model.Z
+                    self.best_tun_pars[
+                        np.flatnonzero(self.trial_Qs == self.Q)[0]
+                    ] = self.dsbmm.tuning_param
+                    if self.best_val_q < self.best_val:
+                        self.best_val = self.best_val_q
+                        self.best_Z = self.bp.model.Z
+                        self.best_tun_param = self.dsbmm.tuning_param
+
                 else:
                     self.poor_run_ctr += 1
                     if self.poor_run_ctr >= self.patience:
@@ -513,9 +541,7 @@ class EM:
             try:
                 # could try and replace with numba again but seemed
                 # to cause issues
-                pred_Z = (
-                    self.bp.model.jit_model.Z if self.use_numba else self.bp.model.Z
-                )
+                pred_Z = self.best_Z
                 aris = np.array(
                     [
                         ari(true[pred > -1], pred[pred > -1])
