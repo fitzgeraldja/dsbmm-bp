@@ -468,6 +468,7 @@ class EM:
                     self.bp.model.set_Z_by_MAP()
                     self.best_Z = self.bp.model.Z
                     self.best_tun_param = self.dsbmm.tuning_param
+                    self.max_energy_Z = self.bp.model.Z
                 elif current_energy < self.best_val:
                     # new best
                     self.poor_run_ctr = 0
