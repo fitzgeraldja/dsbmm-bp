@@ -478,7 +478,7 @@ class EM:
             if self.true_Z is None:
                 current_energy = self.bp.compute_free_energy()
                 if self.best_val_q == 0.0:
-                    self.max_energy_q = current_energy
+                    self.max_energy = current_energy
                     # first iter, first run
                     self.best_val_q = current_energy
                     self.best_val = current_energy
