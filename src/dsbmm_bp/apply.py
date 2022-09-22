@@ -608,7 +608,7 @@ if __name__ == "__main__":
 
                         model.dsbmm.set_params(true_params, freeze=True)
                     ## Fit to given data
-                    model.fit(true_Z=true_Z, learning_rate=0.2)
+                    model.fit(learning_rate=0.2)
                     ## Score after fit
                     try:
                         test_aris[test_no, samp_no, :] = 0.0  # type: ignore
