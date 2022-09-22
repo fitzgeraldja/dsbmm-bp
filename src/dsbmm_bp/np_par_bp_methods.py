@@ -735,6 +735,7 @@ class NumpyBP:
         log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
         tmp[:, 1:, :] += log_forward_term
         tmp_marg = np.exp(tmp)
+        tmp_marg[tmp_marg < TOL] = TOL
         f_site += np.log(tmp_marg.sum(axis=-1)).sum()
         f_site /= self.N * self.T
 
