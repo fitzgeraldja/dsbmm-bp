@@ -81,7 +81,14 @@ parser.add_argument(
     "--max_iter",
     type=int,
     default=150,
-    help="Maximum number of EM iterations to run. Default is 50.",
+    help="Maximum number of EM iterations to run. Default is 150.",
+)
+
+parser.add_argument(
+    "--patience",
+    type=int,
+    default=None,
+    help="Number of EM iterations to tolerate without reduction in energy before giving up. Default is None, i.e. complete all max iterations.",
 )
 
 parser.add_argument(
@@ -543,6 +550,7 @@ if __name__ == "__main__":
                             sample,
                             verbose=verbose,
                             n_runs=args.n_runs,
+                            patience=args.patience,
                             max_iter=args.max_iter,
                             max_msg_iter=args.max_msg_iter,
                             use_numba=args.use_numba,
@@ -557,6 +565,7 @@ if __name__ == "__main__":
                             verbose=verbose,
                             tuning_param=args.tuning_param,
                             n_runs=args.n_runs,
+                            patience=args.patience,
                             max_iter=args.max_iter,
                             max_msg_iter=args.max_msg_iter,
                             use_numba=args.use_numba,
@@ -570,6 +579,9 @@ if __name__ == "__main__":
                             try_parallel=try_parallel,
                             verbose=verbose,
                             n_runs=args.n_runs,
+                            patience=args.patience,
+                            max_iter=args.max_iter,
+                            max_msg_iter=args.max_msg_iter,
                             use_numba=args.use_numba,
                             tuning_param=args.tuning_param
                             if args.tuning_param is not None
@@ -806,8 +818,11 @@ if __name__ == "__main__":
             try_parallel=try_parallel,
             tuning_param=np.linspace(0.8, 1.8, 11),
             n_runs=n_runs,
+            patience=args.patience,
             deg_corr=True if args.use_numba else False,
             verbose=verbose,
+            max_iter=args.max_iter,
+            max_msg_iter=args.max_msg_iter,
             use_meta=not args.ignore_meta,
             use_numba=args.use_numba,
             trial_Qs=trial_Qs,

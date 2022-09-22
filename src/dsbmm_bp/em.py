@@ -44,7 +44,7 @@ class EM:
         use_numba=False,
         try_parallel=False,
         n_runs=5,
-        patience=3,
+        patience=None,
         tuning_param=1.0,
         deg_corr=False,
         verbose=True,
@@ -55,7 +55,7 @@ class EM:
     ):
         self.verbose = verbose
         self.parallel = try_parallel
-        self.patience = patience
+        self.patience = patience if patience is not None else max_iter
         self.use_meta = use_meta
         self.use_numba = use_numba
         self.msg_init_mode = msg_init_mode
