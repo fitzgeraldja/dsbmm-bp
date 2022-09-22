@@ -632,10 +632,12 @@ if __name__ == "__main__":
                         test_aris[test_no, samp_no, :] = 0.0  # type: ignore
                         print("BP Z ARI:")
                         test_aris[test_no, samp_no, :] = model.ari_score(true_Z)  # type: ignore
-                        print("BP max energy Z ARI:")
-                        model.ari_score(true_Z, pred_Z=model.max_energy_Z)  # type: ignore
                         if not verbose:
                             print(np.round_(test_aris[test_no, samp_no, :], 3))  # type: ignore
+                        print("BP max energy Z ARI:")
+                        max_en_aris = model.ari_score(true_Z, pred_Z=model.max_energy_Z)  # type: ignore
+                        if not verbose:
+                            print(np.round_(max_en_aris, 3))  # type: ignore
                         print("Init Z ARI:")
                         if verbose:
                             model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
