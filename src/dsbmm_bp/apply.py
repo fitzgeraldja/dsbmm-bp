@@ -65,6 +65,13 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--max_trials",
+    type=int,
+    default=None,
+    help="Maximum number of full trials to run, only used if min_Q, max_Q specified, in which case will search np.linspace(min_Q,max_Q,max_trials,dtype=int).",
+)
+
+parser.add_argument(
     "--max_iter",
     type=int,
     default=150,
@@ -99,7 +106,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--n_runs", type=int, default=5, help="Set number of runs, default = 5"
+    "--n_runs",
+    type=int,
+    default=5,
+    help="Set number of runs for each value of Q, default = 5",
 )
 
 parser.add_argument(
@@ -444,6 +454,13 @@ if __name__ == "__main__":
             )
             for meta_idx, mn in enumerate(meta_names)
         ]
+        for s, meta_type in enumerate(meta_types):
+            # convert suitably according to specified distribution
+            if meta_type in ["indep bernoulli", "categorical"]:
+                X[s] = (X[s] > 0).astype(int)
+            elif meta_type == "poisson":
+                X[s] = (X[s] - X[s].min()).astype(int)
+
         # print([x.shape for x in X])
         data["X"] = X
         # get sparse adj mats

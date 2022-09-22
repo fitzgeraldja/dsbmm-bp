@@ -279,8 +279,8 @@ class NumpyBP:
                     # only using these to index within each timestep, so don't need to place within full _psi_e
                     + np.flatnonzero(
                         just_js[self.nz_idxs[j, t] : self.nz_idxs[j + 1, t]] == i
-                    )
-                    # then need to find where it is specifically i sending to j
+                    )[0]
+                    # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
                     for i, j in zip(just_is, just_js)
                 ]
             ).squeeze()
