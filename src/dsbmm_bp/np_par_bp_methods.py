@@ -248,7 +248,9 @@ class NumpyBP:
                 cumdegs[:, t], return_index=True
             )  # unique necessary for missing nodes
             self.nz_idxs[t] = np.concatenate([[0], unq_cumdeg])
-            self.nz_is[t] = nz_is
+            self.nz_is[t] = np.concatenate(
+                [nz_is, [self.N]]
+            )  # extend to make same length - now ns_is[t] == i gives posn of i in nz_idxs[t] that itself gives e_idx start posn of i at t
         self.E_idxs = np.concatenate([[0], self.bin_degs.sum(axis=0).cumsum()])
         self.all_idxs = {}
         self.flat_i_idxs = {}
