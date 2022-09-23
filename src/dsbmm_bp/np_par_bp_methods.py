@@ -253,7 +253,7 @@ class NumpyBP:
             )  # unique necessary for missing nodes, with degree zero (and so no change in bin_degs.cumsum())
             # handle case of node 0 missing separately, else will count as present below
             if cumdegs[0, t] == 0:
-                nz_is_t = nz_is_t[unq_cumdeg != 0]
+                nz_is = nz_is[unq_cumdeg != 0]
                 unq_cumdeg = unq_cumdeg[unq_cumdeg != 0]
             self.nz_idxs[t] = np.concatenate([[0], unq_cumdeg], dtype=int)
             self.nz_is[t] = np.concatenate(
@@ -555,9 +555,9 @@ class NumpyBP:
                             np.log(
                                 spatial_field_terms[
                                     self.E_idxs[t]
-                                    + self.nz_idxs[t][self.nz_is[t] == i] : self.E_idxs[
-                                        t
-                                    ]
+                                    + self.nz_idxs[t][self.nz_is[t] == i][
+                                        0
+                                    ] : self.E_idxs[t]
                                     + self.nz_idxs[t][
                                         np.flatnonzero(self.nz_is[t] == i)[0] + 1
                                     ],
