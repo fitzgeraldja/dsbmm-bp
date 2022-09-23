@@ -303,6 +303,8 @@ class NumpyBP:
                     )[0]
                     # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
                     for i, j in zip(just_is, just_js)
+                    if j
+                    in self.nz_is[t]  # shouldn't be necessary as using sym_A so i<->j
                 ]
             ).squeeze()
 
