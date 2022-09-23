@@ -247,9 +247,9 @@ class NumpyBP:
             unq_cumdeg, nz_is = np.unique(
                 cumdegs[:, t], return_index=True
             )  # unique necessary for missing nodes
-            self.nz_idxs[t] = np.concatenate([[0], unq_cumdeg])
+            self.nz_idxs[t] = np.concatenate([[0], unq_cumdeg], dtype=int)
             self.nz_is[t] = np.concatenate(
-                [nz_is, [self.N]]
+                [nz_is, [self.N]], dtype=int
             )  # extend to make same length - now ns_is[t] == i gives posn of i in nz_idxs[t] that itself gives e_idx start posn of i at t
         self.E_idxs = np.concatenate([[0], self.bin_degs.sum(axis=0).cumsum()])
         self.all_idxs = {}
@@ -283,12 +283,12 @@ class NumpyBP:
             just_js = inv_j_idxs[:: self.Q]
             self.all_inv_idxs[t] = np.array(
                 [
-                    self.nz_idxs[t][self.nz_is[t] == j]
+                    self.nz_idxs[t][self.nz_is[t] == j][0]
                     # only using these to index within each timestep, so don't need to place within full _psi_e
                     + np.flatnonzero(
                         just_js[
-                            self.nz_idxs[t][self.nz_is[t] == j] : self.nz_idxs[t][
-                                np.flatnonzero(self.nz_is[t] == j) + 1
+                            self.nz_idxs[t][self.nz_is[t] == j][0] : self.nz_idxs[t][
+                                np.flatnonzero(self.nz_is[t] == j)[0] + 1
                             ]
                         ]
                         == i
@@ -556,7 +556,7 @@ class NumpyBP:
                                         t
                                     ]
                                     + self.nz_idxs[t][
-                                        np.flatnonzero(self.nz_is[t] == i) + 1
+                                        np.flatnonzero(self.nz_is[t] == i)[0] + 1
                                     ],
                                     :,
                                 ]
@@ -723,11 +723,11 @@ class NumpyBP:
                             np.log(
                                 spatial_field_terms[
                                     self.E_idxs[t]
-                                    + self.nz_idxs[t][self.nz_is[t] == i] : self.E_idxs[
-                                        t
-                                    ]
+                                    + self.nz_idxs[t][self.nz_is[t] == i][
+                                        0
+                                    ] : self.E_idxs[t]
                                     + self.nz_idxs[t][
-                                        np.flatnonzero(self.nz_is[t] == i) + 1
+                                        np.flatnonzero(self.nz_is[t] == i)[0] + 1
                                     ],
                                     :,
                                 ]
