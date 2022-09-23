@@ -267,6 +267,29 @@ class NumpyBP:
             # np.flatnonzero fails for sparse matrix,
             # but can easily get equivalent using
             row_idx, col_idx = sym_A[t].T.nonzero()
+            # handle integer overflow problem for v large nets
+            nelems = self.N**2
+            nbits = 2**32  # as scipy sparse by default uses int32 for idxs
+            if nelems > nbits / 2:
+                if nelems < nbits:
+                    if t == 0:
+                        print("Large net: converting idxs from int32 to uint32...")
+                    row_idx, col_idx = row_idx.astype(np.uint32), col_idx.astype(
+                        np.uint32
+                    )
+                else:
+                    nbitsmax = 2**64
+                    try:
+                        assert nelems < nbitsmax
+                        assert self.N < nbits
+                    except AssertionError:
+                        raise ValueError("Nets bigger than max size currently allowed.")
+                    if t == 0:
+                        print("Very large net: converting idxs from int32 to uint64...")
+                    row_idx, col_idx = row_idx.astype(np.uint64), col_idx.astype(
+                        np.uint64
+                    )
+
             # and then np.flatnonzero == col_idx + N*row_idx
             msg_idxs = (
                 np.array(
