@@ -351,7 +351,6 @@ class EM:
         if not reinit:
             self.best_Z = None
             self.best_val = 0.0
-            self.poor_run_ctr = 0  # ctr for runs without reduction in free energy
         else:
             self.run_idx += 1
 
@@ -428,6 +427,7 @@ class EM:
             self.bp.model.set_Z_by_MAP()
 
     def do_run(self, conv_tol, msg_conv_tol, learning_rate):
+        self.poor_iter_ctr = 0  # ctr for iters without reduction in free energy
         for n_iter in range(self.max_iter):
             if self.verbose:
                 print(f"\n##### At iteration {n_iter+1} #####")
@@ -482,14 +482,14 @@ class EM:
                     # first iter, first run
                     self.best_val_q = current_energy
                     self.best_val = current_energy
-                    self.poor_run_ctr = 0
+                    self.poor_iter_ctr = 0
                     self.bp.model.set_Z_by_MAP()
                     self.best_Z = self.bp.model.Z
                     self.best_tun_param = self.dsbmm.tuning_param
                     self.max_energy_Z = self.bp.model.Z
                 elif current_energy < self.best_val_q:
                     # new best for q
-                    self.poor_run_ctr = 0
+                    self.poor_iter_ctr = 0
                     self.best_val_q = current_energy
                     self.bp.model.set_Z_by_MAP()
                     self.all_best_Zs[
@@ -504,8 +504,8 @@ class EM:
                         self.best_tun_param = self.dsbmm.tuning_param
 
                 else:
-                    self.poor_run_ctr += 1
-                    if self.poor_run_ctr >= self.patience:
+                    self.poor_iter_ctr += 1
+                    if self.poor_iter_ctr >= self.patience:
                         print(
                             f"~~~~~~ OUT OF PATIENCE, STOPPING EARLY in run {self.run_idx+1} ~~~~~~"
                         )
