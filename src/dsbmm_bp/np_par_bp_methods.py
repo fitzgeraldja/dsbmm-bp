@@ -237,8 +237,12 @@ class NumpyBP:
         return out
 
     def construct_edge_idxs_and_inv(self):
+        # NB idxs here only used for _psi_e, so should operate on the symmetrised + binarised version of A,
+        # as even in directed case a directed edge from i->j still means that there will be messages j->i, as they
+        # emerge from considering joint factors in the model, and this term still looks like p(a_ij|z_i,z_j).
+        sym_A = [((self.A[t] + self.A[t].T) != 0) * 1.0 for t in range(self.T)]
         self.bin_degs = np.array(
-            np.vstack([(self.A[t] != 0).sum(axis=0).squeeze() for t in range(self.T)]).T
+            np.vstack([(sym_A[t] != 0).sum(axis=0).squeeze() for t in range(self.T)]).T
         )
         self.nz_idxs = {}
         self.nz_is = {}
@@ -246,7 +250,11 @@ class NumpyBP:
         for t in range(self.T):
             unq_cumdeg, nz_is = np.unique(
                 cumdegs[:, t], return_index=True
-            )  # unique necessary for missing nodes
+            )  # unique necessary for missing nodes, with degree zero (and so no change in bin_degs.cumsum())
+            # handle case of node 0 missing separately, else will count as present below
+            if cumdegs[0, t] == 0:
+                nz_is_t = nz_is_t[unq_cumdeg != 0]
+                unq_cumdeg = unq_cumdeg[unq_cumdeg != 0]
             self.nz_idxs[t] = np.concatenate([[0], unq_cumdeg], dtype=int)
             self.nz_is[t] = np.concatenate(
                 [nz_is, [self.N]], dtype=int
@@ -258,7 +266,7 @@ class NumpyBP:
         for t in range(self.T):
             # np.flatnonzero fails for sparse matrix,
             # but can easily get equivalent using
-            row_idx, col_idx = self.A[t].T.nonzero()
+            row_idx, col_idx = sym_A[t].T.nonzero()
             # and then np.flatnonzero == col_idx + N*row_idx
             msg_idxs = (
                 np.array(
@@ -277,10 +285,10 @@ class NumpyBP:
             j_idxs = msg_idxs.flatten() + self.Q * self.N * t
             self.all_idxs[t] = {"i_idxs": i_idxs, "j_idxs": j_idxs}
             # now need inverse idx to align i\to j w j\to i
-            just_is = i_idxs[:: self.Q]
+            just_is = i_idxs[:: self.Q].astype(int)
             self.flat_i_idxs[t] = just_is
             inv_j_idxs = np.mod(j_idxs, self.N)
-            just_js = inv_j_idxs[:: self.Q]
+            just_js = inv_j_idxs[:: self.Q].astype(int)
             self.all_inv_idxs[t] = np.array(
                 [
                     self.nz_idxs[t][self.nz_is[t] == j][0]
@@ -295,11 +303,6 @@ class NumpyBP:
                     )[0]
                     # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
                     for i, j in zip(just_is, just_js)
-                    if i in np.flatnonzero(self._pres_nodes[:, t])
-                    and j
-                    in np.flatnonzero(
-                        self._pres_nodes[:, t]
-                    )  # necessary in case of missing nodes
                 ]
             ).squeeze()
 
@@ -625,7 +628,7 @@ class NumpyBP:
         for t in range(self.T):
             # need inv idxs for locs where i sends msgs to j
             # all_inv_idxs[t] gives order of field_term s.t.
-            # all_inv_idxs[t][nz_idxs[i,t]:nz_idxs[i+1],t]
+            # all_inv_idxs[t][nz_idx[t][i]:nz_idxs[t][i+1]]
             # gives idxs of field terms corresponding to
             # messages FROM i to j in the correct order to
             # align with the block field_terms[E_idxs[t]:E_idxs[t+1]][nz_idxs[i, t] : nz_idxs[i + 1]]
