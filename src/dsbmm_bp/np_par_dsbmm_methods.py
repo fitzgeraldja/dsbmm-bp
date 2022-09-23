@@ -83,7 +83,7 @@ class NumpyDSBMM:
         self._tot_N_pres = self._pres_nodes.sum()
         self._pres_trans = (
             self._pres_nodes[:, :-1] * self._pres_nodes[:, 1:]
-        )  # returns N x T-1 array w i,t true if i
+        )  # returns N x T-1 array w i,t true if i present at t and t-1, for t = 1,...T-1
 
         self.Z = Z
         self.Z[~self._pres_nodes] = -1
@@ -409,7 +409,7 @@ class NumpyDSBMM:
         self.meta_lkl[self.meta_lkl < TOL] = TOL
         self.meta_lkl[self.meta_lkl > 1 - TOL] = 1 - TOL
 
-    def update_alpha(self, init=False, learning_rate=0.2):
+    def update_alpha(self, init=False, learning_rate=0.2, use_all_marg=False):
         if init:
             if NON_INFORMATIVE_INIT:
                 self._alpha = np.ones(self.Q) / self.Q
@@ -425,8 +425,15 @@ class NumpyDSBMM:
                 # _alpha[_alpha > 1 - TOL] = 1 - TOL
         else:
             # if DC, seems like should multiply marg by degree prior to sum - unseen for directed case but can calculate
-            tmp = self.node_marg.sum(axis=(0, 1))
-            tmp /= self._tot_N_pres
+            if use_all_marg:
+                # in style of M&M, count contributions from all node marginals
+                tmp = self.node_marg.sum(axis=(0, 1))
+                tmp /= self._tot_N_pres
+            else:
+                # only count contribs from nodes wout previous states, i.e. first timestep and nodes previously missing, as eqns suggest
+                tmp = self.node_marg[:, 0, :].sum(axis=0)
+                tmp += self.node_marg[:, 1:, :][~self._pres_trans].sum(axis=(0, 1))
+
             if tmp.sum() > 0:
                 tmp /= tmp.sum()
             tmp[tmp < TOL] = TOL

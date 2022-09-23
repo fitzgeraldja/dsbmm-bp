@@ -665,6 +665,7 @@ def gen_test_data(
         trans_mat = gen_trans_mat(p_stay, Q)
 
     for samp_no in range(n_samps):
+        # gen partition for initial timestep - effectively using alpha_q = 1/Q for all q
         Z_1 = np.random.randint(0, high=Q, size=(N,))
         sizes = np.array([len([i for i in Z_1 if i == q]) for q in range(Q)])
         cum_size = np.cumsum(sizes)
