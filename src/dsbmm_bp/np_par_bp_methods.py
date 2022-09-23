@@ -287,8 +287,7 @@ class NumpyBP:
             # now need inverse idx to align i\to j w j\to i
             just_is = i_idxs[:: self.Q].astype(int)
             self.flat_i_idxs[t] = just_is
-            inv_j_idxs = np.mod(j_idxs, self.N)
-            just_js = inv_j_idxs[:: self.Q].astype(int)
+            just_js = np.mod(j_idxs[:: self.Q], self.N).astype(int)
             try:
                 self.all_inv_idxs[t] = np.array(
                     [
@@ -313,16 +312,18 @@ class NumpyBP:
                         stop = self.nz_idxs[t][
                             np.flatnonzero(self.nz_is[t] == j)[0] + 1
                         ]
+                        test_i = self.flat_i_idxs[0][start:stop]
                         test_j = just_js[start:stop]
                         test_ij = np.flatnonzero(test_j == i)
                         test_ijval = test_ij[0]
                     except:
-                        print(i, j)
+                        print(i, j, t)
                         print(start)
                         print(stop)
+                        print(test_i)
                         print(test_j)
-                        row_idxs, col_idxs = np.divmod(test_j, self.N)
-                        print(sym_A[t][row_idxs, col_idxs])
+                        print(sym_A[t][test_i, test_j])
+                        print(sym_A[t][test_j, test_i])
                         print(test_ij)
                         print(test_ijval)
                         raise RuntimeError("Problem w idxs")
