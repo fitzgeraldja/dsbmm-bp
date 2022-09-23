@@ -321,8 +321,10 @@ class NumpyBP:
                         print(start)
                         print(stop)
                         print(test_j)
+                        print(A[t].flatten()[test_j])
                         print(test_ij)
                         print(test_ijval)
+                        raise RuntimeError("Problem w idxs")
 
     def spatial_field_terms(
         self,
