@@ -289,24 +289,40 @@ class NumpyBP:
             self.flat_i_idxs[t] = just_is
             inv_j_idxs = np.mod(j_idxs, self.N)
             just_js = inv_j_idxs[:: self.Q].astype(int)
-            self.all_inv_idxs[t] = np.array(
-                [
-                    self.nz_idxs[t][self.nz_is[t] == j][0]
-                    # only using these to index within each timestep, so don't need to place within full _psi_e
-                    + np.flatnonzero(
-                        just_js[
-                            self.nz_idxs[t][self.nz_is[t] == j][0] : self.nz_idxs[t][
-                                np.flatnonzero(self.nz_is[t] == j)[0] + 1
+            try:
+                self.all_inv_idxs[t] = np.array(
+                    [
+                        self.nz_idxs[t][self.nz_is[t] == j][0]
+                        # only using these to index within each timestep, so don't need to place within full _psi_e
+                        + np.flatnonzero(
+                            just_js[
+                                self.nz_idxs[t][self.nz_is[t] == j][0] : self.nz_idxs[
+                                    t
+                                ][np.flatnonzero(self.nz_is[t] == j)[0] + 1]
                             ]
+                            == i
+                        )[0]
+                        # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
+                        for i, j in zip(just_is, just_js)
+                    ]
+                ).squeeze()
+            except IndexError:
+                for i, j in zip(just_is, just_js):
+                    try:
+                        start = self.nz_idxs[t][self.nz_is[t] == j][0]
+                        stop = self.nz_idxs[t][
+                            np.flatnonzero(self.nz_is[t] == j)[0] + 1
                         ]
-                        == i
-                    )[0]
-                    # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
-                    for i, j in zip(just_is, just_js)
-                    if j
-                    in self.nz_is[t]  # shouldn't be necessary as using sym_A so i<->j
-                ]
-            ).squeeze()
+                        test_j = just_js[start:stop]
+                        test_ij = np.flatnonzero(test_j == i)
+                        test_ijval = test_ij[0]
+                    except:
+                        print(i, j)
+                        print(start)
+                        print(stop)
+                        print(test_j)
+                        print(test_ij)
+                        print(test_ijval)
 
     def spatial_field_terms(
         self,
