@@ -349,7 +349,9 @@ class NumpyBP:
                         print(sym_A[t][test_j, test_i])
                         print(test_ij)
                         print(test_ijval)
-                        raise RuntimeError("Problem w idxs")
+                        raise RuntimeError(
+                            "Problem w idxs, likely integer overflow error that should have been caught..."
+                        )
 
     def spatial_field_terms(
         self,
@@ -782,6 +784,8 @@ class NumpyBP:
                             ),
                             axis=0,
                         )
+                        if self._pres_nodes[i, t]
+                        else np.empty(self.Q)
                         for i in range(self.N)
                     ]
                 )
