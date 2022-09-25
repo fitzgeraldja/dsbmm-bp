@@ -203,14 +203,14 @@ if __name__ == "__main__":
                 # )
                 # raise Exception("Stop here for now")
 
-        print("Successfully loaded data, now initialising model...")
+    print("Successfully loaded data, now initialising model...")
 
-        # tmp = List()
-        # tmp.append(np.ascontiguousarray(data["X_ages"]))
-        # tmp.append(np.ascontiguousarray(data["X_insts"]))
-        # tmp.append(np.ascontiguousarray(data["X_subjs"]))
-        # data["X"] = tmp
-        # data["meta_types"] = ["poisson", "indep bernoulli", "indep bernoulli"]
+    # tmp = List()
+    # tmp.append(np.ascontiguousarray(data["X_ages"]))
+    # tmp.append(np.ascontiguousarray(data["X_insts"]))
+    # tmp.append(np.ascontiguousarray(data["X_subjs"]))
+    # data["X"] = tmp
+    # data["meta_types"] = ["poisson", "indep bernoulli", "indep bernoulli"]
 
     try_parallel = args.nb_parallel
 
