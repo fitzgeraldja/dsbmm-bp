@@ -384,17 +384,20 @@ class EM:
                     f"Using tuning_param {self.tuning_params[0]}",
                     "#" * 15,
                 )
-            while self.run_idx < self.n_runs - 1:
+            with tqdm(total=self.n_runs, desc="Run no.") as run_pbar:
+                while self.run_idx < self.n_runs - 1:
+                    if self.verbose:
+                        print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
+                    self.do_run(conv_tol, msg_conv_tol, learning_rate)
+                    self.bp.model.set_Z_by_MAP()
+                    run_pbar.update(1)
+                    self.reinit(tuning_param=self.tuning_params[0])
                 if self.verbose:
                     print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
+                # final random init run
                 self.do_run(conv_tol, msg_conv_tol, learning_rate)
                 self.bp.model.set_Z_by_MAP()
-                self.reinit(tuning_param=self.tuning_params[0])
-            if self.verbose:
-                print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
-            # final random init run
-            self.do_run(conv_tol, msg_conv_tol, learning_rate)
-            self.bp.model.set_Z_by_MAP()
+                run_pbar.update(1)
             if len(self.tuning_params) > 1:
                 for tuning_param in self.tuning_params[1:]:
                     if self.verbose:
@@ -405,6 +408,7 @@ class EM:
                         )
                         time.sleep(1)
                     self.run_idx = 0
+
                     self.reinit(tuning_param=tuning_param)
                     while self.run_idx < self.n_runs - 1:
                         self.do_run(
