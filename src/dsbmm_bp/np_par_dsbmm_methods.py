@@ -39,6 +39,7 @@ class NumpyDSBMM:
         verbose=False,
         n_threads=None,
         frozen=False,
+        alpha_use_all=True,
     ):
         """Initialise the class
 
@@ -62,6 +63,7 @@ class NumpyDSBMM:
         self.tuning_param = tuning_param
         self.frozen = frozen
         self.deg_corr = deg_corr
+        self.alpha_use_all = alpha_use_all
 
         self.directed = directed
         self.verbose = verbose
@@ -261,7 +263,9 @@ class NumpyDSBMM:
         """
         if not self.frozen:
             # first init of parameters given initial groups if init=True, else use provided marginals
-            self.update_alpha(init=init, learning_rate=learning_rate)
+            self.update_alpha(
+                init=init, learning_rate=learning_rate, use_all_marg=self.alpha_use_all
+            )
             if self.verbose:
                 print(self._alpha)
                 print("\tUpdated alpha")
