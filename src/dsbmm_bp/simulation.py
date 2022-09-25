@@ -773,7 +773,7 @@ def toy_model(
         meta_dims=[Q],
         meta_params=[meta_params],
     )
-    data["A"] = [sparse.csr_matrix(a) for a in data["A"]]
+    data["A"] = [sparse.csr_matrix(a) for a in data["A"].transpose(2, 0, 1)]
     return data
 
 
