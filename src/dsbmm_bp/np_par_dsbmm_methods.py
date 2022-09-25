@@ -717,7 +717,13 @@ class NumpyDSBMM:
             zeta = np.array(
                 [
                     [
-                        [np.nansum(self.X[s][self.Z[:, t] == q, t, 0])]
+                        [
+                            np.nansum(self.X[s][self.Z[:, t] == q, t, 0])
+                            if not np.isna(
+                                np.nansum(self.X[s][self.Z[:, t] == q, t, 0])
+                            )
+                            else 0.0  # handle case of init group containing only missing nodes at t
+                        ]
                         for t in range(self.T)
                     ]
                     for q in range(self.Q)
