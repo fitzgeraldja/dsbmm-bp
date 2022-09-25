@@ -99,6 +99,14 @@ parser.add_argument(
     help="Maximum number of message updates to run each EM iteration. Default is 10. Early iterations will use //3 of this value.",
 )
 
+parser.add_argument(
+    "--learning_rate",
+    "-lr",
+    type=float,
+    default=0.2,
+    help="Learning rate for updating params at each EM iter. Default is 0.2.",
+)
+
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
 
 parser.add_argument(
@@ -628,7 +636,7 @@ if __name__ == "__main__":
 
                         model.dsbmm.set_params(true_params, freeze=True)
                     ## Fit to given data
-                    model.fit(learning_rate=0.2)
+                    model.fit(learning_rate=args.learning_rate)
                     ## Score after fit
                     try:
                         test_aris[test_no, samp_no, :] = 0.0  # type: ignore
@@ -815,7 +823,7 @@ if __name__ == "__main__":
             trial_Qs=trial_Qs,
         )
         ## Fit to given data
-        model.fit(learning_rate=0.2)
+        model.fit(learning_rate=args.learning_rate)
         if args.ret_best_only:
             pred_Z = model.best_Z
         else:
