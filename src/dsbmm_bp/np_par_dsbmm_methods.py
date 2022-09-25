@@ -754,6 +754,10 @@ class NumpyDSBMM:
             self.diff += tmp_diff
             self.meta_params[s] = tmp
         else:
+            if np.isnan(tmp).sum() > 0:
+                print("tmp pois params:")
+                print(tmp)
+                raise RuntimeError("Problem updating poisson params")
             self.meta_params[s] = tmp
 
     def update_indep_bern_meta(self, init, s, learning_rate=0.2):
