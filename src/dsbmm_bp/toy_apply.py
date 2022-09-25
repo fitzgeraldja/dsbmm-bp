@@ -252,7 +252,7 @@ if __name__ == "__main__":
                     print("true eps, eta, rho:", params)
                 print()
                 print("$" * 12, "At sample", samp_no + 1, "$" * 12)
-                sample.update(params)
+                sample.update({"Q": Q, "meta_types": ["categorical"]})
                 # present = calc_present(sample["A"])
                 # trans_present = calc_trans_present(present)
                 # print(present)
