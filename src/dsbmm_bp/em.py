@@ -434,7 +434,7 @@ class EM:
 
     def do_run(self, conv_tol, msg_conv_tol, learning_rate):
         self.poor_iter_ctr = 0  # ctr for iters without reduction in free energy
-        for n_iter in tqdm(range(self.max_iter), desc="EM iter"):
+        for n_iter in tqdm(range(self.max_iter), desc="EM iter", leave=False):
             if self.verbose:
                 tqdm.write(f"\n##### At iteration {n_iter+1} #####")
                 self.xdata.append(n_iter)
