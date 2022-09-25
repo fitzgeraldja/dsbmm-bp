@@ -614,7 +614,9 @@ class NumpyBP:
                             axis=0,
                         )
                         if self._pres_nodes[i, t]
-                        else np.empty(self.Q)
+                        else np.zeros(
+                            self.Q
+                        )  # need zeros rather than nan / empty else will be included in einsums
                         for i in range(self.N)
                     ]
                 )
@@ -785,7 +787,9 @@ class NumpyBP:
                             axis=0,
                         )
                         if self._pres_nodes[i, t]
-                        else np.empty(self.Q)
+                        else np.zeros(
+                            self.Q
+                        )  # need zeros rather than nan / empty else will be included in einsums
                         for i in range(self.N)
                     ]
                 )
