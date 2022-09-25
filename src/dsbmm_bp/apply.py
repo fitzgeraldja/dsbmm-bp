@@ -525,7 +525,9 @@ if __name__ == "__main__":
             #     run_name=f"PARENT_RUN_{test_no}", experiment_id=experiment_id
             # ) as parent_run:
             # mlflow.log_param("parent", "yes")
-            for samp_no, sample in enumerate(tqdm(samples, desc="Sample no.")):
+            for samp_no, sample in enumerate(
+                tqdm(samples, desc="Sample no.", leave=False)
+            ):
                 # with mlflow.start_run(
                 #     run_name=f"CHILD_RUN_{test_no}:{samp_no}",
                 #     experiment_id=experiment_id,
