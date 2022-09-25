@@ -83,7 +83,11 @@ class EM:
                 assert np.allclose(self.A, self.A.transpose(1, 0, 2))
             else:
                 # TODO: fix properly - currently just force symmetrising and binarising
-                self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
+                try:
+                    self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
+                except ValueError:
+                    print(*[A_t.shape for A_t in self.A], sep="\n")
+                    raise ValueError("Problem w non-square adj matrix input")
 
         except Exception:  # AssertionError:
             # symmetrise for this test case
