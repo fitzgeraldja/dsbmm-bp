@@ -384,7 +384,7 @@ class EM:
                     f"Using tuning_param {self.tuning_params[0]}",
                     "#" * 15,
                 )
-            with tqdm(total=self.n_runs, desc="Run no.") as run_pbar:
+            with tqdm(total=self.n_runs, desc="Run no.", leave=False) as run_pbar:
                 while self.run_idx < self.n_runs - 1:
                     if self.verbose:
                         print("%" * 15, f"Starting run {self.run_idx+1}", "%" * 15)
