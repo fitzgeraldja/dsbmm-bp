@@ -34,7 +34,7 @@ class NumpyDSBMM:
         deg_corr=False,
         directed=False,
         use_meta=True,  # control use of metadata or not (for debug)
-        meta_types=["poisson", "indep bernoulli"],
+        meta_types=["poisson", "indep bernoulli", "categorical"],
         tuning_param=1.0,
         verbose=False,
         n_threads=None,
@@ -97,7 +97,7 @@ class NumpyDSBMM:
                 self.S = len(X)
                 assert len(self.meta_types) == self.S
                 self.meta_dims = np.array([X_s.shape[-1] for X_s in X], dtype=np.int32)
-                self.X = X
+                self.X = [np.ma.masked_invalid(Xs) for Xs in X]
                 self._meta_params = [
                     np.zeros((self.Q, self.T, self.meta_dims[s])) for s in range(self.S)
                 ]
@@ -372,6 +372,7 @@ class NumpyDSBMM:
 
     def calc_meta_lkl(self):
         self.meta_lkl = np.ones((self.N, self.T, self.Q))
+        # NB meta_lkl will be nan when a node is missing
         for s, mt in enumerate(self.meta_types):
             # print(f"Updating params for {mt} dist")
             if mt == "poisson":
@@ -399,6 +400,15 @@ class NumpyDSBMM:
                 ).transpose(0, 2, 1)
                 if self.verbose:
                     print("\tUpdated IB lkl contribution")
+            elif mt == "categorical":
+                cat_params = self._meta_params[s]
+                self.meta_lkl *= np.sum(
+                    cat_params * self.X[s][:, np.newaxis, :, :], axis=-1
+                ).transpose(
+                    0, 2, 1
+                )  # should only have single nonzero X, one-hot encoding for category, so this should be sufficient
+                if self.verbose:
+                    print("\tUpdated categorical lkl contribution")
             else:
                 raise NotImplementedError(
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
@@ -684,9 +694,14 @@ class NumpyDSBMM:
                 self.update_indep_bern_meta(init, s, learning_rate=learning_rate)
                 if self.verbose:
                     print("\tUpdated IB")
+            elif self.meta_types[s] == "categorical":
+                # print("In IB")
+                self.update_cat_meta(init, s, learning_rate=learning_rate)
+                if self.verbose:
+                    print("\tUpdated categorical")
             else:
                 raise NotImplementedError(
-                    "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
+                    "Yet to implement metadata distribution of given type \nOptions are 'poisson', 'indep bernoulli', or 'categorical'"
                 )  # NB can't use string formatting for print in numba
 
     def update_poisson_meta(self, init, s, learning_rate=0.2):
@@ -709,7 +724,12 @@ class NumpyDSBMM:
             zeta[zeta < TOL] = TOL
         else:
             xi[:, :, 0] = self.node_marg.sum(axis=0).T
-            zeta = np.einsum("itq,itd->qtd", self.node_marg, self.X[s])
+            # zeta = np.einsum("itq,itd->qtd", self.node_marg, self.X[s]) # can't use einsum if X[s] contains nans, i.e. missing nodes
+            zeta = (
+                (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
+                .sum(axis=0)
+                .data.transpose(1, 0, 2)
+            )
             xi[xi < TOL] = 1.0
             zeta[zeta < TOL] = TOL
         # NB again use relative error here as could be large
@@ -753,12 +773,53 @@ class NumpyDSBMM:
             rho[rho < TOL] = TOL
         else:
             xi[:, :, 0] = self.node_marg.sum(axis=0).T
-            rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s])
+            # rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s]) # again can't use einsum w nans in X[s]
+            rho = (
+                (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
+                .sum(axis=0)
+                .data.transpose(1, 0, 2)
+            )
             xi[xi < TOL] = 1.0
             rho[rho < TOL] = TOL
         tmp = rho / xi
         tmp[tmp < TOL] = TOL
         tmp[tmp > 1 - TOL] = 1 - TOL
+        if not init:
+            tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
+            tmp_diff = np.abs(tmp - self.meta_params[s]).mean()
+            if np.isnan(tmp_diff):
+                raise RuntimeError("Problem updating IB params")
+            if self.verbose:
+                print("IB diff: ", np.round_(tmp_diff, 3))
+            self.diff += tmp_diff
+            self.meta_params[s] = tmp
+        else:
+            self.meta_params[s] = tmp
+
+    def update_cat_meta(self, init, s, learning_rate=0.2):
+        L = self.X[s].shape[-1]
+        rho = np.zeros((self.Q, self.T, L))
+        if init:
+            rho = np.array(
+                [
+                    [
+                        self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                        for t in range(self.T)
+                    ]
+                    for q in range(self.Q)
+                ]
+            )
+            rho[rho < TOL] = TOL
+        else:
+            rho = (
+                (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
+                .sum(axis=0)
+                .data.transpose(1, 0, 2)
+            )
+            rho[rho < TOL] = TOL
+        tmp = rho / rho.sum(axis=-1, keepdims=True)
+        tmp[tmp < TOL] = TOL
+        tmp /= tmp.sum(axis=-1, keepdims=True)
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
             tmp_diff = np.abs(tmp - self.meta_params[s]).mean()

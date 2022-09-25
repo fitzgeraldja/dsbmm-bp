@@ -664,6 +664,7 @@ class NumpyBP:
         )
         tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
         tmp_backwards_msg /= tmp_backwards_msg.sum(axis=-1)[:, :, np.newaxis]
+        tmp_backwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
         self.msg_diff += np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0]).mean()
         self._psi_t[:, :, :, 0] = tmp_backwards_msg
         # include forward term now backwards term updated
@@ -724,6 +725,7 @@ class NumpyBP:
         )
         tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
         tmp_forwards_msg /= tmp_forwards_msg.sum(axis=-1)[:, :, np.newaxis]
+        tmp_forwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
         self.msg_diff += np.abs(tmp_forwards_msg - self._psi_t[..., 1]).mean()
         self._psi_t[:, :, :, 1] = tmp_forwards_msg
 
@@ -735,6 +737,7 @@ class NumpyBP:
         )
         tmp_marg[tmp_marg < TOL] = TOL
         tmp_marg /= tmp_marg.sum(axis=-1)[:, :, np.newaxis]
+        tmp_marg[~self._pres_nodes, :] = 0.0  # set to zero if not present
         self.node_marg = tmp_marg
 
         if np.isnan(self.msg_diff).sum() > 0:
@@ -946,6 +949,7 @@ class NumpyBP:
         self.twopoint_t_marg /= self.twopoint_t_marg.sum(axis=(-2, -1))[
             ..., np.newaxis, np.newaxis
         ]
+        self.twopoint_t_marg[~self._pres_trans, ...] = 0.0  # set to zero if not present
         return self.twopoint_t_marg
 
     def onehot_initialization(self, a):

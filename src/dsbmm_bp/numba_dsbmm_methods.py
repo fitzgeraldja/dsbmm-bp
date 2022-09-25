@@ -906,8 +906,7 @@ def nb_update_cat_meta(
                     rho[q, t, l_idx] = TOL
             norm_rho = rho[q, t, :].sum()
             for l_idx in range(L):
-                if rho[q, t, l_idx] < TOL:
-                    rho[q, t, l_idx] = TOL
+                rho[q, t, l_idx] /= norm_rho
     if not init:
         tmp = learning_rate * rho + (1 - learning_rate) * _mt_params
         tmp_diff = np.abs(tmp - _mt_params).mean()

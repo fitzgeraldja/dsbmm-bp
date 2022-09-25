@@ -266,6 +266,7 @@ if __name__ == "__main__":
                 # print(trans_present)+
                 ## Initialise model
                 true_Z = sample.pop("Z")
+                sample["X"] = [sample["X"]["categorical"]]
                 ## Initialise
 
                 model = em.EM(
