@@ -433,7 +433,7 @@ class EM:
                 print(f"\n##### At iteration {n_iter+1} #####")
                 self.xdata.append(n_iter)
             for msg_iter in range(self.max_msg_iter):
-                if n_iter < 5:
+                if n_iter < 5 and self.max_iter > 1:
                     if msg_iter > self.max_msg_iter // 3:
                         # Use fewer max msg updates for first few EM steps, where params usually inaccurate
                         break
@@ -451,30 +451,35 @@ class EM:
                 if msg_diff < msg_conv_tol:
                     break
                 self.bp.zero_diff()
-            self.bp.update_twopoint_marginals()  # dumping rate?
-            if self.verbose:
-                print("Initialised corresponding twopoint marginals")
-            if self.use_numba:
-                self.bp.model.set_node_marg(self.bp.jit_model.node_marg)
-                self.bp.model.set_twopoint_edge_marg(self.bp.jit_model.twopoint_e_marg)
-                self.bp.model.set_twopoint_time_marg(self.bp.jit_model.twopoint_t_marg)
-            else:
-                self.bp.model.set_node_marg(self.bp.node_marg)
-                self.bp.model.set_twopoint_edge_marg(self.bp.twopoint_e_marg)
-                self.bp.model.set_twopoint_time_marg(self.bp.twopoint_t_marg)
-            if self.verbose:
-                print("\tPassed marginals to DSBMM")
-            self.bp.model.update_params(init=False, learning_rate=learning_rate)
-            if self.verbose:
-                print("\tUpdated DSBMM params given marginals")
-            if self.use_numba:
-                diff = self.bp.model.jit_model.diff
-            else:
-                diff = self.bp.model.diff
-            if self.verbose:
-                print(f"Successfully completed update! Diff = {diff:.4f}")
+            if self.max_iter > 1:
+                self.bp.update_twopoint_marginals()  # dumping rate?
+                if self.verbose:
+                    print("Initialised corresponding twopoint marginals")
+                if self.use_numba:
+                    self.bp.model.set_node_marg(self.bp.jit_model.node_marg)
+                    self.bp.model.set_twopoint_edge_marg(
+                        self.bp.jit_model.twopoint_e_marg
+                    )
+                    self.bp.model.set_twopoint_time_marg(
+                        self.bp.jit_model.twopoint_t_marg
+                    )
+                else:
+                    self.bp.model.set_node_marg(self.bp.node_marg)
+                    self.bp.model.set_twopoint_edge_marg(self.bp.twopoint_e_marg)
+                    self.bp.model.set_twopoint_time_marg(self.bp.twopoint_t_marg)
+                if self.verbose:
+                    print("\tPassed marginals to DSBMM")
+                self.bp.model.update_params(init=False, learning_rate=learning_rate)
+                if self.verbose:
+                    print("\tUpdated DSBMM params given marginals")
+                if self.use_numba:
+                    diff = self.bp.model.jit_model.diff
+                else:
+                    diff = self.bp.model.diff
+                if self.verbose:
+                    print(f"Successfully completed update! Diff = {diff:.4f}")
 
-            self.bp.model.zero_diff()
+                self.bp.model.zero_diff()
             if self.true_Z is None:
                 current_energy = self.bp.compute_free_energy()
                 if self.best_val_q == 0.0:
@@ -526,11 +531,14 @@ class EM:
                     self.ydata.append(current_score.mean())
                     self.update_score_plot()
                     print()
-            if diff < conv_tol:
+            if diff < conv_tol or (msg_diff < msg_conv_tol and self.max_iter == 1):
                 print(f"~~~~~~ CONVERGED in run {self.run_idx+1} ~~~~~~")
                 break
-            if n_iter == self.max_iter - 1:
-                print(f"~~~~~~ MAX ITERATIONS REACHED in run {self.run_idx+1} ~~~~~~")
+            else:
+                if n_iter == self.max_iter - 1:
+                    print(
+                        f"~~~~~~ MAX ITERATIONS REACHED in run {self.run_idx+1} ~~~~~~"
+                    )
 
     def ari_score(self, true_Z, pred_Z=None):
         if self.use_numba:
