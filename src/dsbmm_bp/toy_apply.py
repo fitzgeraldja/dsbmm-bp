@@ -267,6 +267,7 @@ if __name__ == "__main__":
                 ## Initialise model
                 true_Z = sample.pop("Z")
                 sample["X"] = [sample["X"]["categorical"]]
+                print(sample["X"][0].shape)
                 ## Initialise
 
                 model = em.EM(
