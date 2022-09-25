@@ -436,7 +436,7 @@ class EM:
         self.poor_iter_ctr = 0  # ctr for iters without reduction in free energy
         for n_iter in tqdm(range(self.max_iter), desc="EM iter"):
             if self.verbose:
-                print(f"\n##### At iteration {n_iter+1} #####")
+                tqdm.write(f"\n##### At iteration {n_iter+1} #####")
                 self.xdata.append(n_iter)
             for msg_iter in tqdm(
                 range(self.max_msg_iter), desc="Message iter", leave=False
@@ -446,16 +446,16 @@ class EM:
                         # Use fewer max msg updates for first few EM steps, where params usually inaccurate
                         break
                 if self.verbose:
-                    print(f"Message update iter {msg_iter + 1}...")
+                    tqdm.write(f"Message update iter {msg_iter + 1}...")
                 self.bp.update_node_marg()  # dumping rate?
                 if self.verbose:
-                    print("\tUpdated node marginals, messages and external fields")
+                    tqdm.write("\tUpdated node marginals, messages and external fields")
                 if self.use_numba:
                     msg_diff = self.bp.jit_model.msg_diff
                 else:
                     msg_diff = self.bp.msg_diff
                 if self.verbose:
-                    print(f"\tmsg differences: {msg_diff:.4g}")
+                    tqdm.write(f"\tmsg differences: {msg_diff:.4g}")
                 if msg_diff < msg_conv_tol:
                     break
                 self.bp.zero_diff()
@@ -466,7 +466,7 @@ class EM:
             if self.max_iter > 1:
                 self.bp.update_twopoint_marginals()  # dumping rate?
                 if self.verbose:
-                    print("Initialised corresponding twopoint marginals")
+                    tqdm.write("Initialised corresponding twopoint marginals")
                 if self.use_numba:
                     self.bp.model.set_twopoint_edge_marg(
                         self.bp.jit_model.twopoint_e_marg
@@ -478,16 +478,16 @@ class EM:
                     self.bp.model.set_twopoint_edge_marg(self.bp.twopoint_e_marg)
                     self.bp.model.set_twopoint_time_marg(self.bp.twopoint_t_marg)
                 if self.verbose:
-                    print("\tPassed marginals to DSBMM")
+                    tqdm.write("\tPassed marginals to DSBMM")
                 self.bp.model.update_params(init=False, learning_rate=learning_rate)
                 if self.verbose:
-                    print("\tUpdated DSBMM params given marginals")
+                    tqdm.write("\tUpdated DSBMM params given marginals")
                 if self.use_numba:
                     diff = self.bp.model.jit_model.diff
                 else:
                     diff = self.bp.model.diff
                 if self.verbose:
-                    print(f"Successfully completed update! Diff = {diff:.4f}")
+                    tqdm.write(f"Successfully completed update! Diff = {diff:.4f}")
                 self.bp.model.zero_diff()
             else:
                 diff = 1.0
@@ -518,7 +518,7 @@ class EM:
                 else:
                     self.poor_iter_ctr += 1
                     if self.poor_iter_ctr >= self.patience:
-                        print(
+                        tqdm.write(
                             f"~~~~~~ OUT OF PATIENCE, STOPPING EARLY in run {self.run_idx+1} ~~~~~~"
                         )
                         break
@@ -539,11 +539,11 @@ class EM:
                     self.update_score_plot()
                     print()
             if diff < conv_tol or (msg_diff < msg_conv_tol and self.max_iter == 1):
-                print(f"~~~~~~ CONVERGED in run {self.run_idx+1} ~~~~~~")
+                tqdm.write(f"~~~~~~ CONVERGED in run {self.run_idx+1} ~~~~~~")
                 break
             else:
                 if n_iter == self.max_iter - 1:
-                    print(
+                    tqdm.write(
                         f"~~~~~~ MAX ITERATIONS REACHED in run {self.run_idx+1} ~~~~~~"
                     )
 
