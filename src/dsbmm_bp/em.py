@@ -370,7 +370,8 @@ class EM:
 
         self.all_best_Zs = np.empty((len(self.trial_Qs), self.N, self.T))
         self.best_tun_pars = np.ones_like(self.trial_Qs)
-        for current_Q in self.trial_Qs:
+        for q_idx, current_Q in enumerate(self.trial_Qs):
+            self.q_idx = q_idx
             self.best_val_q = 0.0
             print("\tCurrent Q:", current_Q)
             print()
@@ -507,12 +508,8 @@ class EM:
                     self.poor_iter_ctr = 0
                     self.best_val_q = current_energy
                     self.bp.model.set_Z_by_MAP()
-                    self.all_best_Zs[
-                        np.flatnonzero(self.trial_Qs == self.Q)[0], :, :
-                    ] = self.bp.model.Z
-                    self.best_tun_pars[
-                        np.flatnonzero(self.trial_Qs == self.Q)[0]
-                    ] = self.dsbmm.tuning_param
+                    self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z
+                    self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
                     if self.best_val_q < self.best_val:
                         self.best_val = self.best_val_q
                         self.best_Z = self.bp.model.Z
