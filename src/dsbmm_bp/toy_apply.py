@@ -76,6 +76,17 @@ parser.add_argument(
     help="Check connectivity of samples for each test prior to application.",
 )
 
+parser.add_argument(
+    "--name_ext", default="", type=str, help="Extension to add to file names"
+)
+
+parser.add_argument(
+    "--params_path",
+    default=None,
+    type=str,
+    help="Path to set of parameters to test. Default is None (use default params).",
+)
+
 args = parser.parse_args()
 
 if args.n_threads is not None:
@@ -122,9 +133,17 @@ if __name__ == "__main__":
     Q = 2
     c = 10
     n_samps = 20
-    eps_grid = np.linspace(0.3, 0.6, 10)
-    eta_grid = np.linspace(0.4, 0.8, 10)
-    rho_grid = np.linspace(0.6, 1.0, 10)
+    if args.params_path is None:
+        eps_grid = np.linspace(0.3, 0.6, 10)
+        eta_grid = np.linspace(0.4, 0.8, 10)
+        rho_grid = np.linspace(0.6, 1.0, 10)
+        mesh_grid = None
+    else:
+        with open(args.params_path, "rb") as f:
+            mesh_grid = pickle.load(f)
+        eps_grid = None
+        eta_grid = None
+        rho_grid = None
 
     def get_p_in(eps):
         return Q * c / N * (1 + (Q - 1) * eps)
@@ -138,9 +157,9 @@ if __name__ == "__main__":
     results_dir.mkdir(exist_ok=True)
 
     try:
-        with open(data_path / "toy_samples.pkl", "rb") as f:
+        with open(data_path / f"toy_samples{args.name_ext}.pkl", "rb") as f:
             all_samples = pickle.load(f)
-        with open(data_path / "toy_param_grid.pkl", "rb") as f:
+        with open(data_path / f"toy_param_grid{args.name_ext}.pkl", "rb") as f:
             param_grid = pickle.load(f)
     except FileNotFoundError:
         print("Existing samples not found, generating data...")
@@ -153,10 +172,11 @@ if __name__ == "__main__":
             eps_grid=eps_grid,
             eta_grid=eta_grid,
             rho_grid=rho_grid,
+            mesh_grid=mesh_grid,
         )
-        with open(data_path / "toy_samples.pkl", "wb") as f:  # type: ignore
+        with open(data_path / f"toy_samples{args.name_ext}.pkl", "wb") as f:  # type: ignore
             pickle.dump(all_samples, f)
-        with open(data_path / "toy_param_grid.pkl", "wb") as f:  # type: ignore
+        with open(data_path / f"toy_param_grid{args.name_ext}.pkl", "wb") as f:  # type: ignore
             pickle.dump(param_grid, f)
 
     if args.check_conn:
@@ -373,22 +393,26 @@ if __name__ == "__main__":
                 )
 
                 with open(  # type: ignore
-                    results_dir / f"{testset_name}_test_aris{tp_str}.pkl",
+                    results_dir
+                    / f"{testset_name}_test_aris{tp_str}{args.name_ext}.pkl",
                     "wb",
                 ) as f:
                     pickle.dump(test_aris, f)
                 with open(  # type: ignore
-                    results_dir / f"{testset_name}_max_en_aris{tp_str}.pkl",
+                    results_dir
+                    / f"{testset_name}_max_en_aris{tp_str}{args.name_ext}.pkl",
                     "wb",
                 ) as f:
                     pickle.dump(max_en_aris, f)
                 with open(  # type: ignore
-                    results_dir / f"{testset_name}_test_times{tp_str}.pkl",
+                    results_dir
+                    / f"{testset_name}_test_times{tp_str}{args.name_ext}.pkl",
                     "wb",
                 ) as f:
                     pickle.dump(test_times, f)
                 with open(  # type: ignore
-                    results_dir / f"{testset_name}_init_times{tp_str}.pkl",
+                    results_dir
+                    / f"{testset_name}_init_times{tp_str}{args.name_ext}.pkl",
                     "wb",
                 ) as f:
                     pickle.dump(init_times, f)

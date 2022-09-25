@@ -786,6 +786,7 @@ def toy_tests(
     eps_grid=np.linspace(0.3, 0.6, 10),
     eta_grid=np.linspace(0.4, 0.8, 10),
     rho_grid=np.linspace(0.6, 1.0, 10),
+    mesh_grid=None,
 ):
     """Generate test nets for a range of params - for Dyn Det paper, they generate heat maps showing overlap
     where each point shows the average over 100 instances of dynamic networks drawn from our model with
@@ -833,7 +834,12 @@ def toy_tests(
     # p_outs=eps_grid*p_in
     # p_stays = eta_grid
     # rho_ins = rho_grid
-    param_grid = np.array(np.meshgrid(eps_grid, eta_grid, rho_grid)).T.reshape(-1, 3)
+    if mesh_grid is None:
+        param_grid = np.array(np.meshgrid(eps_grid, eta_grid, rho_grid)).T.reshape(
+            -1, 3
+        )
+    else:
+        param_grid = mesh_grid
     samps = [
         [
             toy_model(
