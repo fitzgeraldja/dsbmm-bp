@@ -95,8 +95,8 @@ parser.add_argument(
 parser.add_argument(
     "--max_msg_iter",
     type=int,
-    default=10,
-    help="Maximum number of message updates to run each EM iteration. Default is 10. Early iterations will use //3 of this value.",
+    default=100,
+    help="Maximum number of message updates to run each EM iteration. Default is 100. Early iterations will use //3 of this value.",
 )
 
 parser.add_argument(
@@ -159,6 +159,12 @@ parser.add_argument(
     type=str,
     default=None,
     help="Name of edge attribute to use as weight when constructing adjacency matrices, defaults to None (binary edges). Only important in DC model.",
+)
+
+parser.add_argument(
+    "--alpha_use_first",
+    action="store_true",
+    help="Use only first and previously missing node marginals to update alpha, rather than all marginals.",
 )
 
 args = parser.parse_args()
@@ -570,6 +576,7 @@ if __name__ == "__main__":
                             tuning_param=args.tuning_param
                             if args.tuning_param is not None
                             else 1.0,
+                            alpha_use_all=not args.alpha_use_first,
                         )
                     elif testset_name == "align":
                         tqdm.write(f"alignment = {params['meta_aligned']}")
@@ -582,6 +589,7 @@ if __name__ == "__main__":
                             max_iter=args.max_iter,
                             max_msg_iter=args.max_msg_iter,
                             use_numba=args.use_numba,
+                            alpha_use_all=not args.alpha_use_first,
                         )
                     else:
                         # scaling tests
@@ -599,6 +607,7 @@ if __name__ == "__main__":
                             tuning_param=args.tuning_param
                             if args.tuning_param is not None
                             else 1.0,
+                            alpha_use_all=not args.alpha_use_first,
                         )
                     if samp_no > 0:
                         init_times[test_no, samp_no - 1] = time.time() - start_time
@@ -821,6 +830,7 @@ if __name__ == "__main__":
             use_meta=not args.ignore_meta,
             use_numba=args.use_numba,
             trial_Qs=trial_Qs,
+            alpha_use_all=not args.alpha_use_first,
         )
         ## Fit to given data
         model.fit(learning_rate=args.learning_rate)

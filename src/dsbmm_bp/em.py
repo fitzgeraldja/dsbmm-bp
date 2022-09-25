@@ -53,6 +53,7 @@ class EM:
         max_iter=30,
         max_msg_iter=10,
         trial_Qs=None,
+        alpha_use_all=True,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
@@ -63,6 +64,7 @@ class EM:
         self.max_iter = max_iter
         self.max_msg_iter = max_msg_iter
         self.init_Z_mode = init_Z_mode
+        self.alpha_use_all = alpha_use_all
         self.A = data["A"]
         if type(tuning_param) == float:
             self.tuning_params = [tuning_param]
@@ -319,6 +321,7 @@ class EM:
                 meta_types=self.meta_types,
                 tuning_param=tuning_param,
                 verbose=self.verbose,
+                alpha_use_all=self.alpha_use_all,
             )
             if self.verbose:
                 print(f"Successfully {retext}instantiated BP system...")
@@ -525,6 +528,7 @@ class EM:
                         tqdm.write(
                             f"~~~~~~ OUT OF PATIENCE, STOPPING EARLY in run {self.run_idx+1} ~~~~~~"
                         )
+                        self.poor_iter_ctr = 0
                         break
                 if current_energy > self.max_energy:
                     self.max_energy = current_energy
