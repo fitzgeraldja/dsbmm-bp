@@ -373,8 +373,8 @@ class EM:
         for q_idx, current_Q in enumerate(self.trial_Qs):
             self.q_idx = q_idx
             self.best_val_q = 0.0
-            print("\tCurrent Q:", current_Q)
-            print()
+            tqdm.write(f"\tCurrent Q: {current_Q}")
+            tqdm.write("")
             if current_Q != self.Q:
                 self.initialise_partition(current_Q, init_Z_mode=self.init_Z_mode)
                 self.reinit(tuning_param=self.tuning_params[0])
