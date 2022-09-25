@@ -28,8 +28,8 @@ parser.add_argument(
 parser.add_argument(
     "--max_msg_iter",
     type=int,
-    default=200,
-    help="Maximum number of message updates to run. Default is 200.",
+    default=300,
+    help="Maximum number of message updates to run. Default is 300.",
 )
 
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
@@ -68,6 +68,12 @@ parser.add_argument(
     "--ignore_meta",
     action="store_true",
     help="Ignore metadata, use only network edges for fitting model",
+)
+
+parser.add_argument(
+    "--check_conn",
+    action="store_true",
+    help="Check connectivity of samples for each test prior to application.",
 )
 
 args = parser.parse_args()
@@ -153,55 +159,56 @@ if __name__ == "__main__":
         with open(data_path / "toy_param_grid.pkl", "wb") as f:  # type: ignore
             pickle.dump(param_grid, f)
 
-    print("Checking connectivity of test samples...")
-    for testno, samples in enumerate(tqdm(all_samples)):
-        # print(samples)
-        try:
-            if not np.all(
-                [
-                    utils.is_connected_dense(sample["A"][:, :, t])
-                    for sample in samples
-                    for t in range(sample["A"].shape[-1])
-                ]
-            ):
-                warnings.warn(
-                    f"Some matrices not connected in test set for test no. {testno}"
-                )
-        except Exception:
-            # assert np.all(
-            #     samples[0]["A"][0].todense() == samples[0]["A"][0].T.todense()
-            # )
-            if not np.all(
-                [
-                    utils.is_connected_sparse(csr.CSR.from_scipy(sample["A"][t]))
-                    for sample in samples
-                    for t in range(len(sample["A"]))
-                ]
-            ):
-                warnings.warn(
-                    f"Some matrices not connected in test set for test no. {testno}"
-                )
-                # print(f"Components for {samples[0].get('A')[0].shape[0]} nodes:")
-                # print(
-                #     *[
-                #         [
-                #             list(
-                #                 map(
-                #                     len,
-                #                     list(
-                #                         utils.connected_components_sparse(
-                #                             csr.CSR.from_scipy(sample["A"][t])
-                #                         )
-                #                     ),
-                #                 )
-                #             )
-                #             for t in range(len(sample["A"]))
-                #         ]
-                #         for sample in samples
-                #     ],
-                #     sep="\n",
+    if args.check_conn:
+        print("Checking connectivity of test samples...")
+        for testno, samples in enumerate(tqdm(all_samples)):
+            # print(samples)
+            try:
+                if not np.all(
+                    [
+                        utils.is_connected_dense(sample["A"][:, :, t])
+                        for sample in samples
+                        for t in range(sample["A"].shape[-1])
+                    ]
+                ):
+                    warnings.warn(
+                        f"Some matrices not connected in test set for test no. {testno}"
+                    )
+            except Exception:
+                # assert np.all(
+                #     samples[0]["A"][0].todense() == samples[0]["A"][0].T.todense()
                 # )
-                # raise Exception("Stop here for now")
+                if not np.all(
+                    [
+                        utils.is_connected_sparse(csr.CSR.from_scipy(sample["A"][t]))
+                        for sample in samples
+                        for t in range(len(sample["A"]))
+                    ]
+                ):
+                    warnings.warn(
+                        f"Some matrices not connected in test set for test no. {testno}"
+                    )
+                    # print(f"Components for {samples[0].get('A')[0].shape[0]} nodes:")
+                    # print(
+                    #     *[
+                    #         [
+                    #             list(
+                    #                 map(
+                    #                     len,
+                    #                     list(
+                    #                         utils.connected_components_sparse(
+                    #                             csr.CSR.from_scipy(sample["A"][t])
+                    #                         )
+                    #                     ),
+                    #                 )
+                    #             )
+                    #             for t in range(len(sample["A"]))
+                    #         ]
+                    #         for sample in samples
+                    #     ],
+                    #     sep="\n",
+                    # )
+                    # raise Exception("Stop here for now")
 
     print("Successfully loaded data, now initialising model...")
 
@@ -265,7 +272,7 @@ if __name__ == "__main__":
                     sample,
                     verbose=verbose,
                     n_runs=args.n_runs,
-                    max_iter=args.max_iter,
+                    max_iter=1,
                     max_msg_iter=args.max_msg_iter,
                     use_numba=args.use_numba,
                     tuning_param=args.tuning_param
