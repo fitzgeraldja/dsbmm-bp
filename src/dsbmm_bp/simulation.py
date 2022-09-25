@@ -7,6 +7,7 @@ from scipy import sparse
 from scipy.stats import bernoulli, nbinom, norm, poisson
 from sklearn.metrics import adjusted_rand_score as ari
 from sklearn.metrics import normalized_mutual_info_score as nmi
+from tqdm import tqdm
 
 # from scipy import sparse
 
@@ -846,7 +847,7 @@ def toy_tests(
             )
             for _ in range(n_samps)
         ]
-        for eps, eta, rho in param_grid
+        for eps, eta, rho in tqdm(param_grid)
     ]
     return samps, param_grid
 
