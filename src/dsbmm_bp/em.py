@@ -525,6 +525,7 @@ class EM:
                         tqdm.write(
                             f"~~~~~~ OUT OF PATIENCE, STOPPING EARLY in run {self.run_idx+1} ~~~~~~"
                         )
+                        self.poor_iter_ctr = 0
                         break
                 if current_energy > self.max_energy:
                     self.max_energy = current_energy
