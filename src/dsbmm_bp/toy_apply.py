@@ -287,10 +287,7 @@ if __name__ == "__main__":
                     model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
                 else:
                     tqdm.write(
-                        np.round_(
-                            model.ari_score(true_Z, pred_Z=model.k_means_init_Z),
-                            3,
-                        )
+                        f"{np.round_(model.ari_score(true_Z, pred_Z=model.k_means_init_Z),3)}"
                     )
 
                 tqdm.write("Freezing params...")
@@ -321,69 +318,45 @@ if __name__ == "__main__":
                 tqdm.write("BP Z ARI:")
                 test_aris[test_no, samp_no, :] = model.ari_score(true_Z)  # type: ignore
                 if not verbose:
-                    tqdm.write(np.round_(test_aris[test_no, samp_no, :], 3))  # type: ignore
+                    tqdm.write(f"{np.round_(test_aris[test_no, samp_no, :], 3)}")  # type: ignore
                 tqdm.write("BP max energy Z ARI:")
                 max_en_aris[test_no, samp_no, :] = model.ari_score(true_Z, pred_Z=model.max_energy_Z)  # type: ignore
                 if not verbose:
-                    tqdm.write(np.round_(max_en_aris[test_no, samp_no, :], 3))  # type: ignore
+                    tqdm.write(f"{np.round_(max_en_aris[test_no, samp_no, :], 3)}")  # type: ignore
                 tqdm.write("Init Z ARI:")
                 if verbose:
                     model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
                 else:
                     tqdm.write(
-                        np.round_(
-                            model.ari_score(true_Z, pred_Z=model.k_means_init_Z),
-                            3,
-                        )
+                        f"{np.round_(model.ari_score(true_Z, pred_Z=model.k_means_init_Z),3)}"
                     )
 
                 # print("Z inferred:", model.bp.model.jit_model.Z)
                 if verbose:
                     ## Show transition matrix inferred
-                    tqdm.write("Pi inferred:", model.bp.trans_prob)
-                    try:
-                        tqdm.write("Versus true pi:", params["trans_mat"])
-                    except Exception:  # KeyError:
-                        tqdm.write(
-                            "Versus true pi:",
-                            simulation.gen_trans_mat(sample["p_stay"], sample["Q"]),
-                        )
-                    tqdm.write("True effective pi:", utils.effective_pi(true_Z))
+                    tqdm.write(f"Pi inferred: {model.bp.trans_prob}")
+                    tqdm.write(f"Versus true pi: {true_params['pi']}")
+
+                    tqdm.write(f"True effective pi: {utils.effective_pi(true_Z)}")
                     if args.use_numba:
                         tqdm.write(
-                            "Effective pi from partition inferred:",
-                            utils.effective_pi(model.bp.model.jit_model.Z),
+                            f"Effective pi from partition inferred: {utils.effective_pi(model.bp.model.jit_model.Z)}"
                         )
                         tqdm.write(
-                            "True effective beta:",
-                            utils.effective_beta(
-                                model.bp.model.jit_model.A, true_Z
-                            ).transpose(2, 0, 1),
+                            f"True effective beta: {utils.effective_beta(model.bp.model.jit_model.A, true_Z).transpose(2, 0, 1)}"
                         )
                         tqdm.write(
-                            "Pred effective beta:",
-                            utils.effective_beta(
-                                model.bp.model.jit_model.A,
-                                model.bp.model.jit_model.Z,
-                            ).transpose(2, 0, 1),
+                            f"Pred effective beta: {utils.effective_beta(model.bp.model.jit_model.A,model.bp.model.jit_model.Z).transpose(2, 0, 1)}"
                         )
                     else:
                         tqdm.write(
-                            "Effective pi from partition inferred:",
-                            utils.effective_pi(model.bp.model.Z),
+                            f"Effective pi from partition inferred: {utils.effective_pi(model.bp.model.Z)}"
                         )
                         tqdm.write(
-                            "True effective beta:",
-                            utils.effective_beta(model.bp.model.A, true_Z).transpose(
-                                2, 0, 1
-                            ),
+                            f"True effective beta: {utils.effective_beta(model.bp.model.A, true_Z).transpose(2, 0, 1)}"
                         )
                         tqdm.write(
-                            "Pred effective beta:",
-                            utils.effective_beta(
-                                model.bp.model.A,
-                                model.bp.model.Z,
-                            ).transpose(2, 0, 1),
+                            f"Pred effective beta: {utils.effective_beta(model.bp.model.A,model.bp.model.Z).transpose(2, 0, 1)}"
                         )
                 if samp_no > 0:
                     test_times[test_no, samp_no - 1] = time.time() - start_time
@@ -419,7 +392,7 @@ if __name__ == "__main__":
                     pickle.dump(init_times, f)
 
         tqdm.write(f"Finished test {test_no+1} for true params:")
-        tqdm.write(params)
+        tqdm.write(f"{params}")
         tqdm.write(f"Mean ARIs: {test_aris[test_no].mean(axis=0)}")
         tqdm.write(f"Mean max energy ARIs: {max_en_aris[test_no].mean(axis=0)}")
         # logging_params = {
