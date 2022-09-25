@@ -719,9 +719,7 @@ class NumpyDSBMM:
                     [
                         [
                             np.nansum(self.X[s][self.Z[:, t] == q, t, 0])
-                            if not np.isnan(
-                                np.nansum(self.X[s][self.Z[:, t] == q, t, 0])
-                            )
+                            if not np.all(self.X[s][self.Z[:, t] == q, t, 0].mask)
                             else 0.0  # handle case of init group containing only missing nodes at t
                         ]
                         for t in range(self.T)
@@ -777,6 +775,8 @@ class NumpyDSBMM:
                 [
                     [
                         self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                        if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
+                        else np.zeros(L)
                         for t in range(self.T)
                     ]
                     for q in range(self.Q)
@@ -817,6 +817,8 @@ class NumpyDSBMM:
                 [
                     [
                         self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                        if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
+                        else np.zeros(L)
                         for t in range(self.T)
                     ]
                     for q in range(self.Q)
