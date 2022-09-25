@@ -719,7 +719,7 @@ class NumpyDSBMM:
                     [
                         [
                             np.nansum(self.X[s][self.Z[:, t] == q, t, 0])
-                            if not np.isna(
+                            if not np.isnan(
                                 np.nansum(self.X[s][self.Z[:, t] == q, t, 0])
                             )
                             else 0.0  # handle case of init group containing only missing nodes at t
