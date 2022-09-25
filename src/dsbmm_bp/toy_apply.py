@@ -234,7 +234,7 @@ if __name__ == "__main__":
     for test_no, (samples, params) in enumerate(zip(tqdm(all_samples), param_grid)):
         eps, eta, rho = params
         tqdm.write("")
-        tqdm.write("*" * 15, f"Test {test_no+1}", "*" * 15)
+        tqdm.write(f"{'*' * 15} Test {test_no+1} {'*' * 15}")
         # Create nested runs for each test + sample
         # if log_runs:
         #     experiment_id = experiment.experiment_id
@@ -258,7 +258,7 @@ if __name__ == "__main__":
                 if verbose:
                     tqdm.write("true eps, eta, rho:", params)
                 tqdm.write("")
-                tqdm.write("$" * 12, "At sample", samp_no + 1, "$" * 12)
+                tqdm.write(f"{'$' * 12} At sample {samp_no + 1} {'$' * 12}")
                 sample.update({"Q": Q, "meta_types": ["categorical"]})
                 # present = calc_present(sample["A"])
                 # trans_present = calc_trans_present(present)
