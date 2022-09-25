@@ -458,12 +458,15 @@ class EM:
                 if msg_diff < msg_conv_tol:
                     break
                 self.bp.zero_diff()
+            if self.use_numba:
+                self.bp.model.set_node_marg(self.bp.jit_model.node_marg)
+            else:
+                self.bp.model.set_node_marg(self.bp.node_marg)
             if self.max_iter > 1:
                 self.bp.update_twopoint_marginals()  # dumping rate?
                 if self.verbose:
                     print("Initialised corresponding twopoint marginals")
                 if self.use_numba:
-                    self.bp.model.set_node_marg(self.bp.jit_model.node_marg)
                     self.bp.model.set_twopoint_edge_marg(
                         self.bp.jit_model.twopoint_e_marg
                     )
@@ -471,7 +474,6 @@ class EM:
                         self.bp.jit_model.twopoint_t_marg
                     )
                 else:
-                    self.bp.model.set_node_marg(self.bp.node_marg)
                     self.bp.model.set_twopoint_edge_marg(self.bp.twopoint_e_marg)
                     self.bp.model.set_twopoint_time_marg(self.bp.twopoint_t_marg)
                 if self.verbose:
@@ -485,8 +487,9 @@ class EM:
                     diff = self.bp.model.diff
                 if self.verbose:
                     print(f"Successfully completed update! Diff = {diff:.4f}")
-
                 self.bp.model.zero_diff()
+            else:
+                diff = 1.0
             if self.true_Z is None:
                 current_energy = self.bp.compute_free_energy()
                 if self.best_val_q == 0.0:
