@@ -744,9 +744,9 @@ class NumpyBP:
             if np.isnan(self.node_marg).sum() > 0:
                 print("nans for node marg @ (i,t):")
                 print(*np.array(np.nonzero(np.isnan(self.node_marg))), sep="\n")
-            if np.isnan(self._psi_e).sum() > 0:
-                print("nans for psi_e @ (i,t):")
-                print(*np.array(np.nonzero(np.isnan(self._psi_e))), sep="\n")
+            if np.isnan(self._psi_e.data).sum() > 0:
+                print("nans for psi_e")
+                # print(*np.array(np.nonzero(np.isnan(self._psi_e))), sep="\n")
             if np.isnan(self._psi_t).sum() > 0:
                 print("nans for psi_t @ (i,t):")
                 print(*np.array(np.nonzero(np.isnan(self._psi_t))), sep="\n")

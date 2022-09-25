@@ -716,7 +716,10 @@ class NumpyDSBMM:
             )
             zeta = np.array(
                 [
-                    [[self.X[s][self.Z[:, t] == q, t, 0].sum()] for t in range(self.T)]
+                    [
+                        [np.nansum(self.X[s][self.Z[:, t] == q, t, 0])]
+                        for t in range(self.T)
+                    ]
                     for q in range(self.Q)
                 ]
             )
