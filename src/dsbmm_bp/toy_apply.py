@@ -260,14 +260,10 @@ if __name__ == "__main__":
                 tqdm.write("")
                 tqdm.write(f"{'$' * 12} At sample {samp_no + 1} {'$' * 12}")
                 sample.update({"Q": Q, "meta_types": ["categorical"]})
-                # present = calc_present(sample["A"])
-                # trans_present = calc_trans_present(present)
-                # print(present)
-                # print(trans_present)+
-                ## Initialise model
+
                 true_Z = sample.pop("Z")
-                sample["X"] = [sample["X"]["categorical"]]
-                print(sample["X"][0].shape)
+                sample["X"] = [sample["X"]["categorical"].transpose(1, 2, 0)]
+
                 ## Initialise
 
                 model = em.EM(
