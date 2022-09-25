@@ -427,7 +427,7 @@ class EM:
                     self.bp.model.set_Z_by_MAP()
             # now reinit with best part found from these runs
             if self.best_Z is None:
-                self.best_Z = self.bp.model.Z
+                self.best_Z = self.bp.model.Z.copy()
             try:
                 self.reinit(tuning_param=self.best_tun_param, set_Z=self.best_Z)
             except Exception:  # AttributeError:
@@ -504,19 +504,19 @@ class EM:
                     self.best_val = current_energy
                     self.poor_iter_ctr = 0
                     self.bp.model.set_Z_by_MAP()
-                    self.best_Z = self.bp.model.Z
+                    self.best_Z = self.bp.model.Z.copy()
                     self.best_tun_param = self.dsbmm.tuning_param
-                    self.max_energy_Z = self.bp.model.Z
+                    self.max_energy_Z = self.bp.model.Z.copy()
                 elif current_energy < self.best_val_q:
                     # new best for q
                     self.poor_iter_ctr = 0
                     self.best_val_q = current_energy
                     self.bp.model.set_Z_by_MAP()
-                    self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z
+                    self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
                     self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
                     if self.best_val_q < self.best_val:
                         self.best_val = self.best_val_q
-                        self.best_Z = self.bp.model.Z
+                        self.best_Z = self.bp.model.Z.copy()
                         self.best_tun_param = self.dsbmm.tuning_param
 
                 else:
@@ -534,7 +534,7 @@ class EM:
                 current_score = self.ari_score(self.true_Z)
                 if current_score.mean() >= self.best_val:
                     self.best_val = current_score.mean()
-                    self.best_Z = self.bp.model.Z
+                    self.best_Z = self.bp.model.Z.copy()
             if self.verbose:
                 self.bp.model.set_Z_by_MAP()
                 if self.true_Z is not None:
