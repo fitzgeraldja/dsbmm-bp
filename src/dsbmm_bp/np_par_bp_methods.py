@@ -1,6 +1,7 @@
 # numpy reimplementation of all methods for BP class that reasonably stand to gain from doing so
 import numpy as np
 import yaml  # type: ignore
+from numba import njit
 from scipy import sparse
 
 from dsbmm_bp.np_par_dsbmm_methods import NumpyDSBMM
@@ -146,27 +147,33 @@ class NumpyBP:
             # and corresponding values are stored in
             # data[indptr[i]:indptr[i+1]]
             tmp_indptr = tmp.indptr
-            for i in Z_idxs:
-                tmp.data[tmp_indptr[i] : tmp_indptr[i + 1]] *= p
+
+            @njit
+            def update_data_locs(tmp_data, tmp_indptr, locs, p):
+                for i in locs:
+                    tmp_data[tmp_indptr[i] : tmp_indptr[i + 1]] *= p
+                return tmp_data
+
+            tmp.data = update_data_locs(tmp.data, tmp_indptr, Z_idxs, p)
             other_idxs = np.arange(self.N * self.T * self.Q)
             other_idxs = np.setdiff1d(other_idxs, Z_idxs)
-            for i in other_idxs:
-                tmp.data[tmp_indptr[i] : tmp_indptr[i + 1]] = 0
+            tmp.data = update_data_locs(tmp.data, tmp_indptr, other_idxs, 0)
+
             self._psi_e.data = np.random.rand(len(self._psi_e.data))
 
+            if self.verbose and self.N > 1000:
+                print("Calculating init message sums to normalise...")
             sums = sparse.vstack(
                 [
-                    sparse.csr_matrix(
-                        self._psi_e[
-                            np.arange(self.N * self.T * self.Q)
-                            .reshape(self.T, self.Q, self.N)[t]
-                            .T.flatten(),
-                            :,
-                        ]
-                        .T.reshape(self.N * self.N, self.Q)
-                        .sum(axis=-1)
-                        .reshape(self.N, self.N)
-                    )
+                    self._psi_e[
+                        np.arange(self.N * self.T * self.Q)
+                        .reshape(self.T, self.Q, self.N)[t]
+                        .T.flatten(),
+                        :,
+                    ]
+                    .T.reshape(self.N * self.N, self.Q)
+                    .sum(axis=-1)
+                    .reshape(self.N, self.N)
                     for t in range(self.T)
                     for _ in range(self.Q)
                 ]
