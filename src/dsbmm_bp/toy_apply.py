@@ -295,7 +295,9 @@ if __name__ == "__main__":
                 p_in = get_p_in(eps)
                 p_out = get_p_out(eps)
 
-                beta = simulation.gen_beta_mat(Q, p_in, p_out)
+                beta = np.tile(
+                    simulation.gen_beta_mat(Q, p_in, p_out)[:, :, np.newaxis], (1, 1, T)
+                )
                 pi = simulation.gen_trans_mat(eta, Q)
 
                 meta_params = [
