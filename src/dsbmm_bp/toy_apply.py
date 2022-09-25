@@ -265,7 +265,6 @@ if __name__ == "__main__":
                     sample,
                     verbose=verbose,
                     n_runs=args.n_runs,
-                    patience=args.patience,
                     max_iter=args.max_iter,
                     max_msg_iter=args.max_msg_iter,
                     use_numba=args.use_numba,
