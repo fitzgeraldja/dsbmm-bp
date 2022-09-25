@@ -3,6 +3,7 @@ import pickle
 
 import numpy as np
 from numba import njit
+from scipy import sparse
 from scipy.stats import bernoulli, nbinom, norm, poisson
 from sklearn.metrics import adjusted_rand_score as ari
 from sklearn.metrics import normalized_mutual_info_score as nmi
@@ -760,7 +761,7 @@ def toy_model(
     """
     Z_1 = np.random.randint(0, high=Q, size=N)
     meta_params = np.tile(np.expand_dims(gen_trans_mat(rho_in, Q), 2), (1, 1, T))
-    return sample_dynsbm_meta(
+    data = sample_dynsbm_meta(
         Z_1,
         Q=Q,
         T=T,
@@ -771,18 +772,51 @@ def toy_model(
         meta_dims=[Q],
         meta_params=[meta_params],
     )
+    data["A"] = [sparse.csr_matrix(a) for a in data["A"]]
+    return data
 
 
 def toy_tests(
-    N=100,
-    T=5,
+    N=200,
+    T=10,
     Q=2,
     c=10,
-    n_samps=10,
+    n_samps=20,
     eps_grid=np.linspace(0.3, 0.6, 10),
     eta_grid=np.linspace(0.4, 0.8, 10),
     rho_grid=np.linspace(0.6, 1.0, 10),
 ):
+    """Generate test nets for a range of params - for Dyn Det paper, they generate heat maps showing overlap
+    where each point shows the average over 100 instances of dynamic networks drawn from our model with
+    N = 512, T = 40, Q = 2 groups, and average degree c = 16 (so N = Q*c^2, giving p_in and p_out slightly nicer eqns).
+
+    For sake of brevity we reduce the size of nets tested to N = 200, T = 10, c = 10, keeping Q = 2, and will only average a
+    much coarser grid over 20 samples at each point. Otherwise we only introduce categorical metadata that provides the true label
+    with some probability rho, else chooses a random incorrect label. The goal is to see how the plots differ from those of Fig 3 in
+    the Dyn Det paper with respect to rho, and if high values of rho allow detection of groups given true parameters beyond the previous
+    limit.
+
+    As metadata is assumed to be aligned in the toy model, leaving the tuning parameter at 1 should be sufficient for testing the model.
+
+    :param N: _description_, defaults to 200
+    :type N: int, optional
+    :param T: _description_, defaults to 10
+    :type T: int, optional
+    :param Q: _description_, defaults to 2
+    :type Q: int, optional
+    :param c: _description_, defaults to 10
+    :type c: int, optional
+    :param n_samps: _description_, defaults to 20
+    :type n_samps: int, optional
+    :param eps_grid: _description_, defaults to np.linspace(0.3, 0.6, 10)
+    :type eps_grid: _type_, optional
+    :param eta_grid: _description_, defaults to np.linspace(0.4, 0.8, 10)
+    :type eta_grid: _type_, optional
+    :param rho_grid: _description_, defaults to np.linspace(0.6, 1.0, 10)
+    :type rho_grid: _type_, optional
+    :return: _description_
+    :rtype: _type_
+    """
     # c = (c_in + (Q-1)*c_out)/Q
     # so c_in = Q*c - (Q-1)*c_out
     # eps = c_out/c_in => c_out = eps*c_in
@@ -796,8 +830,8 @@ def toy_tests(
         return eps * Q * c / N * (1 + (Q - 1) * eps)
 
     # p_outs=eps_grid*p_in
-    p_stays = eta_grid
-    rho_ins = rho_grid
+    # p_stays = eta_grid
+    # rho_ins = rho_grid
     param_grid = np.array(np.meshgrid(eps_grid, eta_grid, rho_grid)).T.reshape(-1, 3)
     samps = [
         [
