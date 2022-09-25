@@ -2,6 +2,7 @@ import argparse
 import os
 import pickle
 import time
+import warnings
 from pathlib import Path
 
 import csr
@@ -152,7 +153,8 @@ if __name__ == "__main__":
         with open(data_path / "toy_param_grid.pkl", "wb") as f:  # type: ignore
             pickle.dump(param_grid, f)
 
-    for testno, samples in enumerate(all_samples):
+    print("Checking connectivity of test samples...")
+    for testno, samples in enumerate(tqdm(all_samples)):
         # print(samples)
         try:
             if not np.all(
@@ -162,9 +164,8 @@ if __name__ == "__main__":
                     for t in range(sample["A"].shape[-1])
                 ]
             ):
-                print(
-                    "WARNING: some matrices not connected in test set for test no. ",
-                    testno,
+                warnings.warn(
+                    f"Some matrices not connected in test set for test no. {testno}"
                 )
         except Exception:
             # assert np.all(
@@ -177,9 +178,8 @@ if __name__ == "__main__":
                     for t in range(len(sample["A"]))
                 ]
             ):
-                print(
-                    "WARNING: some matrices not connected in test set for test no. ",
-                    testno,
+                warnings.warn(
+                    f"Some matrices not connected in test set for test no. {testno}"
                 )
                 # print(f"Components for {samples[0].get('A')[0].shape[0]} nodes:")
                 # print(
