@@ -291,7 +291,7 @@ if __name__ == "__main__":
                     )
 
                 tqdm.write("Freezing params...")
-                alpha = 1 / Q
+                alpha = (1 / Q) * np.ones(Q)
                 p_in = get_p_in(eps)
                 p_out = get_p_out(eps)
 

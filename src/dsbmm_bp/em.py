@@ -21,6 +21,7 @@ faulthandler.enable()
 
 import matplotlib.pyplot as plt
 import yaml  # type: ignore # for reading config file
+from tqdm import tqdm
 
 # plt.ion()
 
@@ -432,11 +433,13 @@ class EM:
 
     def do_run(self, conv_tol, msg_conv_tol, learning_rate):
         self.poor_iter_ctr = 0  # ctr for iters without reduction in free energy
-        for n_iter in range(self.max_iter):
+        for n_iter in tqdm(range(self.max_iter), desc="EM iter"):
             if self.verbose:
                 print(f"\n##### At iteration {n_iter+1} #####")
                 self.xdata.append(n_iter)
-            for msg_iter in range(self.max_msg_iter):
+            for msg_iter in tqdm(
+                range(self.max_msg_iter), desc="Message iter", leave=False
+            ):
                 if n_iter < 5 and self.max_iter > 1:
                     if msg_iter > self.max_msg_iter // 3:
                         # Use fewer max msg updates for first few EM steps, where params usually inaccurate
