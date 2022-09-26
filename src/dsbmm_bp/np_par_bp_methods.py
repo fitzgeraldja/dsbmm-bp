@@ -734,8 +734,9 @@ class NumpyBP:
             where=forward_term > 0.0,
             out=2 * np.log(TOL) * np.ones_like(forward_term),
         )
-        # use alpha where i not present at t-1
+        # use alpha where i not present at t-1 if i present at t
         log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
+        log_forward_term[~self._pres_nodes[:, 1:], :] = 0.0
         tmp[:, 1:, :] += log_forward_term
 
         ## UPDATE SPATIAL MESSAGES FROM i AT t ##
@@ -883,15 +884,24 @@ class NumpyBP:
         # add alpha
         tmp[:, 0, :] += np.log(self.model._alpha)[np.newaxis, :]
         # include backward msgs
-        log_back_term = np.log(self.backward_temp_msg_term())
+        back_term = self.backward_temp_msg_term()
+        log_back_term = np.log(
+            back_term,
+            where=back_term > 0.0,
+            out=2 * np.log(TOL) * np.ones_like(back_term),
+        )
         log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
         # include forward term
-        log_forward_term = np.log(self.forward_temp_msg_term())
+        forward_term = self.forward_temp_msg_term()
+        log_forward_term = np.log(
+            forward_term,
+            where=forward_term > 0.0,
+            out=2 * np.log(TOL) * np.ones_like(forward_term),
+        )
         # use alpha where i not present at t-1, if i present at t
-        log_forward_term[
-            (~self._pres_trans) & self._pres_nodes[:, 1:], :
-        ] = self.model._alpha[np.newaxis, :]
+        log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
+        log_forward_term[~self._pres_nodes[:, 1:], :] = 0.0
         tmp[:, 1:, :] += log_forward_term
         tmp_marg = np.exp(tmp)
         # tmp_marg[tmp_marg < TOL] = TOL
@@ -937,8 +947,15 @@ class NumpyBP:
             self._psi_t[..., 0],
             self.trans_prob,
         )
+        twopoint_t_norms = unnorm_twopoint_t_marg.sum(axis=(-2, -1))
         f_templink = (
-            np.log(unnorm_twopoint_t_marg.sum(axis=(-2, -1))).sum() / self.N * self.T
+            np.log(
+                twopoint_t_norms,
+                where=twopoint_t_norms > 0.0,
+                out=np.zeros_like(twopoint_t_norms),
+            ).sum()
+            / self.N
+            * self.T
         )
 
         # calc last term
