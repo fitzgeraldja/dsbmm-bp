@@ -512,7 +512,16 @@ def sample_dynsbm_meta(
         elif meta_type == "categorical":
             # passing distribution over categories
             X = [
-                [pick_category(params[:, q, t], meta_sizes[q, t]) for q in range(Q)]
+                [
+                    (
+                        np.tile(np.arange(len(params[:, q, t])), (meta_sizes[q, t], 1))
+                        == pick_category(params[:, q, t], meta_sizes[q, t])[
+                            :, np.newaxis
+                        ]
+                    ).T
+                    * 1
+                    for q in range(Q)
+                ]
                 for t in range(T)
             ]
 
