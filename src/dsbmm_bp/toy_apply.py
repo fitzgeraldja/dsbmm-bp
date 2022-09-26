@@ -35,7 +35,7 @@ parser.add_argument(
 parser.add_argument(
     "--msg_conv_tol",
     type=float,
-    default=1e-7,
+    default=1e-10,
     help="Convergence criterion for messages",
 )
 
@@ -43,8 +43,8 @@ parser.add_argument(
     "--msg_init_mode",
     type=str,
     choices=["planted", "random"],
-    default="random",
-    help="Initialization mode for messages. Default is random.",
+    default="planted",
+    help="Initialization mode for messages. Default is planted.",
 )
 
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
@@ -308,6 +308,7 @@ if __name__ == "__main__":
                     n_runs=args.n_runs,
                     sparse_adj=True,
                     max_iter=1,
+                    patience=100,
                     max_msg_iter=args.max_msg_iter,
                     use_numba=args.use_numba,
                     tuning_param=args.tuning_param
