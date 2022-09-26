@@ -687,7 +687,11 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        log_spatial_msg += np.log(self.meta_prob)
+        log_spatial_msg += np.log(
+            self.meta_prob,
+            where=self.meta_prob > 0,
+            out=np.log(TOL) * np.ones_like(self.meta_prob),
+        )
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
         #     msg[:, t, :] = np.array(
@@ -715,6 +719,7 @@ class NumpyBP:
             tmp_backwards_msg,
             back_sums[:, :, np.newaxis],
             where=back_sums[:, :, np.newaxis] > 0,
+            out=np.zeros_like(tmp_backwards_msg),
         )
         tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
         tmp_backwards_msg /= tmp_backwards_msg.sum(axis=-1)[:, :, np.newaxis]
@@ -753,6 +758,7 @@ class NumpyBP:
             tmp_spatial_msg,
             tmp_spat_sums[:, np.newaxis],
             where=tmp_spat_sums[:, np.newaxis] > 0,
+            out=np.zeros_like(tmp_spatial_msg),
         )
         tmp_spatial_msg[tmp_spatial_msg < TOL] = TOL
         tmp_spatial_msg /= tmp_spatial_msg.sum(axis=1)[:, np.newaxis]
@@ -776,6 +782,7 @@ class NumpyBP:
             tmp_forwards_msg,
             forward_sums[:, :, np.newaxis],
             where=forward_sums[:, :, np.newaxis] > 0,
+            out=np.zeros_like(tmp_forwards_msg),
         )
         tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
         tmp_forwards_msg /= tmp_forwards_msg.sum(axis=-1)[:, :, np.newaxis]
@@ -787,7 +794,10 @@ class NumpyBP:
         tmp_marg = np.exp(tmp - max_msg_log[:, :, np.newaxis])
         marg_sums = tmp_marg.sum(axis=-1)
         tmp_marg = np.divide(
-            tmp_marg, marg_sums[:, :, np.newaxis], where=marg_sums[:, :, np.newaxis] > 0
+            tmp_marg,
+            marg_sums[:, :, np.newaxis],
+            where=marg_sums[:, :, np.newaxis] > 0,
+            out=np.zeros_like(tmp_marg),
         )
         tmp_marg[tmp_marg < TOL] = TOL
         tmp_marg /= tmp_marg.sum(axis=-1)[:, :, np.newaxis]
@@ -877,7 +887,12 @@ class NumpyBP:
         tmp[:, 1:, :] += log_forward_term
         tmp_marg = np.exp(tmp)
         # tmp_marg[tmp_marg < TOL] = TOL
-        f_site += np.log(tmp_marg.sum(axis=-1)).sum()
+        tmp_marg_sums = tmp_marg.sum(axis=-1)
+        f_site += np.log(
+            tmp_marg_sums,
+            where=tmp_marg_sums > 0,
+            out=np.log(TOL) * np.ones_like(tmp_marg_sums),
+        ).sum()
         f_site /= self.N * self.T
 
         # calc twopoint marg terms
@@ -978,6 +993,7 @@ class NumpyBP:
                 self.twopoint_e_marg,
                 tp_e_sums[:, np.newaxis, np.newaxis],
                 where=tp_e_sums[:, np.newaxis, np.newaxis] > 0,
+                out=np.zeros_like(self.twopoint_e_marg),
             )
             self.twopoint_e_marg[self.twopoint_e_marg < TOL] = TOL
             self.twopoint_e_marg /= self.twopoint_e_marg.sum(axis=(-2, -1))[
@@ -998,6 +1014,7 @@ class NumpyBP:
             self.twopoint_t_marg,
             tp_t_sums[..., np.newaxis, np.newaxis],
             where=tp_t_sums[..., np.newaxis, np.newaxis] > 0,
+            out=np.zeros_like(self.twopoint_t_marg),
         )
         self.twopoint_t_marg[self.twopoint_t_marg < TOL] = TOL
         self.twopoint_t_marg /= self.twopoint_t_marg.sum(axis=(-2, -1))[
