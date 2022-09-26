@@ -168,25 +168,21 @@ class NumpyBP:
             if self.N > 1000:
 
                 @njit
-                def normalise_psi_e(psi_data, psi_indptr):
-                    for t in range(self.T):
-                        q_idxs = (
-                            np.arange(self.N * self.T * self.Q)
-                            .reshape(self.T, self.Q, self.N)[t]
-                            .T
-                        )
-                        for i in range(self.N):
+                def normalise_psi_e(psi_data, psi_indptr, N, T, Q):
+                    for t in range(T):
+                        q_idxs = np.arange(N * T * Q).reshape(T, Q, N)[t].T
+                        for i in range(N):
                             i_sums = np.zeros(
                                 psi_indptr[q_idxs[i, 0] + 1] - psi_indptr[q_idxs[i, 0]]
                             )
-                            for q in range(self.Q):
+                            for q in range(Q):
                                 i_sums += psi_data[
                                     psi_indptr[q_idxs[i, q]] : psi_indptr[
                                         q_idxs[i, q] + 1
                                     ]
                                 ]
                             # assert np.all(i_sums>0)
-                            for q in range(self.Q):
+                            for q in range(Q):
                                 psi_data[
                                     psi_indptr[q_idxs[i, q]] : psi_indptr[
                                         q_idxs[i, q] + 1
@@ -194,7 +190,9 @@ class NumpyBP:
                                 ] /= i_sums
                     return psi_data
 
-                self._psi_e.data = normalise_psi_e(self._psi_e.data, self._psi_e.indptr)
+                self._psi_e.data = normalise_psi_e(
+                    self._psi_e.data, self._psi_e.indptr, self.N, self.T, self.Q
+                )
 
             else:
                 sums = sparse.vstack(
@@ -225,7 +223,9 @@ class NumpyBP:
             if self.verbose and self.N > 1000:
                 print("Now added planted information, calculating renormalisation...")
             if self.N > 1000:
-                self._psi_e.data = normalise_psi_e(self._psi_e.data, self._psi_e.indptr)
+                self._psi_e.data = normalise_psi_e(
+                    self._psi_e.data, self._psi_e.indptr, self.N, self.T, self.Q
+                )
                 if self.verbose:
                     print("Done!")
             else:
