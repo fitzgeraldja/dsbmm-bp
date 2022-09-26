@@ -254,6 +254,8 @@ class NumpyBP:
             self._psi_t[..., 0] += p * one_hot_Z[:, 1:, :]
             self._psi_t[..., 1] += p * one_hot_Z[:, : self.T - 1, :]
             self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
+        self._psi_t[~self._pres_trans, :, :] = 0.0
+        self.n_tot_msgs = self._psi_e.nnz + np.count_nonzero(self._psi_t)
 
     @property
     def trans_prob(self):
@@ -725,7 +727,7 @@ class NumpyBP:
         tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
         tmp_backwards_msg /= tmp_backwards_msg.sum(axis=-1)[:, :, np.newaxis]
         tmp_backwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
-        self.msg_diff += np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0]).mean()
+        self.msg_diff += np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0]).sum()
         self._psi_t[:, :, :, 0] = tmp_backwards_msg
         # include forward term now backwards term updated
         forward_term = self.forward_temp_msg_term()
@@ -774,7 +776,7 @@ class NumpyBP:
             self.msg_diff += np.abs(
                 tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]].flatten()
                 - self._psi_e[j_idxs, i_idxs]
-            ).mean()  # NB need to mult by deg_i so weighted correctly
+            ).sum()  # NB need to mult by deg_i so weighted correctly
             self._psi_e[j_idxs, i_idxs] = tmp_spatial_msg[
                 self.E_idxs[t] : self.E_idxs[t + 1]
             ].flatten()
@@ -794,7 +796,7 @@ class NumpyBP:
         tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
         tmp_forwards_msg /= tmp_forwards_msg.sum(axis=-1)[:, :, np.newaxis]
         tmp_forwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
-        self.msg_diff += np.abs(tmp_forwards_msg - self._psi_t[..., 1]).mean()
+        self.msg_diff += np.abs(tmp_forwards_msg - self._psi_t[..., 1]).sum()
         self._psi_t[:, :, :, 1] = tmp_forwards_msg
 
         ## UPDATE MARGINAL OF i AT t ##
@@ -810,6 +812,8 @@ class NumpyBP:
         tmp_marg /= tmp_marg.sum(axis=-1)[:, :, np.newaxis]
         tmp_marg[~self._pres_nodes, :] = 0.0  # set to zero if not present
         self.node_marg = tmp_marg
+
+        self.msg_diff /= self.n_tot_msgs
 
         if np.isnan(self.msg_diff).sum() > 0:
             if np.isnan(self.node_marg).sum() > 0:
