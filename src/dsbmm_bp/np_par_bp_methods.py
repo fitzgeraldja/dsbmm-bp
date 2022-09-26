@@ -56,11 +56,11 @@ class NumpyBP:
         self.msg_diff = 0.0
 
     @property
-    def meta_prob(self):
+    def log_meta_prob(self):
         # NB DSBMM already performed
         # meta_lkl = meta_lkl**tuning_param
         # so adjusted suitably already
-        return self.model.meta_lkl
+        return self.model.log_meta_lkl
 
     def init_messages(
         self,
@@ -687,11 +687,7 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        log_spatial_msg += np.log(
-            self.meta_prob,
-            where=self.meta_prob > 0,
-            out=10 * np.log(TOL) * np.ones_like(self.meta_prob),
-        )
+        log_spatial_msg += self.log_meta_prob
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
         #     msg[:, t, :] = np.array(
@@ -871,11 +867,7 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        log_spatial_msg += np.log(
-            self.meta_prob,
-            where=self.meta_prob > 0,
-            out=10 * np.log(TOL) * np.ones_like(self.meta_prob),
-        )
+        log_spatial_msg += self.log_meta_prob
 
         tmp = log_spatial_msg
         # add alpha
