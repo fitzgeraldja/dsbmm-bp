@@ -770,7 +770,7 @@ def toy_model(
     :type verbose: bool, optional
     """
     Z_1 = np.random.randint(0, high=Q, size=N)
-    meta_params = np.tile(np.expand_dims(gen_trans_mat(rho_in, Q), 2), (1, 1, T))
+    meta_params = np.tile(gen_trans_mat(rho_in, Q)[:, np.newaxis, :], (1, T, 1))
     data = sample_dynsbm_meta(
         Z_1,
         Q=Q,
