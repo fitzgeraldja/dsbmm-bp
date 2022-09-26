@@ -19,7 +19,7 @@ try:
         "non_informative_init"
     ]  # initialise alpha, pi as uniform (True), or according to init part passed (False)
 except FileNotFoundError:
-    TOL = 1e-70
+    TOL = 1e-100
     NON_INFORMATIVE_INIT = True
 
 
