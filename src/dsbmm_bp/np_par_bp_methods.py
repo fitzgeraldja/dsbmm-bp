@@ -705,7 +705,12 @@ class NumpyBP:
 
         tmp = log_spatial_msg.copy()
         tmp[:, 0, :] += np.log(self.model._alpha)[np.newaxis, :]
-        log_back_term = np.log(self.backward_temp_msg_term())
+        back_term = self.backward_temp_msg_term()
+        log_back_term = np.log(
+            back_term,
+            where=back_term > 0.0,
+            out=2 * np.log(TOL) * np.ones_like(back_term),
+        )
         log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
         ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
@@ -723,7 +728,12 @@ class NumpyBP:
         self.msg_diff += np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0]).mean()
         self._psi_t[:, :, :, 0] = tmp_backwards_msg
         # include forward term now backwards term updated
-        log_forward_term = np.log(self.forward_temp_msg_term())
+        forward_term = self.forward_temp_msg_term()
+        log_forward_term = np.log(
+            forward_term,
+            where=forward_term > 0.0,
+            out=2 * np.log(TOL) * np.ones_like(forward_term),
+        )
         # use alpha where i not present at t-1
         log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
         tmp[:, 1:, :] += log_forward_term
@@ -878,8 +888,10 @@ class NumpyBP:
         tmp[:, :-1, :] += log_back_term
         # include forward term
         log_forward_term = np.log(self.forward_temp_msg_term())
-        # use alpha where i not present at t-1
-        log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
+        # use alpha where i not present at t-1, if i present at t
+        log_forward_term[
+            (~self._pres_trans) & self._pres_nodes[:, 1:], :
+        ] = self.model._alpha[np.newaxis, :]
         tmp[:, 1:, :] += log_forward_term
         tmp_marg = np.exp(tmp)
         # tmp_marg[tmp_marg < TOL] = TOL
