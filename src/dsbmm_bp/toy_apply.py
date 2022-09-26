@@ -32,6 +32,21 @@ parser.add_argument(
     help="Maximum number of message updates to run. Default is 300.",
 )
 
+parser.add_argument(
+    "--msg_conv_tol",
+    type=float,
+    default=1e-7,
+    help="Convergence criterion for messages",
+)
+
+parser.add_argument(
+    "--msg_init_mode",
+    type=str,
+    choices=["planted", "random"],
+    default="random",
+    help="Initialization mode for messages. Default is random.",
+)
+
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
 
 parser.add_argument(
@@ -289,6 +304,7 @@ if __name__ == "__main__":
                 model = em.EM(
                     sample,
                     verbose=verbose,
+                    msg_init_mode=args.msg_init_mode,
                     n_runs=args.n_runs,
                     sparse_adj=True,
                     max_iter=1,
@@ -334,7 +350,7 @@ if __name__ == "__main__":
 
                 model.dsbmm.set_params(true_params, freeze=True)
                 ## Fit to given data
-                model.fit(learning_rate=0.2)
+                model.fit(learning_rate=0.2, msg_conv_tol=args.msg_conv_tol)
                 ## Score after fit
                 test_aris[test_no, samp_no, :] = 0.0  # type: ignore
                 tqdm.write("BP Z ARI:")
