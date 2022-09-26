@@ -339,7 +339,7 @@ if __name__ == "__main__":
 
                 meta_params = [
                     np.tile(
-                        np.expand_dims(simulation.gen_trans_mat(rho, Q), 2), (1, 1, T)
+                        simulation.gen_trans_mat(rho, Q)[:, np.newaxis, :], (1, T, 1)
                     )
                 ]
                 true_params = {
