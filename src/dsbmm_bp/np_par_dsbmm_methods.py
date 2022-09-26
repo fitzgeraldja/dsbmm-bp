@@ -593,7 +593,7 @@ class NumpyDSBMM:
             # lam_den[lam_den < TOL] = 1.0
         # NB use relative rather than absolute difference here as lam could be large
         tmp = np.divide(
-            lam_num, lam_den, where=lam_den > 0, out=np.zeros_like(lam_num), dtype=float
+            lam_num, lam_den, where=lam_den > 0, out=np.zeros_like(lam_num, dtype=float)
         )
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self._lam
@@ -691,8 +691,7 @@ class NumpyDSBMM:
             beta_num,
             beta_den,
             where=beta_den > 0,
-            out=np.zeros_like(beta_num),
-            dtype=float,
+            out=np.zeros_like(beta_num, dtype=float),
         )
         # tmp[tmp < TOL] = TOL
         # tmp[tmp > 1 - TOL] = 1 - TOL
@@ -772,7 +771,7 @@ class NumpyDSBMM:
             # xi[xi < TOL] = 1.0
             # zeta[zeta < TOL] = TOL
         # NB again use relative error here as could be large
-        tmp = np.divide(zeta, xi, where=xi > 0, out=np.zeros_like(zeta), dtype=float)
+        tmp = np.divide(zeta, xi, where=xi > 0, out=np.zeros_like(zeta, dtype=float))
         # tmp[tmp < TOL] = TOL
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
@@ -826,7 +825,7 @@ class NumpyDSBMM:
             )
             # xi[xi < TOL] = 1.0
             # rho[rho < TOL] = TOL
-        tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho), dtype=float)
+        tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho, dtype=float))
         # tmp[tmp < TOL] = TOL
         # tmp[tmp > 1 - TOL] = 1 - TOL
         if not init:
@@ -865,7 +864,7 @@ class NumpyDSBMM:
             )
             # rho[rho < TOL] = TOL
         xi = rho.sum(axis=-1, keepdims=True)
-        tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho), dtype=float)
+        tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho, dtype=float))
         # tmp[tmp < TOL] = TOL
         # tmp /= tmp.sum(axis=-1, keepdims=True)
         if not init:
