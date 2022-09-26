@@ -813,6 +813,8 @@ class NumpyBP:
         tmp_marg[~self._pres_nodes, :] = 0.0  # set to zero if not present
         self.node_marg = tmp_marg
 
+        self.msg_diff /= self.n_tot_msgs
+
         if np.isnan(self.msg_diff).sum() > 0:
             if np.isnan(self.node_marg).sum() > 0:
                 print("nans for node marg @ (i,t):")
