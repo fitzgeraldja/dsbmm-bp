@@ -871,7 +871,11 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        log_spatial_msg += np.log(self.meta_prob)
+        log_spatial_msg += np.log(
+            self.meta_prob,
+            where=self.meta_prob > 0,
+            out=np.log(TOL) * np.ones_like(self.meta_prob),
+        )
 
         tmp = log_spatial_msg
         # add alpha
