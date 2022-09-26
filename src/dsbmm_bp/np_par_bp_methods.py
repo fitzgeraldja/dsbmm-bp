@@ -165,23 +165,31 @@ class NumpyBP:
                 print("Calculating init message sums to normalise...")
             sums = sparse.vstack(
                 [
-                    self._psi_e[
-                        np.arange(self.N * self.T * self.Q)
-                        .reshape(self.T, self.Q, self.N)[t]
-                        .T.flatten(),
-                        :,
-                    ]
-                    .T.reshape(self.N * self.N, self.Q)
-                    .sum(axis=-1)
-                    .reshape(self.N, self.N)
+                    sparse.csr_matrix(
+                        self._psi_e[
+                            np.arange(self.N * self.T * self.Q)
+                            .reshape(self.T, self.Q, self.N)[t]
+                            .T.flatten(),
+                            :,
+                        ]
+                        .T.reshape(self.N * self.N, self.Q)
+                        .sum(axis=-1)
+                        .reshape(self.N, self.N)
+                    )
                     for t in range(self.T)
                     for _ in range(self.Q)
                 ]
             )
+            if self.verbose and self.N > 1000:
+                print("Done, performing normalisation...")
             self._psi_e.data /= sums.data  # normalise noise
             self._psi_e.data *= 1 - p
             self._psi_e.data += tmp.data
             # renormalise just in case
+            if self.verbose and self.N > 1000:
+                print(
+                    "Done, added planted information, now calculating renormalisation..."
+                )
             sums = sparse.vstack(
                 [
                     sparse.csr_matrix(
