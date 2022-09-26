@@ -143,10 +143,10 @@ if __name__ == "__main__":
     #     "indep_bern_params": test_params["meta_params"][i][1],
     #     "meta_aligned": test_params["meta_align"][i],
     # }
-    N = 200
-    T = 10
+    N = 512
+    T = 40
     Q = 2
-    c = 10
+    c = 16
     n_samps = 20
     if args.params_path is None:
         eps_grid = np.linspace(0.3, 0.6, 10)
