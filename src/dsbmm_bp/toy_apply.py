@@ -39,6 +39,14 @@ parser.add_argument(
     help="Convergence criterion for messages",
 )
 
+parser.add_argument(
+    "--msg_init_mode",
+    type=str,
+    choices=["planted", "random"],
+    default="random",
+    help="Initialization mode for messages. Default is random.",
+)
+
 parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
 
 parser.add_argument(
@@ -296,6 +304,7 @@ if __name__ == "__main__":
                 model = em.EM(
                     sample,
                     verbose=verbose,
+                    msg_init_mode=args.msg_init_mode,
                     n_runs=args.n_runs,
                     sparse_adj=True,
                     max_iter=1,
