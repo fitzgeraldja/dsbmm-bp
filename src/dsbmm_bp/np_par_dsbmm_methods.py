@@ -357,7 +357,15 @@ class NumpyDSBMM:
         # log(n!) = gammaln(n+1)
         return (
             -lam.T
-            + np.einsum("it,qt->itq", k, np.log(lam))
+            + np.einsum(
+                "it,qt->itq",
+                k,
+                np.log(
+                    lam,
+                    where=lam > 0.0,
+                    out=np.log(TOL) * np.ones_like(lam, dtype=float),
+                ),
+            )
             - gammaln(k + 1)[:, :, np.newaxis]
         )
 
@@ -370,7 +378,15 @@ class NumpyDSBMM:
         # log(n!) = gammaln(n+1)
         return np.exp(
             -lam
-            + np.einsum("e,eqr->eqr", k, np.log(lam))
+            + np.einsum(
+                "e,eqr->eqr",
+                k,
+                np.log(
+                    lam,
+                    where=lam > 0.0,
+                    out=np.log(TOL) * np.ones_like(lam, dtype=float),
+                ),
+            )
             - gammaln(k + 1)[:, np.newaxis, np.newaxis]
         )
 
