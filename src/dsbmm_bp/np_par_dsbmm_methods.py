@@ -293,7 +293,7 @@ class NumpyDSBMM:
             if self.verbose:
                 # print(self.jit_model._meta_params)
                 print("\tUpdated meta")
-        self.calc_meta_lkl()
+        self.calc_log_meta_lkl()
         if self.deg_corr:
             self.compute_DC_lkl()
 
@@ -351,11 +351,11 @@ class NumpyDSBMM:
                 ]
             )
 
-    def meta_pois_lkl(self, k: np.ndarray, lam: np.ndarray):
+    def log_meta_pois_lkl(self, k: np.ndarray, lam: np.ndarray):
         # k_it,lam_qt -> e^-lam_qt * lam_qt^k_it / k_it!
         # in log -> -lam_qt + k_it*log(lam_qt) - log(k_it!)
         # log(n!) = gammaln(n+1)
-        return np.exp(
+        return (
             -lam.T
             + np.einsum("it,qt->itq", k, np.log(lam))
             - gammaln(k + 1)[:, :, np.newaxis]
@@ -374,8 +374,8 @@ class NumpyDSBMM:
             - gammaln(k + 1)[:, np.newaxis, np.newaxis]
         )
 
-    def calc_meta_lkl(self):
-        self.meta_lkl = np.ones((self.N, self.T, self.Q))
+    def calc_log_meta_lkl(self):
+        self.log_meta_lkl = np.zeros((self.N, self.T, self.Q))
         # NB meta_lkl will be nan when a node is missing
         for s, mt in enumerate(self.meta_types):
             # print(f"Updating params for {mt} dist")
@@ -384,7 +384,7 @@ class NumpyDSBMM:
                 pois_params = self._meta_params[s]  # shape (Q x T x 1)
                 # recall X[s] has shape (N x T x Ds), w Ds = 1 here
                 # pois_lkl(k;lam) = e^-lam lam^k / k!
-                self.meta_lkl *= self.meta_pois_lkl(
+                self.log_meta_lkl += self.log_meta_pois_lkl(
                     self.X[s][:, :, 0], pois_params[:, :, 0]
                 )
                 if self.verbose:
@@ -393,12 +393,23 @@ class NumpyDSBMM:
                 # print("In IB")
                 ib_params = self._meta_params[s]  # shape (Q x T x L)
                 # recall X[s] has shape (N x T x Ds), w Ds = L here
-                self.meta_lkl *= (
-                    np.prod(
-                        np.power(ib_params, self.X[s][:, np.newaxis, :, :]), axis=-1
+                self.log_meta_lkl += (
+                    np.sum(
+                        np.log(
+                            ib_params,
+                            where=ib_params > 0.0,
+                            out=10 * np.log(TOL) * np.ones_like(ib_params),
+                        )
+                        * self.X[s][:, np.newaxis, :, :],
+                        axis=-1,
                     )
-                    * np.prod(
-                        np.power(1 - ib_params, 1 - self.X[s][:, np.newaxis, :, :]),
+                    + np.sum(
+                        np.log(
+                            1 - ib_params,
+                            where=1 - ib_params > 0.0,
+                            out=10 * np.log(TOL) * np.ones_like(ib_params),
+                        )
+                        * (1 - self.X[s][:, np.newaxis, :, :]),
                         axis=-1,
                     )
                 ).transpose(0, 2, 1)
@@ -406,8 +417,14 @@ class NumpyDSBMM:
                     print("\tUpdated IB lkl contribution")
             elif mt == "categorical":
                 cat_params = self._meta_params[s]
-                self.meta_lkl *= np.sum(
-                    cat_params * self.X[s][:, np.newaxis, :, :], axis=-1
+                self.log_meta_lkl += np.sum(
+                    np.log(
+                        cat_params,
+                        where=cat_params > 0.0,
+                        out=10 * np.log(TOL) * np.ones_like(cat_params),
+                    )
+                    * self.X[s][:, np.newaxis, :, :],
+                    axis=-1,
                 ).transpose(
                     0, 2, 1
                 )  # should only have single nonzero X, one-hot encoding for category, so this should be sufficient
@@ -419,8 +436,8 @@ class NumpyDSBMM:
                 )
         # enforce all vals +ve prior to taking power
         # self.meta_lkl[self.meta_lkl < TOL] = TOL
-        self.meta_lkl[self.meta_lkl < 0.0] = 0.0
-        self.meta_lkl = self.meta_lkl**self.tuning_param
+        # self.meta_lkl[self.meta_lkl < 0.0] = 0.0
+        self.log_meta_lkl = self.log_meta_lkl * self.tuning_param
         # self.meta_lkl[self.meta_lkl < TOL] = TOL
         # self.meta_lkl[self.meta_lkl > 1 - TOL] = 1 - TOL
 
