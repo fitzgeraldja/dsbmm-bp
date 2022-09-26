@@ -162,28 +162,38 @@ class NumpyBP:
             self._psi_e.data = np.random.rand(len(self._psi_e.data))
 
             if self.verbose and self.N > 1000:
-                print("Calculating init message sums to normalise...")
+                print("Normalising init messages...")
             if self.N > 1000:
-                for t in range(self.T):
-                    # get in order, so q_idxs[Q*i:Q*(i+1)] gives indices for q messages for node i at time t
-                    q_idxs = (
-                        np.arange(self.N * self.T * self.Q)
-                        .reshape(self.T, self.Q, self.N)[t]
-                        .T.flatten()
-                    )
-                    for i in range(self.N):
-                        # data for row i in indptr[i]:indptr[i+1]
-                        # should have same sparsity structure i.e. msgs to same j for all q, so can directly construct sums that way
-                        psi_indptr = self._psi_e.indptr
-                        psi_data = self._psi_e.data
-                        i_sum = np.zeros(
-                            psi_indptr[q_idxs[i, 0] + 1] - psi_indptr[q_idxs[i, 0]]
+
+                @njit
+                def normalise_psi_e(psi_data, psi_indptr):
+                    for t in range(self.T):
+                        q_idxs = (
+                            np.arange(self.N * self.T * self.Q)
+                            .reshape(self.T, self.Q, self.N)[t]
+                            .T
                         )
-                        for q in range(self.Q):
-                            i_sum += psi_data[
-                                psi_indptr[q_idxs[i, q]] : psi_indptr[q_idxs[i, q] + 1]
-                            ]
-                        sums = self._psi_e[q_idxs, :]
+                        for i in range(self.N):
+                            i_sums = np.zeros(
+                                psi_indptr[q_idxs[i, 0] + 1] - psi_indptr[q_idxs[i, 0]]
+                            )
+                            for q in range(self.Q):
+                                i_sums += psi_data[
+                                    psi_indptr[q_idxs[i, q]] : psi_indptr[
+                                        q_idxs[i, q] + 1
+                                    ]
+                                ]
+                            # assert np.all(i_sums>0)
+                            for q in range(self.Q):
+                                psi_data[
+                                    psi_indptr[q_idxs[i, q]] : psi_indptr[
+                                        q_idxs[i, q] + 1
+                                    ]
+                                ] /= i_sums
+                    return psi_data
+
+                self._psi_e.data = normalise_psi_e(self._psi_e.data, self._psi_e.indptr)
+
             else:
                 sums = sparse.vstack(
                     [
@@ -202,34 +212,39 @@ class NumpyBP:
                         for _ in range(self.Q)
                     ]
                 )
+                self._psi_e.data /= sums.data  # normalise noise
+                self._psi_e.data *= 1 - p
+                self._psi_e.data += tmp.data
+
             if self.verbose and self.N > 1000:
-                print("Done, performing normalisation...")
-            self._psi_e.data /= sums.data  # normalise noise
-            self._psi_e.data *= 1 - p
-            self._psi_e.data += tmp.data
+                print("Done for random init...")
+
             # renormalise just in case
             if self.verbose and self.N > 1000:
-                print(
-                    "Done, added planted information, now calculating renormalisation..."
+                print("Now added planted information, calculating renormalisation...")
+            if self.N > 1000:
+                self._psi_e.data = normalise_psi_e(self._psi_e.data, self._psi_e.indptr)
+                if self.verbose:
+                    print("Done!")
+            else:
+                sums = sparse.vstack(
+                    [
+                        sparse.csr_matrix(
+                            self._psi_e[
+                                np.arange(self.N * self.T * self.Q)
+                                .reshape(self.T, self.Q, self.N)[t]
+                                .T.flatten(),
+                                :,
+                            ]
+                            .T.reshape(self.N * self.N, self.Q)
+                            .sum(axis=-1)
+                            .reshape(self.N, self.N)
+                        )
+                        for t in range(self.T)
+                        for _ in range(self.Q)
+                    ]
                 )
-            sums = sparse.vstack(
-                [
-                    sparse.csr_matrix(
-                        self._psi_e[
-                            np.arange(self.N * self.T * self.Q)
-                            .reshape(self.T, self.Q, self.N)[t]
-                            .T.flatten(),
-                            :,
-                        ]
-                        .T.reshape(self.N * self.N, self.Q)
-                        .sum(axis=-1)
-                        .reshape(self.N, self.N)
-                    )
-                    for t in range(self.T)
-                    for _ in range(self.Q)
-                ]
-            )
-            self._psi_e.data /= sums.data
+                self._psi_e.data /= sums.data
 
             self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, 2)
             self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
