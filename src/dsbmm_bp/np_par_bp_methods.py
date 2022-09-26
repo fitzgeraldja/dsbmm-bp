@@ -163,23 +163,45 @@ class NumpyBP:
 
             if self.verbose and self.N > 1000:
                 print("Calculating init message sums to normalise...")
-            sums = sparse.vstack(
-                [
-                    sparse.csr_matrix(
-                        self._psi_e[
-                            np.arange(self.N * self.T * self.Q)
-                            .reshape(self.T, self.Q, self.N)[t]
-                            .T.flatten(),
-                            :,
-                        ]
-                        .T.reshape(self.N * self.N, self.Q)
-                        .sum(axis=-1)
-                        .reshape(self.N, self.N)
+            if self.N > 1000:
+                for t in range(self.T):
+                    # get in order, so q_idxs[Q*i:Q*(i+1)] gives indices for q messages for node i at time t
+                    q_idxs = (
+                        np.arange(self.N * self.T * self.Q)
+                        .reshape(self.T, self.Q, self.N)[t]
+                        .T.flatten()
                     )
-                    for t in range(self.T)
-                    for _ in range(self.Q)
-                ]
-            )
+                    for i in range(self.N):
+                        # data for row i in indptr[i]:indptr[i+1]
+                        # should have same sparsity structure i.e. msgs to same j for all q, so can directly construct sums that way
+                        psi_indptr = self._psi_e.indptr
+                        psi_data = self._psi_e.data
+                        i_sum = np.zeros(
+                            psi_indptr[q_idxs[i, 0] + 1] - psi_indptr[q_idxs[i, 0]]
+                        )
+                        for q in range(self.Q):
+                            i_sum += psi_data[
+                                psi_indptr[q_idxs[i, q]] : psi_indptr[q_idxs[i, q] + 1]
+                            ]
+                        sums = self._psi_e[q_idxs, :]
+            else:
+                sums = sparse.vstack(
+                    [
+                        sparse.csr_matrix(
+                            self._psi_e[
+                                np.arange(self.N * self.T * self.Q)
+                                .reshape(self.T, self.Q, self.N)[t]
+                                .T.flatten(),
+                                :,
+                            ]
+                            .T.reshape(self.N * self.N, self.Q)
+                            .sum(axis=-1)
+                            .reshape(self.N, self.N)
+                        )
+                        for t in range(self.T)
+                        for _ in range(self.Q)
+                    ]
+                )
             if self.verbose and self.N > 1000:
                 print("Done, performing normalisation...")
             self._psi_e.data /= sums.data  # normalise noise
