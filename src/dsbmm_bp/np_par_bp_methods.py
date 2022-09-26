@@ -17,7 +17,7 @@ try:
     # (for numerical stability)
     PLANTED_P = config["planted_p"]
 except FileNotFoundError:
-    TOL = 1e-70
+    TOL = 1e-100
     LARGE_DEG_THR = 20
     RANDOM_ONLINE_UPDATE_MSG = False
     PLANTED_P = 0.8
@@ -690,7 +690,7 @@ class NumpyBP:
         log_spatial_msg += np.log(
             self.meta_prob,
             where=self.meta_prob > 0,
-            out=np.log(TOL) * np.ones_like(self.meta_prob),
+            out=10 * np.log(TOL) * np.ones_like(self.meta_prob),
         )
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
@@ -874,7 +874,7 @@ class NumpyBP:
         log_spatial_msg += np.log(
             self.meta_prob,
             where=self.meta_prob > 0,
-            out=np.log(TOL) * np.ones_like(self.meta_prob),
+            out=10 * np.log(TOL) * np.ones_like(self.meta_prob),
         )
 
         tmp = log_spatial_msg
@@ -895,7 +895,7 @@ class NumpyBP:
         f_site += np.log(
             tmp_marg_sums,
             where=tmp_marg_sums > 0,
-            out=np.log(TOL) * np.ones_like(tmp_marg_sums),
+            out=10 * np.log(TOL) * np.ones_like(tmp_marg_sums),
         ).sum()
         f_site /= self.N * self.T
 
