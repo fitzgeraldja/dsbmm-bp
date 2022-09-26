@@ -19,7 +19,7 @@ try:
         "non_informative_init"
     ]  # initialise alpha, pi as uniform (True), or according to init part passed (False)
 except FileNotFoundError:
-    TOL = 1e-50
+    TOL = 1e-70
     NON_INFORMATIVE_INIT = True
 
 
@@ -418,10 +418,11 @@ class NumpyDSBMM:
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
                 )
         # enforce all vals +ve prior to taking power
-        self.meta_lkl[self.meta_lkl < TOL] = TOL
+        # self.meta_lkl[self.meta_lkl < TOL] = TOL
+        self.meta_lkl[self.meta_lkl < 0.0] = 0.0
         self.meta_lkl = self.meta_lkl**self.tuning_param
-        self.meta_lkl[self.meta_lkl < TOL] = TOL
-        self.meta_lkl[self.meta_lkl > 1 - TOL] = 1 - TOL
+        # self.meta_lkl[self.meta_lkl < TOL] = TOL
+        # self.meta_lkl[self.meta_lkl > 1 - TOL] = 1 - TOL
 
     def update_alpha(self, init=False, learning_rate=0.2, use_all_marg=False):
         if init:
@@ -434,7 +435,7 @@ class NumpyDSBMM:
                 )
                 if self._alpha.sum() > 0:
                     self._alpha /= self._alpha.sum()
-                self._alpha[self._alpha < TOL] = TOL
+                # self._alpha[self._alpha < TOL] = TOL
                 self._alpha /= self._alpha.sum()
                 # _alpha[_alpha > 1 - TOL] = 1 - TOL
         else:
@@ -450,8 +451,10 @@ class NumpyDSBMM:
 
             if tmp.sum() > 0:
                 tmp /= tmp.sum()
-            tmp[tmp < TOL] = TOL
-            tmp /= tmp.sum()
+            else:
+                tmp = np.ones(self.Q) / self.Q
+            # tmp[tmp < TOL] = TOL
+            # tmp /= tmp.sum()
             # tmp[tmp > 1 - TOL] = 1 - TOL
 
             tmp = learning_rate * tmp + (1 - learning_rate) * self._alpha
@@ -506,7 +509,7 @@ class NumpyDSBMM:
             # qqprime_trans[q, :] = TOL
             # correct_pi()
         qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis]
-        qqprime_trans[qqprime_trans < TOL] = TOL
+        # qqprime_trans[qqprime_trans < TOL] = TOL
         qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis]
         if not init:
             tmp = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
@@ -545,13 +548,13 @@ class NumpyDSBMM:
             lam_den = np.einsum(
                 "tq,tr->tqr", self._kappa[:, :, 1], self._kappa[:, :, 0]
             )
-            lam_num[lam_num < TOL] = TOL
-            lam_den[lam_den < TOL] = 1.0
+            # lam_num[lam_num < TOL] = TOL
+            # lam_den[lam_den < TOL] = 1.0
             if not self.directed:
                 lam_num = (lam_num + lam_num.transpose(1, 0, 2)) / 2
                 lam_den = (lam_den + lam_den.transpose(1, 0, 2)) / 2
-            lam_num[lam_num < TOL] = TOL
-            lam_den[lam_den < TOL] = 1.0
+            # lam_num[lam_num < TOL] = TOL
+            # lam_den[lam_den < TOL] = 1.0
         else:
             lam_num = np.dstack(
                 [
@@ -561,18 +564,18 @@ class NumpyDSBMM:
                     for t in range(self.T)
                 ]
             )
-            lam_num[lam_num < TOL] = TOL
+            # lam_num[lam_num < TOL] = TOL
             lam_den_out = np.einsum("itq,it->qt", self.node_marg, self.degs[:, :, 1])
             lam_den_in = np.einsum("itq,it->qt", self.node_marg, self.degs[:, :, 0])
             lam_den = np.einsum("qt,rt->qrt", lam_den_out, lam_den_in)
-            lam_den[lam_den < TOL] = 1.0
+            # lam_den[lam_den < TOL] = 1.0
             if not self.directed:
                 lam_num = (lam_num + lam_num.transpose(1, 0, 2)) / 2
                 lam_den = (lam_den + lam_den.transpose(1, 0, 2)) / 2
-            lam_num[lam_num < TOL] = TOL
-            lam_den[lam_den < TOL] = 1.0
+            # lam_num[lam_num < TOL] = TOL
+            # lam_den[lam_den < TOL] = 1.0
         # NB use relative rather than absolute difference here as lam could be large
-        tmp = lam_num / lam_den
+        tmp = np.divide(lam_num, lam_den, where=lam_den > 0, out=np.zeros_like(lam_num))
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self._lam
             tmp_diff = np.abs((tmp - self._lam) / self._lam).mean()
@@ -628,13 +631,13 @@ class NumpyDSBMM:
                 ).sum(axis=-1)
                 [np.fill_diagonal(beta_num[:, :, t], diag_vals) for t in range(self.T)]
                 beta_den = np.einsum("qt,rt->qrt", self._n_qt, self._n_qt)
-                beta_num[beta_num < TOL] = TOL
-                beta_den[beta_den < TOL] = 1.0
+                # beta_num[beta_num < TOL] = TOL
+                # beta_den[beta_den < TOL] = 1.0
                 if not self.directed:
                     beta_num = (beta_num + beta_num.transpose(1, 0, 2)) / 2
                     beta_den = (beta_den + beta_den.transpose(1, 0, 2)) / 2
-                beta_num[beta_num < TOL] = TOL
-                beta_den[beta_den < TOL] = 1.0
+                # beta_num[beta_num < TOL] = TOL
+                # beta_den[beta_den < TOL] = 1.0
                 # enforce uniformity for identifiability
                 diag_vals = np.stack(
                     [np.diag(beta_den[:, :, t]) for t in range(self.T)], axis=-1
@@ -652,10 +655,10 @@ class NumpyDSBMM:
             [np.fill_diagonal(beta_num[:, :, t], diag_vals) for t in range(self.T)]
             if not self.directed:
                 beta_num = (beta_num + beta_num.transpose(1, 0, 2)) / 2
-            beta_num[beta_num < TOL] = TOL
+            # beta_num[beta_num < TOL] = TOL
             beta_den = self.node_marg.sum(axis=0).T
             beta_den = np.einsum("qt,rt->qrt", beta_den, beta_den)
-            beta_den[beta_den < TOL] = 1.0
+            # beta_den[beta_den < TOL] = 1.0
             # enforce uniformity for identifiability
             diag_vals = np.stack(
                 [np.diag(beta_den[:, :, t]) for t in range(self.T)], axis=-1
@@ -665,9 +668,11 @@ class NumpyDSBMM:
                 beta_den = (beta_den + beta_den.transpose(1, 0, 2)) / 2
 
         # correct for numerical stability
-        tmp = beta_num / beta_den
-        tmp[tmp < TOL] = TOL
-        tmp[tmp > 1 - TOL] = 1 - TOL
+        tmp = np.divide(
+            beta_num, beta_den, where=beta_den > 0, out=np.zeros_like(beta_num)
+        )
+        # tmp[tmp < TOL] = TOL
+        # tmp[tmp > 1 - TOL] = 1 - TOL
 
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self._beta
@@ -731,8 +736,8 @@ class NumpyDSBMM:
                     for q in range(self.Q)
                 ]
             )
-            xi[xi < TOL] = 1.0
-            zeta[zeta < TOL] = TOL
+            # xi[xi < TOL] = 1.0
+            # zeta[zeta < TOL] = TOL
         else:
             xi[:, :, 0] = self.node_marg.sum(axis=0).T
             # zeta = np.einsum("itq,itd->qtd", self.node_marg, self.X[s]) # can't use einsum if X[s] contains nans, i.e. missing nodes
@@ -741,11 +746,11 @@ class NumpyDSBMM:
                 .sum(axis=0)
                 .data.transpose(1, 0, 2)
             )
-            xi[xi < TOL] = 1.0
-            zeta[zeta < TOL] = TOL
+            # xi[xi < TOL] = 1.0
+            # zeta[zeta < TOL] = TOL
         # NB again use relative error here as could be large
-        tmp = zeta / xi
-        tmp[tmp < TOL] = TOL
+        tmp = np.divide(zeta, xi, where=xi > 0, out=np.zeros_like(zeta))
+        # tmp[tmp < TOL] = TOL
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
             tmp_diff = np.abs((tmp - self.meta_params[s]) / self.meta_params[s]).mean()
@@ -786,8 +791,8 @@ class NumpyDSBMM:
                     for q in range(self.Q)
                 ]
             )
-            xi[xi < TOL] = 1.0
-            rho[rho < TOL] = TOL
+            # xi[xi < TOL] = 1.0
+            # rho[rho < TOL] = TOL
         else:
             xi[:, :, 0] = self.node_marg.sum(axis=0).T
             # rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s]) # again can't use einsum w nans in X[s]
@@ -796,11 +801,11 @@ class NumpyDSBMM:
                 .sum(axis=0)
                 .data.transpose(1, 0, 2)
             )
-            xi[xi < TOL] = 1.0
-            rho[rho < TOL] = TOL
-        tmp = rho / xi
-        tmp[tmp < TOL] = TOL
-        tmp[tmp > 1 - TOL] = 1 - TOL
+            # xi[xi < TOL] = 1.0
+            # rho[rho < TOL] = TOL
+        tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho))
+        # tmp[tmp < TOL] = TOL
+        # tmp[tmp > 1 - TOL] = 1 - TOL
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
             tmp_diff = np.abs(tmp - self.meta_params[s]).mean()
@@ -828,17 +833,18 @@ class NumpyDSBMM:
                     for q in range(self.Q)
                 ]
             )
-            rho[rho < TOL] = TOL
+            # rho[rho < TOL] = TOL
         else:
             rho = (
                 (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
                 .sum(axis=0)
                 .data.transpose(1, 0, 2)
             )
-            rho[rho < TOL] = TOL
-        tmp = rho / rho.sum(axis=-1, keepdims=True)
-        tmp[tmp < TOL] = TOL
-        tmp /= tmp.sum(axis=-1, keepdims=True)
+            # rho[rho < TOL] = TOL
+        xi = rho.sum(axis=-1, keepdims=True)
+        tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho))
+        # tmp[tmp < TOL] = TOL
+        # tmp /= tmp.sum(axis=-1, keepdims=True)
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
             tmp_diff = np.abs(tmp - self.meta_params[s]).mean()

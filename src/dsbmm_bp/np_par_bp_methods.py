@@ -17,7 +17,7 @@ try:
     # (for numerical stability)
     PLANTED_P = config["planted_p"]
 except FileNotFoundError:
-    TOL = 1e-50
+    TOL = 1e-70
     LARGE_DEG_THR = 20
     RANDOM_ONLINE_UPDATE_MSG = False
     PLANTED_P = 0.8
@@ -82,6 +82,8 @@ class NumpyBP:
         self._psi_e = sparse.vstack(
             [sparse.csr_matrix(sym_A[t]) for t in range(self.T) for _ in range(self.Q)]
         )
+        if self.N > 1000:
+            print(f"{len(self._psi_e.data)} messages in full system")
         if mode == "random":
             # initialise by random messages and marginals
             self.node_marg = np.random.rand(self.N, self.T, self.Q)
@@ -263,7 +265,7 @@ class NumpyBP:
         # _psi_t in shape [N, T - 1, Q, (backwards from t+1, forwards from t)]
         # so return gives msg term for i belonging to q at t to i at t+1 for t<T in i,t,q
         out = np.einsum("itr,rq->itq", self._psi_t[:, :, :, 1], self.trans_prob)
-        out[out < TOL] = TOL
+        # out[out < TOL] = TOL
         return out
 
     def backward_temp_msg_term(self):
@@ -285,7 +287,7 @@ class NumpyBP:
         # sum_qprime(trans_prob(q,qprime)*_psi_t[i,t,qprime,0])
         # from t+1 to t
         out = np.einsum("itr,qr->itq", self._psi_t[..., 0], self.trans_prob)
-        out[out < TOL] = TOL
+        # out[out < TOL] = TOL
         return out
 
     def construct_edge_idxs_and_inv(self):
@@ -874,7 +876,7 @@ class NumpyBP:
         log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
         tmp[:, 1:, :] += log_forward_term
         tmp_marg = np.exp(tmp)
-        tmp_marg[tmp_marg < TOL] = TOL
+        # tmp_marg[tmp_marg < TOL] = TOL
         f_site += np.log(tmp_marg.sum(axis=-1)).sum()
         f_site /= self.N * self.T
 
