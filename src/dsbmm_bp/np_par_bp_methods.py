@@ -472,7 +472,14 @@ class NumpyBP:
                 field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = (
                     self._psi_e[j_idxs, i_idxs].T.reshape(-1, self.Q) @ beta
                 )
-
+        # REMOVE:
+        try:
+            assert np.all(field_terms > 0)
+        except AssertionError:
+            print(np.nonzero(field_terms <= 0.0))
+            print(np.count_nonzero(field_terms == 0))
+            print(np.count_nonzero(field_terms < 0))
+            raise RuntimeError("Problem w spatial field terms")
         return field_terms
 
     @property
