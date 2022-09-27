@@ -19,7 +19,7 @@ try:
         "non_informative_init"
     ]  # initialise alpha, pi as uniform (True), or according to init part passed (False)
 except FileNotFoundError:
-    TOL = 1e-100
+    TOL = 1e-6
     NON_INFORMATIVE_INIT = True
 
 
@@ -155,7 +155,7 @@ class NumpyDSBMM:
             # ).fit_predict(kmeans_mat)
             # self.Z = np.tile(kmeans_labels, (1, self.T))
 
-        self.diff = 1.0
+        self.diff = 0.0
         self.verbose = verbose
         self.frozen = frozen
 
@@ -491,12 +491,12 @@ class NumpyDSBMM:
             # tmp[tmp > 1 - TOL] = 1 - TOL
 
             tmp = learning_rate * tmp + (1 - learning_rate) * self._alpha
-            tmp_diff = np.abs(tmp - self._alpha).mean()
+            tmp_diff = np.abs(tmp - self._alpha).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating alpha")
             if self.verbose:
                 print("Alpha diff:", np.round_(tmp_diff, 3))
-            self.diff += tmp_diff
+            self.diff = max(tmp_diff, self.diff)
             self._alpha = tmp
 
     def update_pi(self, init=False, learning_rate=0.2):
@@ -546,12 +546,12 @@ class NumpyDSBMM:
         qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis]
         if not init:
             tmp = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
-            tmp_diff = np.abs(tmp - self._pi).mean()
+            tmp_diff = np.abs(tmp - self._pi).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating pi")
             if self.verbose:
                 print("Pi diff:", np.round_(tmp_diff, 3))
-            self.diff += tmp_diff
+            self.diff = max(tmp_diff, self.diff)
             self._pi = tmp
         else:
             self._pi = qqprime_trans
@@ -613,12 +613,17 @@ class NumpyDSBMM:
         )
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self._lam
-            tmp_diff = np.abs((tmp - self._lam) / self._lam).mean()
+            tmp_diff = np.divide(
+                np.abs(tmp - self._lam),
+                self._lam,
+                where=self._lam > 0.0,
+                out=np.zeros_like(self._lam, dtype=float),
+            ).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating lambda")
             if self.verbose:
                 print("Lambda diff:", np.round_(tmp_diff, 3))
-            self.diff += tmp_diff
+            self.diff = max(tmp_diff, self.diff)
             self._lam = tmp
         else:
             self._lam = tmp
@@ -714,12 +719,12 @@ class NumpyDSBMM:
 
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self._beta
-            tmp_diff = np.abs(tmp - self._beta).mean()
+            tmp_diff = np.abs(tmp - self._beta).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating beta")
             if self.verbose:
                 print("Beta diff:", np.round_(tmp_diff, 3))
-            self.diff += tmp_diff
+            self.diff = max(tmp_diff, self.diff)
             self._beta = tmp
         else:
             self._beta = tmp
@@ -791,12 +796,17 @@ class NumpyDSBMM:
         # tmp[tmp < TOL] = TOL
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
-            tmp_diff = np.abs((tmp - self.meta_params[s]) / self.meta_params[s]).mean()
+            tmp_diff = np.divide(
+                np.abs(tmp - self.meta_params[s]),
+                self.meta_params[s],
+                where=self.meta_params[s] > 0.0,
+                out=np.zeros_like(self.meta_params[s], dtype=float),
+            ).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating poisson params")
             if self.verbose:
                 print("Poisson diff: ", np.round_(tmp_diff, 3))
-            self.diff += tmp_diff
+            self.diff = max(tmp_diff, self.diff)
             self.meta_params[s] = tmp
         else:
             if np.isnan(tmp).sum() > 0:
@@ -846,12 +856,12 @@ class NumpyDSBMM:
         # tmp[tmp > 1 - TOL] = 1 - TOL
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
-            tmp_diff = np.abs(tmp - self.meta_params[s]).mean()
+            tmp_diff = np.abs(tmp - self.meta_params[s]).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating IB params")
             if self.verbose:
                 print("IB diff: ", np.round_(tmp_diff, 3))
-            self.diff += tmp_diff
+            self.diff = max(tmp_diff, self.diff)
             self.meta_params[s] = tmp
         else:
             self.meta_params[s] = tmp
@@ -885,12 +895,12 @@ class NumpyDSBMM:
         # tmp /= tmp.sum(axis=-1, keepdims=True)
         if not init:
             tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
-            tmp_diff = np.abs(tmp - self.meta_params[s]).mean()
+            tmp_diff = np.abs(tmp - self.meta_params[s]).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating IB params")
             if self.verbose:
                 print("IB diff: ", np.round_(tmp_diff, 3))
-            self.diff += tmp_diff
+            self.diff = max(tmp_diff, self.diff)
             self.meta_params[s] = tmp
         else:
             self.meta_params[s] = tmp
