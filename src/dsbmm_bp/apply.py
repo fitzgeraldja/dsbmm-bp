@@ -490,8 +490,11 @@ if __name__ == "__main__":
         ]
         for s, meta_type in enumerate(meta_types):
             # convert suitably according to specified distribution
-            if meta_type in ["indep bernoulli", "categorical"]:
+            if meta_type == "indep bernoulli":
                 X[s] = (X[s] > 0).astype(int)
+            elif meta_type == "categorical":
+                # FINISH
+                X[s] = X[s].argmax(axis=-1)
             elif meta_type == "poisson":
                 X[s] = (X[s] - X[s].min()).astype(int)
 
