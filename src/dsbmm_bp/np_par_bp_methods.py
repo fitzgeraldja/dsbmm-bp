@@ -477,6 +477,8 @@ class NumpyBP:
             assert np.all(field_terms > 0)
         except AssertionError:
             print(np.nonzero(field_terms <= 0.0))
+            print(np.count_nonzero(field_terms == 0))
+            print(np.count_nonzero(field_terms < 0))
             raise RuntimeError("Problem w spatial field terms")
         return field_terms
 
