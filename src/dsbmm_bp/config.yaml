@@ -1,7 +1,7 @@
 max_msg_iter: 10 # max num BP iterations each EM cycle
-msg_conv_tol: 1.0e-4 # conv tol for differences between messages after BP update
+msg_conv_tol: 1.0e-6 # conv tol for differences between messages after BP update
 max_iter: 30 # max num EM iterations
-conv_tol: 1.0e-4 # total difference tol for params after EM run
+conv_tol: 1.0e-5 # total difference tol for params after EM run
 tol: 1.0e-50 # min val of any array before thresholding for num stab
 large_deg_thr: 20 # threshold for degree above which logs used
 random_online_update_msg: True # update messages sequentially or in random order

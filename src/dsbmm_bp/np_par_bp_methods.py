@@ -17,7 +17,7 @@ try:
     # (for numerical stability)
     PLANTED_P = config["planted_p"]
 except FileNotFoundError:
-    TOL = 1e-100
+    TOL = 5e-6
     LARGE_DEG_THR = 20
     RANDOM_ONLINE_UPDATE_MSG = False
     PLANTED_P = 0.8
@@ -727,7 +727,9 @@ class NumpyBP:
         tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
         tmp_backwards_msg /= tmp_backwards_msg.sum(axis=-1)[:, :, np.newaxis]
         tmp_backwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
-        self.msg_diff += np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0]).sum()
+        self.msg_diff = max(
+            np.max(np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0])), self.msg_diff
+        )
         self._psi_t[:, :, :, 0] = tmp_backwards_msg
         # include forward term now backwards term updated
         forward_term = self.forward_temp_msg_term()
@@ -773,10 +775,13 @@ class NumpyBP:
         tmp_spatial_msg /= tmp_spatial_msg.sum(axis=1)[:, np.newaxis]
         for t in range(self.T):
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
-            self.msg_diff += np.abs(
-                tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]].flatten()
-                - self._psi_e[j_idxs, i_idxs]
-            ).sum()  # NB need to mult by deg_i so weighted correctly
+            self.msg_diff = max(
+                np.abs(
+                    tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]].flatten()
+                    - self._psi_e[j_idxs, i_idxs]
+                ).max(),
+                self.msg_diff,
+            )
             self._psi_e[j_idxs, i_idxs] = tmp_spatial_msg[
                 self.E_idxs[t] : self.E_idxs[t + 1]
             ].flatten()
@@ -796,7 +801,9 @@ class NumpyBP:
         tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
         tmp_forwards_msg /= tmp_forwards_msg.sum(axis=-1)[:, :, np.newaxis]
         tmp_forwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
-        self.msg_diff += np.abs(tmp_forwards_msg - self._psi_t[..., 1]).sum()
+        self.msg_diff = max(
+            np.abs(tmp_forwards_msg - self._psi_t[..., 1]).max(), self.msg_diff
+        )
         self._psi_t[:, :, :, 1] = tmp_forwards_msg
 
         ## UPDATE MARGINAL OF i AT t ##
@@ -813,7 +820,7 @@ class NumpyBP:
         tmp_marg[~self._pres_nodes, :] = 0.0  # set to zero if not present
         self.node_marg = tmp_marg
 
-        self.msg_diff /= self.n_tot_msgs
+        # self.msg_diff /= self.n_tot_msgs
 
         if np.isnan(self.msg_diff).sum() > 0:
             if np.isnan(self.node_marg).sum() > 0:
