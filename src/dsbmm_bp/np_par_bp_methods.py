@@ -727,9 +727,12 @@ class NumpyBP:
         tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
         tmp_backwards_msg /= tmp_backwards_msg.sum(axis=-1)[:, :, np.newaxis]
         tmp_backwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
-        self.msg_diff = max(
-            np.max(np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0])), self.msg_diff
-        )
+        tmp_diff = np.max(np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0]))
+        try:
+            assert not np.isnan(tmp_diff)
+        except AssertionError:
+            raise RuntimeError("Problem w backwards msg")
+        self.msg_diff = max(tmp_diff, self.msg_diff)
         self._psi_t[:, :, :, 0] = tmp_backwards_msg
         # include forward term now backwards term updated
         forward_term = self.forward_temp_msg_term()
@@ -775,11 +778,16 @@ class NumpyBP:
         tmp_spatial_msg /= tmp_spatial_msg.sum(axis=1)[:, np.newaxis]
         for t in range(self.T):
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
+            tmp_diff = np.abs(
+                tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]].flatten()
+                - self._psi_e[j_idxs, i_idxs]
+            ).max()
+            try:
+                assert not np.isnan(tmp_diff)
+            except AssertionError:
+                raise RuntimeError("Problem w spatial msg")
             self.msg_diff = max(
-                np.abs(
-                    tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]].flatten()
-                    - self._psi_e[j_idxs, i_idxs]
-                ).max(),
+                tmp_diff,
                 self.msg_diff,
             )
             self._psi_e[j_idxs, i_idxs] = tmp_spatial_msg[
@@ -801,9 +809,12 @@ class NumpyBP:
         tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
         tmp_forwards_msg /= tmp_forwards_msg.sum(axis=-1)[:, :, np.newaxis]
         tmp_forwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
-        self.msg_diff = max(
-            np.abs(tmp_forwards_msg - self._psi_t[..., 1]).max(), self.msg_diff
-        )
+        np.abs(tmp_forwards_msg - self._psi_t[..., 1]).max()
+        try:
+            assert not np.isnan(tmp_diff)
+        except AssertionError:
+            raise RuntimeError("Problem w forwards msg")
+        self.msg_diff = max(tmp_diff, self.msg_diff)
         self._psi_t[:, :, :, 1] = tmp_forwards_msg
 
         ## UPDATE MARGINAL OF i AT t ##
