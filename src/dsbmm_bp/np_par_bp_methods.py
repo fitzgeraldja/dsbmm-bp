@@ -691,9 +691,6 @@ class NumpyBP:
             ],
             axis=1,
         )
-        max_log_msg = -1000000.0
-        max_msg_log = log_spatial_msg.max(axis=-1)
-        max_msg_log[max_msg_log < max_log_msg] = max_log_msg
         if self.deg_corr:
             log_spatial_msg -= np.einsum("qt,it->itq", self._h, self.degs[:, :, 1])
         else:
@@ -727,7 +724,10 @@ class NumpyBP:
         # log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
         ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
-        tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_msg_log[:, 1:, np.newaxis])
+        max_log_msg = -1000000.0
+        max_back_msg_log = tmp[:, 1:, :].max(axis=-1, keepdims=True)
+        max_back_msg_log[max_back_msg_log < max_log_msg] = max_log_msg
+        tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_back_msg_log)
         back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
         tmp_backwards_msg = np.divide(
             tmp_backwards_msg,
@@ -776,14 +776,14 @@ class NumpyBP:
                 tmp[i_idxs, t, :]
                 + tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]][inv_idxs, :]
             )
-        log_field_term_max = tmp_spatial_msg.max(axis=1)
+        log_field_term_max = tmp_spatial_msg.max(axis=1, keepdims=True)
         log_field_term_max[log_field_term_max < max_log_msg] = max_log_msg
-        tmp_spatial_msg = np.exp(tmp_spatial_msg - log_field_term_max[:, np.newaxis])
-        tmp_spat_sums = tmp_spatial_msg.sum(axis=1)
+        tmp_spatial_msg = np.exp(tmp_spatial_msg - log_field_term_max)
+        tmp_spat_sums = tmp_spatial_msg.sum(axis=1, keepdims=True)
         tmp_spatial_msg = np.divide(
             tmp_spatial_msg,
-            tmp_spat_sums[:, np.newaxis],
-            where=tmp_spat_sums[:, np.newaxis] > 0,
+            tmp_spat_sums,
+            where=tmp_spat_sums > 0,
             out=np.zeros_like(tmp_spatial_msg),
         )
         # tmp_spatial_msg[tmp_spatial_msg < TOL] = TOL
@@ -808,9 +808,10 @@ class NumpyBP:
 
         ## UPDATE FORWARDS MESSAGES FROM i AT t ##
         # just need to remove back term previously added
-        tmp_forwards_msg = np.exp(
-            tmp[:, :-1, :] - max_msg_log[:, :-1, np.newaxis] - log_back_term
-        )
+        log_forwards_msg = tmp[:, :-1, :] - log_back_term
+        max_fwd_msg_log = log_forwards_msg.max(axis=-1, keepdims=True)
+        max_fwd_msg_log[max_fwd_msg_log < max_log_msg] = max_log_msg
+        tmp_forwards_msg = np.exp(log_forwards_msg - max_fwd_msg_log)
         forward_sums = tmp_forwards_msg.sum(axis=-1)
         tmp_forwards_msg = np.divide(
             tmp_forwards_msg,
@@ -830,7 +831,9 @@ class NumpyBP:
         self._psi_t[:, :, :, 1] = tmp_forwards_msg
 
         ## UPDATE MARGINAL OF i AT t ##
-        tmp_marg = np.exp(tmp - max_msg_log[:, :, np.newaxis])
+        log_marg_max = tmp.max(axis=-1, keepdims=True)
+        log_marg_max[log_marg_max < max_log_msg] = max_log_msg
+        tmp_marg = np.exp(tmp - log_marg_max)
         marg_sums = tmp_marg.sum(axis=-1)
         tmp_marg = np.divide(
             tmp_marg,
@@ -942,7 +945,10 @@ class NumpyBP:
         log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
         log_forward_term[~self._pres_nodes[:, 1:], :] = 0.0
         tmp[:, 1:, :] += log_forward_term
-        tmp_marg = np.exp(tmp)
+        # log_marg_max = tmp.max(axis=-1, keepdims=True)
+        tmp_marg = np.exp(
+            tmp
+        )  # don't subtract max here as otherwise norm sum incorrect for free energy
         # tmp_marg[tmp_marg < TOL] = TOL
         tmp_marg_sums = tmp_marg.sum(axis=-1)
         f_site += np.log(
@@ -951,7 +957,7 @@ class NumpyBP:
             out=np.zeros_like(tmp_marg_sums),
             # out=10 * np.log(TOL) * np.ones_like(tmp_marg_sums),
         ).sum()
-        f_site /= self.N * self.T
+        f_site /= self.model._tot_N_pres
 
         # calc twopoint marg terms
         unnorm_twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
@@ -979,7 +985,8 @@ class NumpyBP:
                         self.E_idxs[t] : self.E_idxs[t + 1]
                     ] *= self.block_edge_prob[np.newaxis, :, :, t]
         f_spatlink = (
-            np.log(unnorm_twopoint_e_marg.sum(axis=(-2, -1))).sum() / self.N * self.T
+            np.log(unnorm_twopoint_e_marg.sum(axis=(-2, -1))).sum()
+            / self.model._tot_N_pres
         )
         unnorm_twopoint_t_marg = np.einsum(
             "itq,itr,qr->itqr",
@@ -994,14 +1001,13 @@ class NumpyBP:
                 where=twopoint_t_norms > 0.0,
                 out=np.zeros_like(twopoint_t_norms),
             ).sum()
-            / self.N
-            * self.T
+            / self.model._tot_N_pres
         )
 
         # calc last term
         marg_sums = self.node_marg.sum(axis=0)
         last_term = np.einsum("qrt,tq,tr->", self.model._beta, marg_sums, marg_sums)
-        last_term /= self.N * self.T
+        last_term /= self.model._tot_N_pres
 
         # if self.verbose:
         # print("Spatial link energy: ", f_spatlink)

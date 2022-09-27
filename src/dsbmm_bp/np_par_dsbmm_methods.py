@@ -765,25 +765,29 @@ class NumpyDSBMM:
         xi = np.ones((self.Q, self.T, 1))
         zeta = np.zeros((self.Q, self.T, 1))
         if init:
-            xi[:, :, 0] = np.array(
-                [
-                    [(self.Z[:, t] == q).sum() for t in range(self.T)]
-                    for q in range(self.Q)
-                ]
-            )
-            zeta = np.array(
-                [
+            if NON_INFORMATIVE_INIT:
+                xi[:, :, 0] = np.ones((self.Q, self.T), dtype=float)
+                zeta[:, :, 1] = self.X[s].mean(axis=0, keepdims=True)
+            else:
+                xi[:, :, 0] = np.array(
+                    [
+                        [(self.Z[:, t] == q).sum() for t in range(self.T)]
+                        for q in range(self.Q)
+                    ]
+                )
+                zeta = np.array(
                     [
                         [
-                            np.nansum(self.X[s][self.Z[:, t] == q, t, 0])
-                            if not np.all(self.X[s][self.Z[:, t] == q, t, 0].mask)
-                            else 0.0  # handle case of init group containing only missing nodes at t
+                            [
+                                np.nansum(self.X[s][self.Z[:, t] == q, t, 0])
+                                if not np.all(self.X[s][self.Z[:, t] == q, t, 0].mask)
+                                else 0.0  # handle case of init group containing only missing nodes at t
+                            ]
+                            for t in range(self.T)
                         ]
-                        for t in range(self.T)
+                        for q in range(self.Q)
                     ]
-                    for q in range(self.Q)
-                ]
-            )
+                )
             # xi[xi < TOL] = 1.0
             # zeta[zeta < TOL] = TOL
         else:
@@ -825,25 +829,27 @@ class NumpyDSBMM:
         L = self.X[s].shape[-1]
         rho = np.zeros((self.Q, self.T, L))
         if init:
-            # TODO: Change to allow non-informative init
-            # tags: IMPORTANT!
-            xi[:, :, 0] = np.array(
-                [
-                    [(self.Z[:, t] == q).sum() for t in range(self.T)]
-                    for q in range(self.Q)
-                ]
-            )
-            rho = np.array(
-                [
+            if NON_INFORMATIVE_INIT:
+                xi = np.ones_like(xi, dtype=float)
+                rho[:, :, :] = self.X[s].mean(axis=0, keepdims=True)
+            else:
+                xi[:, :, 0] = np.array(
                     [
-                        self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
-                        if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
-                        else np.zeros(L)
-                        for t in range(self.T)
+                        [(self.Z[:, t] == q).sum() for t in range(self.T)]
+                        for q in range(self.Q)
                     ]
-                    for q in range(self.Q)
-                ]
-            )
+                )
+                rho = np.array(
+                    [
+                        [
+                            self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                            if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
+                            else np.zeros(L)
+                            for t in range(self.T)
+                        ]
+                        for q in range(self.Q)
+                    ]
+                )
             # xi[xi < TOL] = 1.0
             # rho[rho < TOL] = TOL
         else:
@@ -875,17 +881,20 @@ class NumpyDSBMM:
         L = self.X[s].shape[-1]
         rho = np.zeros((self.Q, self.T, L))
         if init:
-            rho = np.array(
-                [
+            if NON_INFORMATIVE_INIT:
+                rho[:, :, :] = self.X[s].mean(axis=0, keepdims=True)
+            else:
+                rho = np.array(
                     [
-                        self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
-                        if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
-                        else np.zeros(L)
-                        for t in range(self.T)
+                        [
+                            self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                            if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
+                            else np.zeros(L)
+                            for t in range(self.T)
+                        ]
+                        for q in range(self.Q)
                     ]
-                    for q in range(self.Q)
-                ]
-            )
+                )
             # rho[rho < TOL] = TOL
         else:
             rho = (
