@@ -268,6 +268,8 @@ class NumpyBP:
         # so return gives msg term for i belonging to q at t to i at t+1 for t<T in i,t,q
         out = np.einsum("itr,rq->itq", self._psi_t[:, :, :, 1], self.trans_prob)
         # out[out < TOL] = TOL
+        # REMOVE:
+        assert np.all(out[self._pres_trans] > 0)
         return out
 
     def backward_temp_msg_term(self):
@@ -290,6 +292,8 @@ class NumpyBP:
         # from t+1 to t
         out = np.einsum("itr,qr->itq", self._psi_t[..., 0], self.trans_prob)
         # out[out < TOL] = TOL
+        # REMOVE:
+        assert np.all(out[self._pres_trans] > 0)
         return out
 
     def construct_edge_idxs_and_inv(self):
@@ -710,22 +714,22 @@ class NumpyBP:
         back_term = self.backward_temp_msg_term()
         log_back_term = np.log(
             back_term,
-            where=back_term > 0.0,
-            out=2 * np.log(TOL) * np.ones_like(back_term),
+            where=self._pres_trans,
+            out=np.zeros_like(back_term),
         )
-        log_back_term[~self._pres_trans, :] = 0.0
+        # log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
         ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
         tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_msg_log[:, 1:, np.newaxis])
-        back_sums = tmp_backwards_msg.sum(axis=-1)
+        back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
         tmp_backwards_msg = np.divide(
             tmp_backwards_msg,
-            back_sums[:, :, np.newaxis],
-            where=back_sums[:, :, np.newaxis] > 0,
+            back_sums,
+            where=back_sums > 0,
             out=np.zeros_like(tmp_backwards_msg),
         )
-        tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
-        tmp_backwards_msg /= tmp_backwards_msg.sum(axis=-1)[:, :, np.newaxis]
+        # tmp_backwards_msg[tmp_backwards_msg < TOL] = TOL
+        # tmp_backwards_msg /= tmp_backwards_msg.sum(axis=-1)[:, :, np.newaxis]
         tmp_backwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
         tmp_diff = np.max(np.abs(tmp_backwards_msg - self._psi_t[:, :, :, 0]))
         try:
@@ -739,7 +743,8 @@ class NumpyBP:
         log_forward_term = np.log(
             forward_term,
             where=forward_term > 0.0,
-            out=2 * np.log(TOL) * np.ones_like(forward_term),
+            # out=2 * np.log(TOL) * np.ones_like(forward_term),
+            out=np.zeros_like(forward_term),
         )
         # use alpha where i not present at t-1 if i present at t
         log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
@@ -774,8 +779,8 @@ class NumpyBP:
             where=tmp_spat_sums[:, np.newaxis] > 0,
             out=np.zeros_like(tmp_spatial_msg),
         )
-        tmp_spatial_msg[tmp_spatial_msg < TOL] = TOL
-        tmp_spatial_msg /= tmp_spatial_msg.sum(axis=1)[:, np.newaxis]
+        # tmp_spatial_msg[tmp_spatial_msg < TOL] = TOL
+        # tmp_spatial_msg /= tmp_spatial_msg.sum(axis=1)[:, np.newaxis]
         for t in range(self.T):
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
             tmp_diff = np.abs(
@@ -806,8 +811,8 @@ class NumpyBP:
             where=forward_sums[:, :, np.newaxis] > 0,
             out=np.zeros_like(tmp_forwards_msg),
         )
-        tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
-        tmp_forwards_msg /= tmp_forwards_msg.sum(axis=-1)[:, :, np.newaxis]
+        # tmp_forwards_msg[tmp_forwards_msg < TOL] = TOL
+        # tmp_forwards_msg /= tmp_forwards_msg.sum(axis=-1)[:, :, np.newaxis]
         tmp_forwards_msg[~self._pres_trans, :] = 0.0  # set to zero if not present
         np.abs(tmp_forwards_msg - self._psi_t[..., 1]).max()
         try:
@@ -826,8 +831,13 @@ class NumpyBP:
             where=marg_sums[:, :, np.newaxis] > 0,
             out=np.zeros_like(tmp_marg),
         )
-        tmp_marg[tmp_marg < TOL] = TOL
-        tmp_marg /= tmp_marg.sum(axis=-1)[:, :, np.newaxis]
+        # tmp_marg[tmp_marg < TOL] = TOL
+        tmp_marg = np.divide(
+            tmp_marg,
+            tmp_marg.sum(axis=-1, keepdims=True),
+            where=tmp_marg.sum(axis=-1, keepdims=True) > 0.0,
+            out=np.zeros_like(tmp_marg),
+        )
         tmp_marg[~self._pres_nodes, :] = 0.0  # set to zero if not present
         self.node_marg = tmp_marg
 
@@ -909,17 +919,17 @@ class NumpyBP:
         back_term = self.backward_temp_msg_term()
         log_back_term = np.log(
             back_term,
-            where=back_term > 0.0,
-            out=2 * np.log(TOL) * np.ones_like(back_term),
+            where=self._pres_trans,
+            out=np.zeros_like(back_term),
         )
-        log_back_term[~self._pres_trans, :] = 0.0
+        # log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
         # include forward term
         forward_term = self.forward_temp_msg_term()
         log_forward_term = np.log(
             forward_term,
-            where=forward_term > 0.0,
-            out=2 * np.log(TOL) * np.ones_like(forward_term),
+            where=self._pres_trans,
+            out=np.zeros_like(forward_term),
         )
         # use alpha where i not present at t-1, if i present at t
         log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
@@ -930,8 +940,9 @@ class NumpyBP:
         tmp_marg_sums = tmp_marg.sum(axis=-1)
         f_site += np.log(
             tmp_marg_sums,
-            where=tmp_marg_sums > 0,
-            out=10 * np.log(TOL) * np.ones_like(tmp_marg_sums),
+            where=(tmp_marg_sums > 0),
+            out=np.zeros_like(tmp_marg_sums),
+            # out=10 * np.log(TOL) * np.ones_like(tmp_marg_sums),
         ).sum()
         f_site /= self.N * self.T
 
@@ -1035,17 +1046,15 @@ class NumpyBP:
                     self.twopoint_e_marg[
                         self.E_idxs[t] : self.E_idxs[t + 1]
                     ] *= self.block_edge_prob[np.newaxis, :, :, t]
-            tp_e_sums = self.twopoint_e_marg.sum(axis=(-2, -1))
+            tp_e_sums = self.twopoint_e_marg.sum(axis=(-2, -1), keepdims=True)
             self.twopoint_e_marg = np.divide(
                 self.twopoint_e_marg,
-                tp_e_sums[:, np.newaxis, np.newaxis],
-                where=tp_e_sums[:, np.newaxis, np.newaxis] > 0,
+                tp_e_sums,
+                where=tp_e_sums > 0,
                 out=np.zeros_like(self.twopoint_e_marg),
             )
-            self.twopoint_e_marg[self.twopoint_e_marg < TOL] = TOL
-            self.twopoint_e_marg /= self.twopoint_e_marg.sum(axis=(-2, -1))[
-                :, np.newaxis, np.newaxis
-            ]
+            # self.twopoint_e_marg[self.twopoint_e_marg < TOL] = TOL
+            # self.twopoint_e_marg = np.divide(self.twopoint_e_marg,self.twopoint_e_marg.sum(axis=(-2, -1),keepdims=True),where=
         return self.twopoint_e_marg
 
     def update_twopoint_temp_marg(self):
@@ -1056,17 +1065,17 @@ class NumpyBP:
             self._psi_t[..., 0],
             self.trans_prob,
         )
-        tp_t_sums = self.twopoint_t_marg.sum(axis=(-2, -1))
+        tp_t_sums = self.twopoint_t_marg.sum(axis=(-2, -1), keepdims=True)
         self.twopoint_t_marg = np.divide(
             self.twopoint_t_marg,
-            tp_t_sums[..., np.newaxis, np.newaxis],
-            where=tp_t_sums[..., np.newaxis, np.newaxis] > 0,
+            tp_t_sums,
+            where=tp_t_sums > 0,
             out=np.zeros_like(self.twopoint_t_marg),
         )
-        self.twopoint_t_marg[self.twopoint_t_marg < TOL] = TOL
-        self.twopoint_t_marg /= self.twopoint_t_marg.sum(axis=(-2, -1))[
-            ..., np.newaxis, np.newaxis
-        ]
+        # self.twopoint_t_marg[self.twopoint_t_marg < TOL] = TOL
+        # self.twopoint_t_marg /= self.twopoint_t_marg.sum(axis=(-2, -1))[
+        #     ..., np.newaxis, np.newaxis
+        # ]
         self.twopoint_t_marg[~self._pres_trans, ...] = 0.0  # set to zero if not present
         return self.twopoint_t_marg
 
