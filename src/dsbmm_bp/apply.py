@@ -417,6 +417,12 @@ if __name__ == "__main__":
             "\twhere dist_name is one of the accepted metadata distribution types, and dim is the corresponding dimension."
         )
         net_files = list(DATA_DIR.glob("net_*.pkl"))
+        try:
+            assert len(net_files) > 0
+        except AssertionError:
+            raise FileNotFoundError(
+                "No network files of required form found in specified data directory."
+            )
         print(
             f"Found {len(net_files)} network files, for timestamps {sorted(list(map(lambda x: int(x.stem.split('_')[1]), net_files)))}"
         )
