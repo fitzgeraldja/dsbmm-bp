@@ -489,14 +489,74 @@ if __name__ == "__main__":
             for meta_idx, mn in enumerate(meta_names)
         ]
         for s, meta_type in enumerate(meta_types):
-            # convert suitably according to specified distribution
+            # remove null dimensions
+            null_dims = np.nansum(X[s], axis=(0, 1)) == 0
+            if np.count_nonzero(null_dims) > 0:
+                warnings.warn(
+                    f"The following empty dimensions were found for metadata {meta_names[s]}: {np.flatnonzero(null_dims)}. Removing these dimensions."
+                )
+                X[s] = X[s][:, :, ~null_dims]
+                meta_dims[s] -= np.count_nonzero(null_dims)
+            # now convert suitably according to specified distribution
+            L = X[s].shape[-1]
+            missing_meta = np.isnan(X[s])
             if meta_type == "indep bernoulli":
-                X[s] = (X[s] > 0).astype(int)
+                # restrict to a maximum of 10 dims 'present' for each node, else in high cardinality case likely equally weighting important and noisy meta
+                if L > 10:
+                    tmpx = np.zeros_like(X[s])
+                    k = 10
+                    topkidxs = np.argsort(
+                        X[s], axis=-1
+                    )  # will place nans at end, but should be OK as should only have either whole row nan or nothing
+                    np.put_along_axis(tmpx, topkidxs[..., -k:], 1, axis=-1)
+                    tmpx[X[s] == 0] = 0
+                    tmpx[missing_meta] = np.nan
+                    X[s] = tmpx
+                else:
+                    X[s] = (X[s] > 0) * 1.0
+                    X[s][missing_meta] = np.nan
             elif meta_type == "categorical":
-                # FINISH
-                X[s] = X[s].argmax(axis=-1)
+                tmpx = np.zeros_like(X[s])
+                k = 1
+                topkidxs = np.argsort(X[s], axis=-1)
+                np.put_along_axis(tmpx, topkidxs[..., -k:], 1, axis=-1)
+                tmpx[X[s] == 0] = 0
+                tmpx[missing_meta] = np.nan
+                X[s] = tmpx
+            elif meta_type == "multinomial":
+                # first convert to a form of count dist
+                int_prop_thr = 0.7  # if proportion of integer values is above this, assume integer count dist
+                if np.nanmean(np.mod(X[s][X[s] > 0], 1) == 0) > int_prop_thr:
+                    X[s] = np.round(
+                        X[s]
+                    )  # NB can't just cast to int else nans cause problems
+                else:
+                    # assume need to convert to something similar - as can be floats, will just enforce some precision
+                    n_tot = 1000
+                    tmpx = np.round(
+                        (
+                            X[s]
+                            - np.nanmin(X[s], axis=-1, keepdims=True, where=X[s] != 0.0)
+                        )
+                        / (
+                            np.nanmax(X[s], axis=-1, keepdims=True)
+                            - np.nanmin(X[s], axis=-1, keepdims=True, where=X[s] != 0.0)
+                        )
+                        + 1 * n_tot
+                    )
+                    tmpx[X[s] == 0.0] = 0.0
+                    tmpx[missing_meta] = np.nan
+                    X[s] = tmpx
+
             elif meta_type == "poisson":
-                X[s] = (X[s] - X[s].min()).astype(int)
+                int_prop_thr = 0.7  # if proportion of integer values is above this, assume integer count dist
+                if np.nanmean(np.mod(X[s][X[s] != 0], 1) == 0) > int_prop_thr:
+                    X[s] = np.round(X[s] - np.nanmin(X[s], keepdims=True))
+                else:
+                    warnings.warn(
+                        "Poisson dist being used for non-integer values - no error thrown, but possible problem in dataset."
+                    )
+                    X[s] = np.round(X[s] - np.nanmin(X[s], keepdims=True))
 
         # print([x.shape for x in X])
         data["X"] = X
