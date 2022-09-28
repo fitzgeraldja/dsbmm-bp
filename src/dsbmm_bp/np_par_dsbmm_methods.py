@@ -399,7 +399,7 @@ class NumpyDSBMM:
                             ib_params,
                             where=ib_params > 0.0,
                             out=np.log(TOL) * np.ones_like(ib_params),
-                            out=np.zeros_like(ib_params),
+                            # out=np.zeros_like(ib_params),
                         )
                         * self.X[s][:, np.newaxis, :, :],
                         axis=-1,
