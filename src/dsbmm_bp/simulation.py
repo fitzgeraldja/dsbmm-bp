@@ -840,6 +840,9 @@ def toy_tests(
     def get_p_out(eps):
         return eps * Q * c / N * (1 + (Q - 1) * eps)
 
+    def get_p_stay(eta):
+        return eta + (1 - eta) / Q
+
     # p_outs=eps_grid*p_in
     # p_stays = eta_grid
     # rho_ins = rho_grid
@@ -854,7 +857,7 @@ def toy_tests(
             toy_model(
                 p_in=get_p_in(eps),
                 p_out=get_p_out(eps),
-                p_stay=eta,
+                p_stay=get_p_stay(eta),
                 rho_in=rho,
                 Q=Q,
                 T=T,

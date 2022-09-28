@@ -166,6 +166,9 @@ if __name__ == "__main__":
     def get_p_out(eps):
         return eps * Q * c / N * (1 + (Q - 1) * eps)
 
+    def get_p_stay(eta):
+        return eta + (1 - eta) / Q
+
     data_path = Path("/scratch/fitzgeraldj/data") / "toy_sims"
     data_path.mkdir(exist_ok=True)
     results_dir = data_path.parent / "toy_results"
@@ -331,11 +334,12 @@ if __name__ == "__main__":
                 alpha = (1 / Q) * np.ones(Q)
                 p_in = get_p_in(eps)
                 p_out = get_p_out(eps)
+                p_stay = get_p_stay(eta)
 
                 beta = np.tile(
                     simulation.gen_beta_mat(Q, p_in, p_out)[:, :, np.newaxis], (1, 1, T)
                 )
-                pi = simulation.gen_trans_mat(eta, Q)
+                pi = simulation.gen_trans_mat(p_stay, Q)
 
                 meta_params = [
                     np.tile(
