@@ -757,7 +757,7 @@ class NumpyBP:
         back_term = self.backward_temp_msg_term()
         log_back_term = np.log(
             back_term,
-            where=self._pres_trans[:, :, np.newaxis] & back_term > 0,
+            where=self._pres_trans[:, :, np.newaxis] & (back_term > 0),
             out=np.zeros_like(back_term),
         )
         # log_back_term[~self._pres_trans, :] = 0.0
