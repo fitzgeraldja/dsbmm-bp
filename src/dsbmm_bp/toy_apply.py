@@ -293,8 +293,7 @@ if __name__ == "__main__":
                 if samp_no > 0:
                     # drop first run as compiling
                     start_time = time.time()
-                if verbose:
-                    tqdm.write(f"true eps, eta, rho: {params}")
+                tqdm.write(f"true eps, eta, rho: {params}")
                 tqdm.write("")
                 tqdm.write(f"{'$' * 12} At sample {samp_no + 1} {'$' * 12}")
                 sample.update({"Q": Q, "meta_types": ["categorical"]})
@@ -304,6 +303,7 @@ if __name__ == "__main__":
                 if rho == 1.0:
                     try:
                         assert np.all(true_Z == np.argmax(sample["X"][0], axis=-1))
+                        print("Meta for rho=1.0 showing true labels correctly.")
                     except AssertionError:
                         print(sample["X"][0].shape)
                         print(true_Z.shape)
