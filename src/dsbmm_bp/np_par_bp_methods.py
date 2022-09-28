@@ -308,7 +308,12 @@ class NumpyBP:
         )
         # out[out < TOL] = TOL
         # REMOVE:
-        assert np.all(out[self._pres_trans] > 0)
+        try:
+            assert np.all(out[self._pres_trans] > 0)
+        except AssertionError:
+            print(out[out[self._pres_trans] <= 0])
+            print(np.isnan(out).sum())
+            raise RuntimeError("Problem w backward msg term")
         return out
 
     def construct_edge_idxs_and_inv(self):
