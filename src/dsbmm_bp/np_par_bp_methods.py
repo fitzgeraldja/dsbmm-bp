@@ -323,8 +323,14 @@ class NumpyBP:
             )  # even in case of rho=1, should have this term = pi_{qx^{i(t+1)}}
         except AssertionError:
             print(out[(out <= 0) & self._pres_trans[..., np.newaxis]])
-            print(self._psi_t[np.any(out == 0, axis=-1)[..., np.newaxis], 0])
-            print(self._psi_t[np.any(out == 0, axis=-1)[..., np.newaxis], 0].sum())
+            print(
+                self._psi_t[np.any(out == 0, axis=-1, keepdims=True)[..., np.newaxis]]
+            )
+            print(
+                self._psi_t[
+                    np.any(out == 0, axis=-1, keepdims=True)[..., np.newaxis]
+                ].sum(axis=-2)
+            )
             print(np.isnan(out[self._pres_trans]).sum())
             print(self.trans_prob)
             raise RuntimeError("Problem w backward msg term")
