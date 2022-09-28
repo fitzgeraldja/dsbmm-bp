@@ -773,6 +773,9 @@ class NumpyBP:
         max_back_msg_log = tmp[:, 1:, :].max(axis=-1, keepdims=True)
         max_back_msg_log[max_back_msg_log < max_log_msg] = max_log_msg
         tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_back_msg_log)
+        tmp_backwards_msg[
+            self.log_meta_prob[:, 1:, :] <= np.log(TOL)
+        ] = 0.0  # set to zero if meta suggests such
         back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
         # REMOVE:
         try:
@@ -797,11 +800,12 @@ class NumpyBP:
             raise RuntimeError("Problem w backwards msg")
         self.msg_diff = max(tmp_diff, self.msg_diff)
         # REMOVE:
+        back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
         try:
-            assert np.all(tmp_backwards_msg > 0)
+            assert np.all(back_sums[self._pres_trans] > 0)
         except AssertionError:
-            print(tmp_backwards_msg[self._pres_trans])
-            print(np.count_nonzero(np.isnan(tmp_backwards_msg[self._pres_trans])))
+            print(back_sums[self._pres_trans & (back_sums <= 0)])
+            print(np.count_nonzero(np.isnan(back_sums[self._pres_trans])))
             raise RuntimeError("Problem w backwards msg")
         self._psi_t[:, :, :, 0] = tmp_backwards_msg
         # include forward term now backwards term updated
