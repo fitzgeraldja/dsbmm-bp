@@ -331,7 +331,9 @@ class NumpyBP:
             print(
                 self._psi_t[
                     np.tile(np.any(out == 0, axis=-1, keepdims=True), (1, 1, self.Q)), 0
-                ].sum(axis=-2)
+                ]
+                .reshape(-1, self.Q)
+                .sum(axis=-1)
             )
             print(np.isnan(out[self._pres_trans]).sum())
             print(self.trans_prob)
