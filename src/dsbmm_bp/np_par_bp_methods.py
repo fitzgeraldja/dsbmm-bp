@@ -311,7 +311,7 @@ class NumpyBP:
         try:
             assert np.all(out[self._pres_trans] > 0)
         except AssertionError:
-            print(out[(out <= 0) & self._pres_trans])
+            print(out[(out <= 0) & self._pres_trans[..., np.newaxis]])
             print(np.isnan(out[self._pres_trans]).sum())
             raise RuntimeError("Problem w backward msg term")
         return out
