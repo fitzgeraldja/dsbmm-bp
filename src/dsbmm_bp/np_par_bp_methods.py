@@ -774,6 +774,13 @@ class NumpyBP:
         max_back_msg_log[max_back_msg_log < max_log_msg] = max_log_msg
         tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_back_msg_log)
         back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
+        # REMOVE:
+        try:
+            assert np.all(back_sums[self._pres_trans] > 0)
+        except AssertionError:
+            print(back_sums[self._pres_trans & back_sums <= 0])
+            print(np.count_nonzero(np.isnan(back_sums[self._pres_trans])))
+            raise RuntimeError("Problem w backwards msg")
         tmp_backwards_msg = np.divide(
             tmp_backwards_msg,
             back_sums,
