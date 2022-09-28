@@ -796,6 +796,14 @@ class NumpyBP:
         except AssertionError:
             raise RuntimeError("Problem w backwards msg")
         self.msg_diff = max(tmp_diff, self.msg_diff)
+        # REMOVE:
+        back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
+        try:
+            assert np.all(back_sums[self._pres_trans] > 0)
+        except AssertionError:
+            print(back_sums[self._pres_trans & back_sums <= 0])
+            print(np.count_nonzero(np.isnan(back_sums[self._pres_trans])))
+            raise RuntimeError("Problem w backwards msg")
         self._psi_t[:, :, :, 0] = tmp_backwards_msg
         # include forward term now backwards term updated
         forward_term = self.forward_temp_msg_term()
