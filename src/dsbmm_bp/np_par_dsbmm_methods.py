@@ -400,7 +400,7 @@ class NumpyDSBMM:
                             where=ib_params > 0.0,
                             out=np.log(TOL) * np.ones_like(ib_params),
                             # out=np.zeros_like(ib_params),
-                        )
+                        )[np.newaxis, ...]
                         * self.X[s][:, np.newaxis, :, :],
                         axis=-1,
                     )
@@ -410,7 +410,7 @@ class NumpyDSBMM:
                             where=1 - ib_params > 0.0,
                             # out=10 * np.log(TOL) * np.ones_like(ib_params),
                             out=np.log(TOL) * np.ones_like(ib_params),
-                        )
+                        )[np.newaxis, ...]
                         * (1 - self.X[s][:, np.newaxis, :, :]),
                         axis=-1,
                     )
@@ -419,15 +419,23 @@ class NumpyDSBMM:
                     print("\tUpdated IB lkl contribution")
             elif mt == "categorical":
                 cat_params = self._meta_params[s]
+                log_cat_params = np.log(
+                    cat_params,
+                    where=cat_params > 0.0,
+                    out=np.log(TOL) * np.ones_like(cat_params)
+                    if not self.frozen
+                    else -np.inf * np.ones_like(cat_params),
+                    # out=np.zeros_like(cat_params),
+                )[np.newaxis, ...]
                 assert np.all(self.X[s].sum(axis=-1) == 1)  # REMOVE
                 self.log_meta_lkl += np.sum(
-                    np.log(
-                        cat_params,
-                        where=cat_params > 0.0,
-                        out=10 * np.log(TOL) * np.ones_like(cat_params),
-                        # out=np.zeros_like(cat_params),
-                    )
-                    * self.X[s][:, np.newaxis, :, :],
+                    np.multiply(
+                        log_cat_params,
+                        self.X[s][:, np.newaxis, :, :],
+                        where=~np.isinf(log_cat_params) | self.X[s][:, np.newaxis, :, :]
+                        != 0,
+                        out=np.zeros((self.N, self.Q, self.T, cat_params.shape[-1])),
+                    ),
                     axis=-1,
                 ).transpose(
                     0, 2, 1
