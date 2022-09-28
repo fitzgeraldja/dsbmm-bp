@@ -451,6 +451,25 @@ class NumpyDSBMM:
                 )  # should only have single nonzero X, one-hot encoding for category, so this should be sufficient
                 if self.verbose:
                     print("\tUpdated categorical lkl contribution")
+            elif mt == "multinomial":
+                multi_params = self._meta_params[s]  # shape (Q,T,L)
+                # TODO: stop recalculating xsums for multinomial each time
+                xsums = self.X[s].sum(axis=-1, keepdims=True)
+                self.log_meta_lkl += (
+                    np.log(
+                        xsums, where=xsums > 0.0, out=np.zeros_like(xsums, dtype=float)
+                    )
+                    - gammaln(self.X[s] + 1).sum(axis=-1, keepdims=True)
+                    + np.sum(
+                        self.X[s][:, :, np.newaxis, :]
+                        * np.log(
+                            multi_params,
+                            where=multi_params > 0.0,
+                            out=np.zeros_like(multi_params, dtype=float),
+                        ).transpose(1, 0, 2)[np.newaxis, ...],
+                        axis=-1,
+                    )
+                )
             else:
                 raise NotImplementedError(
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
@@ -752,10 +771,16 @@ class NumpyDSBMM:
                 if self.verbose:
                     print("\tUpdated IB")
             elif self.meta_types[s] == "categorical":
-                # print("In IB")
+                # print("In categorical")
                 self.update_cat_meta(init, s, learning_rate=learning_rate)
                 if self.verbose:
                     print("\tUpdated categorical")
+            elif self.meta_types[s] == "multinomial":
+                # print("In multinomial")
+                self.update_multi_meta(init, s, learning_rate=learning_rate)
+                if self.verbose:
+                    print("\tUpdated multinomial")
+
             else:
                 raise NotImplementedError(
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson', 'indep bernoulli', or 'categorical'"
@@ -804,25 +829,25 @@ class NumpyDSBMM:
         tmp = np.divide(zeta, xi, where=xi > 0, out=np.zeros_like(zeta, dtype=float))
         # tmp[tmp < TOL] = TOL
         if not init:
-            tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
             tmp_diff = np.divide(
-                np.abs(tmp - self.meta_params[s]),
-                self.meta_params[s],
-                where=self.meta_params[s] > 0.0,
-                out=np.zeros_like(self.meta_params[s], dtype=float),
+                np.abs(tmp - self._meta_params[s]),
+                self._meta_params[s],
+                where=self._meta_params[s] > 0.0,
+                out=np.zeros_like(self._meta_params[s], dtype=float),
             ).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating poisson params")
             if self.verbose:
                 print("Poisson diff: ", np.round_(tmp_diff, 3))
             self.diff = max(tmp_diff, self.diff)
-            self.meta_params[s] = tmp
+            self._meta_params[s] = tmp
         else:
             if np.isnan(tmp).sum() > 0:
                 print("tmp pois params:")
                 print(tmp)
                 raise RuntimeError("Problem updating poisson params")
-            self.meta_params[s] = tmp
+            self._meta_params[s] = tmp
 
     def update_indep_bern_meta(self, init, s, learning_rate=0.2):
         xi = np.ones((self.Q, self.T, 1))
@@ -866,16 +891,16 @@ class NumpyDSBMM:
         # tmp[tmp < TOL] = TOL
         # tmp[tmp > 1 - TOL] = 1 - TOL
         if not init:
-            tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
-            tmp_diff = np.abs(tmp - self.meta_params[s]).max()
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
+            tmp_diff = np.abs(tmp - self._meta_params[s]).max()
             if np.isnan(tmp_diff):
                 raise RuntimeError("Problem updating IB params")
             if self.verbose:
                 print("IB diff: ", np.round_(tmp_diff, 3))
             self.diff = max(tmp_diff, self.diff)
-            self.meta_params[s] = tmp
+            self._meta_params[s] = tmp
         else:
-            self.meta_params[s] = tmp
+            self._meta_params[s] = tmp
 
     def update_cat_meta(self, init, s, learning_rate=0.2):
         L = self.X[s].shape[-1]
@@ -908,16 +933,74 @@ class NumpyDSBMM:
         # tmp[tmp < TOL] = TOL
         # tmp /= tmp.sum(axis=-1, keepdims=True)
         if not init:
-            tmp = learning_rate * tmp + (1 - learning_rate) * self.meta_params[s]
-            tmp_diff = np.abs(tmp - self.meta_params[s]).max()
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
+            tmp_diff = np.abs(tmp - self._meta_params[s]).max()
             if np.isnan(tmp_diff):
-                raise RuntimeError("Problem updating IB params")
+                raise RuntimeError("Problem updating cat params")
             if self.verbose:
-                print("IB diff: ", np.round_(tmp_diff, 3))
+                print("Cat diff: ", np.round_(tmp_diff, 3))
             self.diff = max(tmp_diff, self.diff)
-            self.meta_params[s] = tmp
+            self._meta_params[s] = tmp
         else:
-            self.meta_params[s] = tmp
+            self._meta_params[s] = tmp
+
+    def update_multi_meta(self, init, s, learning_rate=0.2):
+        xi = np.ones((self.Q, self.T, 1))
+        L = self.X[s].shape[-1]
+        rho = np.zeros((self.Q, self.T, L))
+        xsums = self.X[s].sum(axis=-1, keepdims=True)  # shape (N,T,1)
+        if init:
+            if NON_INFORMATIVE_INIT:
+                xi[:, :, :] = xsums.sum(axis=0, keepdims=True)
+                rho[:, :, :] = self.X[s].sum(axis=0, keepdims=True)
+            else:
+                xi[:, :, 0] = np.array(
+                    [
+                        [xsums[self.Z[:, t] == q, t, :].sum() for t in range(self.T)]
+                        for q in range(self.Q)
+                    ]
+                )
+                rho = np.array(
+                    [
+                        [
+                            self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                            if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
+                            else np.zeros(L)
+                            for t in range(self.T)
+                        ]
+                        for q in range(self.Q)
+                    ]
+                )
+            # xi[xi < TOL] = 1.0
+            # rho[rho < TOL] = TOL
+        else:
+            xi = (
+                (self.node_marg[..., np.newaxis] * xsums[:, :, np.newaxis, :])
+                .sum(axis=0)
+                .data.transpose(1, 0, 2)
+            )
+            # rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s]) # again can't use einsum w nans in X[s]
+            rho = (
+                (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
+                .sum(axis=0)
+                .data.transpose(1, 0, 2)
+            )
+            # xi[xi < TOL] = 1.0
+            # rho[rho < TOL] = TOL
+        tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho, dtype=float))
+        # tmp[tmp < TOL] = TOL
+        # tmp[tmp > 1 - TOL] = 1 - TOL
+        if not init:
+            tmp = learning_rate * tmp + (1 - learning_rate) * self._meta_params[s]
+            tmp_diff = np.abs(tmp - self._meta_params[s]).max()
+            if np.isnan(tmp_diff):
+                raise RuntimeError("Problem updating multi params")
+            if self.verbose:
+                print("Multi diff: ", np.round_(tmp_diff, 3))
+            self.diff = max(tmp_diff, self.diff)
+            self._meta_params[s] = tmp
+        else:
+            self._meta_params[s] = tmp
 
     def compute_DC_lkl(self):
         # Sort computation for all pres edges simultaneously (in DSBMM),
