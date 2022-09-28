@@ -136,24 +136,6 @@ class NumpyDSBMM:
 
         if self.Z is None:
             assert self.Q > 0
-            # TODO: allow multiple types of initialisation, e.g.
-            # fixed over time on concatenated adj mats and metadata,
-            # just concat adj mats, and same but allowing to vary over time
-            # kmeans_mat = np.concatenate(
-            #     [
-            #         self.A.reshape(self.N, -1),
-            #         self.X.transpose(1, 2, 0, 3).reshape(self.N, -1),
-            #     ],
-            #     axis=1,
-            # )  # done for fixing labels over time
-            # TODO: uncomment after considering more
-            # kmeans_labels = MiniBatchKMeans(
-            #     n_clusters=self.Q,
-            #     #   random_state=0, # TODO: consider allowing fixing this for reproducibility
-            #     batch_size=20,
-            #     max_iter=10,
-            # ).fit_predict(kmeans_mat)
-            # self.Z = np.tile(kmeans_labels, (1, self.T))
 
         self.diff = 0.0
         self.verbose = verbose
@@ -472,7 +454,7 @@ class NumpyDSBMM:
                 )
             else:
                 raise NotImplementedError(
-                    "Yet to implement metadata distribution of given type \nOptions are 'poisson' or 'indep bernoulli'"
+                    "Yet to implement metadata distribution of given type \nOptions are 'poisson', 'indep bernoulli', 'categorical' or 'multinomial'."
                 )
         # enforce all vals +ve prior to taking power
         # self.meta_lkl[self.meta_lkl < TOL] = TOL
@@ -499,12 +481,14 @@ class NumpyDSBMM:
             # if DC, seems like should multiply marg by degree prior to sum - unseen for directed case but can calculate
             if use_all_marg:
                 # in style of M&M, count contributions from all node marginals
-                tmp = self.node_marg.sum(axis=(0, 1))
+                tmp = np.nansum(self.node_marg, axis=(0, 1))
                 tmp /= self._tot_N_pres
             else:
                 # only count contribs from nodes wout previous states, i.e. first timestep and nodes previously missing, as eqns suggest
-                tmp = self.node_marg[:, 0, :].sum(axis=0)
-                tmp += self.node_marg[:, 1:, :][~self._pres_trans].sum(axis=(0, 1))
+                tmp = np.nansum(self.node_marg[:, 0, :], axis=0)
+                tmp += np.nansum(
+                    self.node_marg[:, 1:, :][~self._pres_trans], axis=(0, 1)
+                )
 
             if tmp.sum() > 0:
                 tmp /= tmp.sum()
@@ -547,7 +531,7 @@ class NumpyDSBMM:
                     *qqprime_trans.shape
                 )
         else:
-            qqprime_trans = self.twopoint_time_marg.sum(axis=(0, 1))
+            qqprime_trans = np.nansum(self.twopoint_time_marg, axis=(0, 1))
             # qqprime_trans /= np.expand_dims(
             #     node_marg[:, :-1, :].sum(axis=0).sum(axis=0), 1
             # )  # need to do sums twice as numba axis argument
@@ -622,8 +606,15 @@ class NumpyDSBMM:
                 ]
             )
             # lam_num[lam_num < TOL] = TOL
-            lam_den_out = np.einsum("itq,it->qt", self.node_marg, self.degs[:, :, 1])
-            lam_den_in = np.einsum("itq,it->qt", self.node_marg, self.degs[:, :, 0])
+            # NB einsums fail for missing data
+            # lam_den_out = np.einsum("itq,it->qt", self.node_marg, self.degs[:, :, 1])
+            # lam_den_in = np.einsum("itq,it->qt", self.node_marg, self.degs[:, :, 0])
+            lam_den_out = np.nansum(
+                self.node_marg * self.degs[:, :, 1][..., np.newaxis], axis=0
+            )
+            lam_den_in = np.nansum(
+                self.node_marg * self.degs[:, :, 0][..., np.newaxis], axis=0
+            )
             lam_den = np.einsum("qt,rt->qrt", lam_den_out, lam_den_in)
             # lam_den[lam_den < TOL] = 1.0
             if not self.directed:
@@ -710,7 +701,7 @@ class NumpyDSBMM:
 
         else:
             beta_num = np.dstack(
-                [self.twopoint_edge_marg[t].sum(axis=0) for t in range(self.T)]
+                [np.nansum(self.twopoint_edge_marg[t], axis=0) for t in range(self.T)]
             )
             # enforce uniformity for identifiability
             diag_vals = np.stack(
@@ -720,7 +711,7 @@ class NumpyDSBMM:
             if not self.directed:
                 beta_num = (beta_num + beta_num.transpose(1, 0, 2)) / 2
             # beta_num[beta_num < TOL] = TOL
-            beta_den = self.node_marg.sum(axis=0).T
+            beta_den = np.nansum(self.node_marg, axis=0).T
             beta_den = np.einsum("qt,rt->qrt", beta_den, beta_den)
             # beta_den[beta_den < TOL] = 1.0
             # enforce uniformity for identifiability
@@ -792,7 +783,7 @@ class NumpyDSBMM:
         if init:
             if NON_INFORMATIVE_INIT:
                 xi[:, :, 0] = np.ones((self.Q, self.T), dtype=float)
-                zeta[:, :, 0] = self.X[s].mean(axis=0, keepdims=True)
+                zeta[:, :, :] = np.nanmean(self.X[s], axis=0, keepdims=True)
             else:
                 xi[:, :, 0] = np.array(
                     [
@@ -816,13 +807,11 @@ class NumpyDSBMM:
             # xi[xi < TOL] = 1.0
             # zeta[zeta < TOL] = TOL
         else:
-            xi[:, :, 0] = self.node_marg.sum(axis=0).T
+            xi[:, :, 0] = np.nansum(self.node_marg, axis=0).T
             # zeta = np.einsum("itq,itd->qtd", self.node_marg, self.X[s]) # can't use einsum if X[s] contains nans, i.e. missing nodes
-            zeta = (
-                (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
-                .sum(axis=0)
-                .data.transpose(1, 0, 2)
-            )
+            zeta = np.nansum(
+                self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :], axis=0
+            ).data.transpose(1, 0, 2)
             # xi[xi < TOL] = 1.0
             # zeta[zeta < TOL] = TOL
         # NB again use relative error here as could be large
@@ -856,7 +845,7 @@ class NumpyDSBMM:
         if init:
             if NON_INFORMATIVE_INIT:
                 xi = np.ones_like(xi, dtype=float)
-                rho[:, :, :] = self.X[s].mean(axis=0, keepdims=True)
+                rho[:, :, :] = np.nanmean(self.X[s], axis=0, keepdims=True)
             else:
                 xi[:, :, 0] = np.array(
                     [
@@ -867,7 +856,7 @@ class NumpyDSBMM:
                 rho = np.array(
                     [
                         [
-                            self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                            np.nansum(self.X[s][self.Z[:, t] == q, t, :], axis=0)
                             if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
                             else np.zeros(L)
                             for t in range(self.T)
@@ -878,13 +867,11 @@ class NumpyDSBMM:
             # xi[xi < TOL] = 1.0
             # rho[rho < TOL] = TOL
         else:
-            xi[:, :, 0] = self.node_marg.sum(axis=0).T
+            xi[:, :, 0] = np.nansum(self.node_marg, axis=0).T
             # rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s]) # again can't use einsum w nans in X[s]
-            rho = (
-                (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
-                .sum(axis=0)
-                .data.transpose(1, 0, 2)
-            )
+            rho = np.nansum(
+                self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :], axis=0
+            ).data.transpose(1, 0, 2)
             # xi[xi < TOL] = 1.0
             # rho[rho < TOL] = TOL
         tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho, dtype=float))
@@ -907,12 +894,12 @@ class NumpyDSBMM:
         rho = np.zeros((self.Q, self.T, L))
         if init:
             if NON_INFORMATIVE_INIT:
-                rho[:, :, :] = self.X[s].mean(axis=0, keepdims=True)
+                rho[:, :, :] = np.nanmean(self.X[s], axis=0, keepdims=True)
             else:
                 rho = np.array(
                     [
                         [
-                            self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                            np.nansum(self.X[s][self.Z[:, t] == q, t, :], axis=0)
                             if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
                             else np.zeros(L)
                             for t in range(self.T)
@@ -922,11 +909,9 @@ class NumpyDSBMM:
                 )
             # rho[rho < TOL] = TOL
         else:
-            rho = (
-                (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
-                .sum(axis=0)
-                .data.transpose(1, 0, 2)
-            )
+            rho = np.nansum(
+                self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :], axis=0
+            ).data.transpose(1, 0, 2)
             # rho[rho < TOL] = TOL
         xi = rho.sum(axis=-1, keepdims=True)
         tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho, dtype=float))
@@ -948,22 +933,27 @@ class NumpyDSBMM:
         xi = np.ones((self.Q, self.T, 1))
         L = self.X[s].shape[-1]
         rho = np.zeros((self.Q, self.T, L))
-        xsums = self.X[s].sum(axis=-1, keepdims=True)  # shape (N,T,1)
+        xsums = self.X[s].sum(
+            axis=-1, keepdims=True
+        )  # shape (N,T,1), OK for not using nansum as should only have either all or no meta missing for i,t
         if init:
             if NON_INFORMATIVE_INIT:
-                xi[:, :, :] = xsums.sum(axis=0, keepdims=True)
-                rho[:, :, :] = self.X[s].sum(axis=0, keepdims=True)
+                xi[:, :, :] = np.nansum(xsums, axis=0, keepdims=True)
+                rho[:, :, :] = np.nansum(self.X[s], axis=0, keepdims=True)
             else:
                 xi[:, :, 0] = np.array(
                     [
-                        [xsums[self.Z[:, t] == q, t, :].sum() for t in range(self.T)]
+                        [
+                            np.nansum(xsums[self.Z[:, t] == q, t, :])
+                            for t in range(self.T)
+                        ]
                         for q in range(self.Q)
                     ]
                 )
                 rho = np.array(
                     [
                         [
-                            self.X[s][self.Z[:, t] == q, t, :].sum(axis=0)
+                            np.nansum(self.X[s][self.Z[:, t] == q, t, :], axis=0)
                             if not np.all(self.X[s][self.Z[:, t] == q, t, :].mask)
                             else np.zeros(L)
                             for t in range(self.T)
@@ -974,17 +964,13 @@ class NumpyDSBMM:
             # xi[xi < TOL] = 1.0
             # rho[rho < TOL] = TOL
         else:
-            xi = (
-                (self.node_marg[..., np.newaxis] * xsums[:, :, np.newaxis, :])
-                .sum(axis=0)
-                .data.transpose(1, 0, 2)
-            )
+            xi = np.nansum(
+                self.node_marg[..., np.newaxis] * xsums[:, :, np.newaxis, :], axis=0
+            ).data.transpose(1, 0, 2)
             # rho = np.einsum("itq,itl->qtl", self.node_marg, self.X[s]) # again can't use einsum w nans in X[s]
-            rho = (
-                (self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :])
-                .sum(axis=0)
-                .data.transpose(1, 0, 2)
-            )
+            rho = np.nansum(
+                self.node_marg[..., np.newaxis] * self.X[s][:, :, np.newaxis, :], axis=0
+            ).data.transpose(1, 0, 2)
             # xi[xi < TOL] = 1.0
             # rho[rho < TOL] = TOL
         tmp = np.divide(rho, xi, where=xi > 0, out=np.zeros_like(rho, dtype=float))
