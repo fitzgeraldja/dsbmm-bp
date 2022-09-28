@@ -419,6 +419,7 @@ class NumpyDSBMM:
                     print("\tUpdated IB lkl contribution")
             elif mt == "categorical":
                 cat_params = self._meta_params[s]
+                assert np.all(self.X[s].sum(axis=-1) == 1)  # REMOVE
                 self.log_meta_lkl += np.sum(
                     np.log(
                         cat_params,

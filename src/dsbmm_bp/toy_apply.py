@@ -301,6 +301,13 @@ if __name__ == "__main__":
 
                 true_Z = sample.pop("Z")
                 sample["X"] = [sample["X"]["categorical"].transpose(1, 2, 0)]
+                if rho == 1.0:
+                    try:
+                        assert np.all(true_Z == np.argmax(sample["X"][0], axis=-1))
+                    except AssertionError:
+                        print(sample["X"][0].shape)
+                        print(true_Z.shape)
+                        raise ValueError("Problem w metadata for rho=1.0")
 
                 ## Initialise
 
