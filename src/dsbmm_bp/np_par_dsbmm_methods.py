@@ -523,7 +523,7 @@ class NumpyDSBMM:
                         for q in range(self.Q)
                     ]
                 )
-                qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis, :]
+                qqprime_trans /= qqprime_trans.sum(axis=1, keepdims=True)
                 p = 0.8
                 qqprime_trans = p * qqprime_trans + (1 - p) * np.random.rand(
                     *qqprime_trans.shape
@@ -547,9 +547,9 @@ class NumpyDSBMM:
             #         raise RuntimeError("Problem with node marginals")
             # qqprime_trans[q, :] = TOL
             # correct_pi()
-        qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis]
+        qqprime_trans /= qqprime_trans.sum(axis=1, keepdims=True)
         # qqprime_trans[qqprime_trans < TOL] = TOL
-        qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis]
+        # qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis]
         if not init:
             tmp = learning_rate * qqprime_trans + (1 - learning_rate) * self._pi
             tmp_diff = np.abs(tmp - self._pi).max()

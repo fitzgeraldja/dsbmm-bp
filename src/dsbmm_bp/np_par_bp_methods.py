@@ -113,7 +113,7 @@ class NumpyBP:
             self._psi_e.data /= sums.data  # normalise messages
 
             self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, 2)
-            self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
+            self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
             self._psi_t[~self._pres_trans] = 0.0
             # assert np.isnan(_psi_t).sum() == 0
             # about being in group q,
@@ -139,7 +139,7 @@ class NumpyBP:
             self.node_marg = p * one_hot_Z + (1 - p) * np.random.rand(
                 self.N, self.T, self.Q
             )
-            self.node_marg /= self.node_marg.sum(axis=-1)[:, :, np.newaxis]
+            self.node_marg /= self.node_marg.sum(axis=-1, keepdims=True)
             self.node_marg[~self._pres_nodes] = 0.0
 
             ## INIT MESSAGES ##
@@ -253,11 +253,11 @@ class NumpyBP:
                 self._psi_e.data /= sums.data
 
             self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, 2)
-            self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
+            self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
             self._psi_t *= 1 - p
             self._psi_t[..., 0] += p * one_hot_Z[:, 1:, :]
             self._psi_t[..., 1] += p * one_hot_Z[:, : self.T - 1, :]
-            self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
+            self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
 
         self._psi_t[~self._pres_trans, :, :] = 0.0
         self.n_tot_msgs = self._psi_e.nnz + np.count_nonzero(self._psi_t)
@@ -311,7 +311,7 @@ class NumpyBP:
         # from t+1 to t
         # out = np.einsum("itr,qr->itq", self._psi_t[..., 0], self.trans_prob)
         out = np.nansum(
-            self._psi_t[..., 0][..., np.newaxis]
+            self._psi_t[..., 0][..., np.newaxis, :]
             * self.trans_prob[np.newaxis, np.newaxis, ...],
             axis=-1,
         )
