@@ -88,6 +88,7 @@ class NumpyBP:
             # initialise by random messages and marginals
             self.node_marg = np.random.rand(self.N, self.T, self.Q)
             self.node_marg /= self.node_marg.sum(axis=2, keepdims=True)
+            self.node_marg[~self._pres_nodes] = 0.0
             ## INIT MESSAGES ##
             self._psi_e.data = np.random.rand(len(self._psi_e.data))
             # psi_e[np.arange(N*T*Q).reshape(T,Q,N)[0].T.flatten(),:].T # gives N,N*Q array where j, i*q + q entry is message from i to j about being in q at t
@@ -113,6 +114,7 @@ class NumpyBP:
 
             self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, 2)
             self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
+            self._psi_t[~self._pres_trans] = 0.0
             # assert np.isnan(_psi_t).sum() == 0
             # about being in group q,
             # so again 4d
@@ -133,10 +135,12 @@ class NumpyBP:
             p = PLANTED_P
             ## INIT MARGINALS ##
             one_hot_Z = self.onehot_initialization(self.Z)  # in shape N x T x Q
+            one_hot_Z[~self._pres_nodes] = 0.0
             self.node_marg = p * one_hot_Z + (1 - p) * np.random.rand(
                 self.N, self.T, self.Q
             )
             self.node_marg /= self.node_marg.sum(axis=-1)[:, :, np.newaxis]
+            self.node_marg[~self._pres_nodes] = 0.0
 
             ## INIT MESSAGES ##
             tmp = sparse.csr_matrix(
@@ -254,6 +258,7 @@ class NumpyBP:
             self._psi_t[..., 0] += p * one_hot_Z[:, 1:, :]
             self._psi_t[..., 1] += p * one_hot_Z[:, : self.T - 1, :]
             self._psi_t /= self._psi_t.sum(axis=2)[:, :, np.newaxis, :]
+
         self._psi_t[~self._pres_trans, :, :] = 0.0
         self.n_tot_msgs = self._psi_e.nnz + np.count_nonzero(self._psi_t)
 
@@ -266,7 +271,12 @@ class NumpyBP:
         # from t-1 to t
         # _psi_t in shape [N, T - 1, Q, (backwards from t+1, forwards from t)]
         # so return gives msg term for i belonging to q at t to i at t+1 for t<T in i,t,q
-        out = np.einsum("itr,rq->itq", self._psi_t[:, :, :, 1], self.trans_prob)
+        # out = np.einsum("itr,rq->itq", self._psi_t[:, :, :, 1], self.trans_prob)
+        out = np.nansum(
+            self._psi_t[..., 1][..., np.newaxis]
+            * self._trans_prob[np.newaxis, np.newaxis, ...],
+            axis=-2,
+        )
         # out[out < TOL] = TOL
         # REMOVE:
         assert np.all(out[self._pres_trans] > 0)
@@ -290,7 +300,12 @@ class NumpyBP:
         """
         # sum_qprime(trans_prob(q,qprime)*_psi_t[i,t,qprime,0])
         # from t+1 to t
-        out = np.einsum("itr,qr->itq", self._psi_t[..., 0], self.trans_prob)
+        # out = np.einsum("itr,qr->itq", self._psi_t[..., 0], self.trans_prob)
+        out = np.nansum(
+            self._psi_t[..., 0][..., np.newaxis]
+            * self._trans_prob[np.newaxis, np.newaxis, ...],
+            axis=-1,
+        )
         # out[out < TOL] = TOL
         # REMOVE:
         assert np.all(out[self._pres_trans] > 0)
@@ -594,14 +609,25 @@ class NumpyBP:
         # i.e. = \sum_r \sum_i \psi_r^{it} p_{rq}^t
 
         if self.deg_corr:
-            self._h = np.einsum(
-                "itr,rqt,it->qt",
-                self.node_marg,
-                self.block_edge_prob,
-                self.degs[:, :, 1],
-            )
+            # self._h = np.einsum(
+            #     "itr,rqt,it->qt",
+            #     self.node_marg,
+            #     self.block_edge_prob,
+            #     self.degs[:, :, 1],
+            # )
+            self._h = np.nansum(
+                self.node_marg[..., np.newaxis]
+                * self.block_edge_prob.transpose(2, 0, 1)[np.newaxis, ...]
+                * self.degs[:, :, 1][..., np.newaxis, np.newaxis],
+                axis=(0, -2),
+            ).T
         else:
-            self._h = np.einsum("itr,rqt->qt", self.node_marg, self.block_edge_prob)
+            # self._h = np.einsum("itr,rqt->qt", self.node_marg, self.block_edge_prob)
+            self._h = np.nansum(
+                self.node_marg[..., np.newaxis]
+                * self.block_edge_prob.transpose(2, 0, 1)[np.newaxis, ...],
+                axis=(0, -2),
+            ).T
         # print("h after init:", _h)
 
     # def np_update_h(Q, sign, i, t, degs, deg_corr, block_edge_prob, _h, node_marg):
