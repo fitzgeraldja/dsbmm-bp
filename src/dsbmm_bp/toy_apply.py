@@ -291,7 +291,7 @@ if __name__ == "__main__":
                     # drop first run as compiling
                     start_time = time.time()
                 if verbose:
-                    tqdm.write("true eps, eta, rho:", params)
+                    tqdm.write(f"true eps, eta, rho: {params}")
                 tqdm.write("")
                 tqdm.write(f"{'$' * 12} At sample {samp_no + 1} {'$' * 12}")
                 sample.update({"Q": Q, "meta_types": ["categorical"]})
