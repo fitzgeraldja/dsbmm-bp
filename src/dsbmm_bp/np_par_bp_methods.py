@@ -279,7 +279,13 @@ class NumpyBP:
         )
         # out[out < TOL] = TOL
         # REMOVE:
-        assert np.all(out[self._pres_trans, :].sum(axis=-1) > 0)
+        try:
+            assert np.all(out[self._pres_trans, :].sum(axis=-1) > 0)
+        except AssertionError:
+            print(out[(out <= 0) & self._pres_trans[..., np.newaxis]])
+            print(np.isnan(out[self._pres_trans]).sum())
+            print(self.trans_prob)
+            raise RuntimeError("Problem w forward msg term")
         return out
 
     def backward_temp_msg_term(self):
@@ -313,6 +319,7 @@ class NumpyBP:
         except AssertionError:
             print(out[(out <= 0) & self._pres_trans[..., np.newaxis]])
             print(np.isnan(out[self._pres_trans]).sum())
+            print(self.trans_prob)
             raise RuntimeError("Problem w backward msg term")
         return out
 
@@ -750,7 +757,7 @@ class NumpyBP:
         back_term = self.backward_temp_msg_term()
         log_back_term = np.log(
             back_term,
-            where=self._pres_trans[:, :, np.newaxis],
+            where=self._pres_trans[:, :, np.newaxis] & back_term > 0,
             out=np.zeros_like(back_term),
         )
         # log_back_term[~self._pres_trans, :] = 0.0
