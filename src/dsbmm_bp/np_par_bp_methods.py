@@ -324,11 +324,13 @@ class NumpyBP:
         except AssertionError:
             print(out[(out <= 0) & self._pres_trans[..., np.newaxis]])
             print(
-                self._psi_t[np.any(out == 0, axis=-1, keepdims=True)[..., np.newaxis]]
+                self._psi_t[
+                    np.tile(np.any(out == 0, axis=-1, keepdims=True), (1, 1, self.Q)), 0
+                ]
             )
             print(
                 self._psi_t[
-                    np.any(out == 0, axis=-1, keepdims=True)[..., np.newaxis]
+                    np.tile(np.any(out == 0, axis=-1, keepdims=True), (1, 1, self.Q)), 0
                 ].sum(axis=-2)
             )
             print(np.isnan(out[self._pres_trans]).sum())
