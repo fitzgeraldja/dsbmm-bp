@@ -279,7 +279,7 @@ class NumpyBP:
         )
         # out[out < TOL] = TOL
         # REMOVE:
-        assert np.all(out[self._pres_trans] > 0)
+        assert np.all(out[self._pres_trans, :].sum(axis=-1) > 0)
         return out
 
     def backward_temp_msg_term(self):
@@ -309,7 +309,7 @@ class NumpyBP:
         # out[out < TOL] = TOL
         # REMOVE:
         try:
-            assert np.all(out[self._pres_trans] > 0)
+            assert np.all(out[self._pres_trans, :].sum(axis=-1) > 0)
         except AssertionError:
             print(out[(out <= 0) & self._pres_trans[..., np.newaxis]])
             print(np.isnan(out[self._pres_trans]).sum())
@@ -494,11 +494,12 @@ class NumpyBP:
                 )
         # REMOVE:
         try:
-            assert np.all(field_terms > 0)
+            assert np.all(field_terms.sum(axis=-1) > 0)
         except AssertionError:
             print(np.nonzero(field_terms <= 0.0))
             print(np.count_nonzero(field_terms == 0))
             print(np.count_nonzero(field_terms < 0))
+            print(np.isnan(field_terms).sum())
             raise RuntimeError("Problem w spatial field terms")
         return field_terms
 
