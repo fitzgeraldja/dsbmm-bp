@@ -280,9 +280,12 @@ class NumpyBP:
         # out[out < TOL] = TOL
         # REMOVE:
         try:
-            assert np.all(out[self._pres_trans, :].sum(axis=-1) > 0)
+            assert np.all(
+                out[self._pres_trans, :] > 0
+            )  # even in case of rho=1, should have this term = pi_{x^{i(t-1)}q}
         except AssertionError:
             print(out[(out <= 0) & self._pres_trans[..., np.newaxis]])
+            print(self._psi_t[out == 0, 1])
             print(np.isnan(out[self._pres_trans]).sum())
             print(self.trans_prob)
             raise RuntimeError("Problem w forward msg term")
@@ -315,9 +318,12 @@ class NumpyBP:
         # out[out < TOL] = TOL
         # REMOVE:
         try:
-            assert np.all(out[self._pres_trans, :].sum(axis=-1) > 0)
+            assert np.all(
+                out[self._pres_trans, :] > 0
+            )  # even in case of rho=1, should have this term = pi_{qx^{i(t+1)}}
         except AssertionError:
             print(out[(out <= 0) & self._pres_trans[..., np.newaxis]])
+            print(self._psi_t[out == 0, 0])
             print(np.isnan(out[self._pres_trans]).sum())
             print(self.trans_prob)
             raise RuntimeError("Problem w backward msg term")
