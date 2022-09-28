@@ -398,7 +398,7 @@ class NumpyDSBMM:
                         np.log(
                             ib_params,
                             where=ib_params > 0.0,
-                            # out=10 * np.log(TOL) * np.ones_like(ib_params),
+                            out=np.log(TOL) * np.ones_like(ib_params),
                             out=np.zeros_like(ib_params),
                         )
                         * self.X[s][:, np.newaxis, :, :],
@@ -409,7 +409,7 @@ class NumpyDSBMM:
                             1 - ib_params,
                             where=1 - ib_params > 0.0,
                             # out=10 * np.log(TOL) * np.ones_like(ib_params),
-                            out=np.zeros_like(ib_params),
+                            out=np.log(TOL) * np.ones_like(ib_params),
                         )
                         * (1 - self.X[s][:, np.newaxis, :, :]),
                         axis=-1,
@@ -423,8 +423,8 @@ class NumpyDSBMM:
                     np.log(
                         cat_params,
                         where=cat_params > 0.0,
-                        # out=10 * np.log(TOL) * np.ones_like(cat_params),
-                        out=np.zeros_like(cat_params),
+                        out=10 * np.log(TOL) * np.ones_like(cat_params),
+                        # out=np.zeros_like(cat_params),
                     )
                     * self.X[s][:, np.newaxis, :, :],
                     axis=-1,
@@ -438,9 +438,7 @@ class NumpyDSBMM:
                 # TODO: stop recalculating xsums for multinomial each time
                 xsums = self.X[s].sum(axis=-1, keepdims=True)
                 self.log_meta_lkl += (
-                    np.log(
-                        xsums, where=xsums > 0.0, out=np.zeros_like(xsums, dtype=float)
-                    )
+                    gammaln(xsums + 1)
                     - gammaln(self.X[s] + 1).sum(axis=-1, keepdims=True)
                     + np.sum(
                         self.X[s][:, :, np.newaxis, :]
