@@ -136,9 +136,9 @@ class NumpyBP:
             ## INIT MARGINALS ##
             one_hot_Z = self.onehot_initialization(self.Z)  # in shape N x T x Q
             one_hot_Z[~self._pres_nodes] = 0.0
-            self.node_marg = p * one_hot_Z + (1 - p) * np.random.rand(
-                self.N, self.T, self.Q
-            )
+            marg_noise = np.random.rand(self.N, self.T, self.Q)
+            marg_noise /= marg_noise.sum(axis=-1, keepdims=True)
+            self.node_marg = p * one_hot_Z + (1 - p) * marg_noise
             self.node_marg /= self.node_marg.sum(axis=-1, keepdims=True)
             self.node_marg[~self._pres_nodes] = 0.0
 
@@ -886,6 +886,9 @@ class NumpyBP:
         max_fwd_msg_log = log_forwards_msg.max(axis=-1, keepdims=True)
         max_fwd_msg_log[max_fwd_msg_log < max_log_msg] = max_log_msg
         tmp_forwards_msg = np.exp(log_forwards_msg - max_fwd_msg_log)
+        tmp_forwards_msg[
+            self.log_meta_prob[:, :-1, :] < np.log(TOL)
+        ] = 0.0  # set to zero if meta suggests
         forward_sums = tmp_forwards_msg.sum(axis=-1)
         tmp_forwards_msg = np.divide(
             tmp_forwards_msg,
@@ -916,6 +919,7 @@ class NumpyBP:
             out=np.zeros_like(tmp_marg),
         )
         # tmp_marg[tmp_marg < TOL] = TOL
+        tmp_marg[self.log_meta_prob <= np.log(TOL)] = 0.0  # set zero if meta suggests
         tmp_marg = np.divide(
             tmp_marg,
             tmp_marg.sum(axis=-1, keepdims=True),
