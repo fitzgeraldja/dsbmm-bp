@@ -767,7 +767,7 @@ class NumpyDSBMM:
         if init:
             if NON_INFORMATIVE_INIT:
                 xi[:, :, 0] = np.ones((self.Q, self.T), dtype=float)
-                zeta[:, :, 1] = self.X[s].mean(axis=0, keepdims=True)
+                zeta[:, :, 0] = self.X[s].mean(axis=0, keepdims=True)
             else:
                 xi[:, :, 0] = np.array(
                     [
