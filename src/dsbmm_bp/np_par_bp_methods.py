@@ -274,7 +274,7 @@ class NumpyBP:
         # out = np.einsum("itr,rq->itq", self._psi_t[:, :, :, 1], self.trans_prob)
         out = np.nansum(
             self._psi_t[..., 1][..., np.newaxis]
-            * self._trans_prob[np.newaxis, np.newaxis, ...],
+            * self.trans_prob[np.newaxis, np.newaxis, ...],
             axis=-2,
         )
         # out[out < TOL] = TOL
@@ -303,7 +303,7 @@ class NumpyBP:
         # out = np.einsum("itr,qr->itq", self._psi_t[..., 0], self.trans_prob)
         out = np.nansum(
             self._psi_t[..., 0][..., np.newaxis]
-            * self._trans_prob[np.newaxis, np.newaxis, ...],
+            * self.trans_prob[np.newaxis, np.newaxis, ...],
             axis=-1,
         )
         # out[out < TOL] = TOL
