@@ -73,11 +73,13 @@ class NumpyBP:
                 self._edge_vals[t], tmp_lam
             )
             if not self.directed:
-                tmp = dc_lkl[t].transpose(0, 2, 1)
+                tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
                 diags = np.diag_indices(self.Q, ndim=2)
                 # don't double diagonals
                 tmp[:, diags] = 0
-                dc_lkl[t] = (dc_lkl[t] + tmp) / 2
+                dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
+                    dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
+                ) / 2
 
         self._dc_lkl = dc_lkl
 
