@@ -538,6 +538,8 @@ class NumpyBP:
         # this works as only extracting a sum(in_degs[:,t]) size slice of _psi_e at each t, and structured msg_idxs
         # s.t. extract all msgs from i at t in sequence, for each connected j, for each q, so total of in_degs[i,t]*Q msgs for i at t
         field_terms = np.zeros((self.E_idxs[-1], self.Q))
+        if self.deg_corr:
+            self.compute_DC_lkl()
         for t in range(self.T):
             beta = self.block_edge_prob[:, :, t]
             # msg_idxs[nz_idxs[i,t]:nz_idxs[i+1,t],:]+Q*N*t would give idxs of j in psi_e which connect to i at t, i.e. exactly what we want
