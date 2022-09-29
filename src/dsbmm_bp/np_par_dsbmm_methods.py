@@ -432,8 +432,8 @@ class NumpyDSBMM:
                     np.multiply(
                         log_cat_params,
                         self.X[s][:, np.newaxis, :, :],
-                        where=~np.isinf(log_cat_params) | self.X[s][:, np.newaxis, :, :]
-                        != 0,
+                        where=~np.isinf(log_cat_params)
+                        | (self.X[s][:, np.newaxis, :, :] != 0),
                         out=np.zeros((self.N, self.Q, self.T, cat_params.shape[-1])),
                     ),
                     axis=-1,
