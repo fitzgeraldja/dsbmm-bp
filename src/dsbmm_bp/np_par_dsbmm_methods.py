@@ -551,10 +551,10 @@ class NumpyDSBMM:
                 lam_num = np.array(
                     [
                         [
-                            [self.A[t].mean() for r in range(self.Q)]
-                            for q in range(self.Q)
+                            [self.A[t].mean() for t in range(self.T)]
+                            for r in range(self.Q)
                         ]
-                        for t in range(self.T)
+                        for q in range(self.Q)
                     ]
                 )
                 lam_den = np.ones((self.Q, self.Q, self.T))
@@ -566,11 +566,11 @@ class NumpyDSBMM:
                                 self.A[t][
                                     np.ix_(self.Z[:, t] == q, self.Z[:, t] == r)
                                 ].sum()
-                                for r in range(self.Q)
+                                for t in range(self.T)
                             ]
-                            for q in range(self.Q)
+                            for r in range(self.Q)
                         ]
-                        for t in range(self.T)
+                        for q in range(self.Q)
                     ]
                 )
 
@@ -673,11 +673,11 @@ class NumpyDSBMM:
                                 self.A[t][
                                     np.ix_(self.Z[:, t] == q, self.Z[:, t] == r)
                                 ].sum()
-                                for r in range(self.Q)
+                                for t in range(self.T)
                             ]
-                            for q in range(self.Q)
+                            for r in range(self.Q)
                         ]
-                        for t in range(self.T)
+                        for q in range(self.Q)
                     ]
                 )
                 # enforce uniformity for identifiability
