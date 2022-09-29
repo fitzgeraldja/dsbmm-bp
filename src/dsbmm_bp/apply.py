@@ -66,6 +66,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--deg-corr", action="store_true", help="Use degree corrected version of model."
+)
+
+parser.add_argument(
     "--max_trials",
     type=int,
     default=None,
@@ -892,7 +896,7 @@ if __name__ == "__main__":
             tuning_param=np.linspace(0.8, 1.8, 11),
             n_runs=n_runs,
             patience=args.patience,
-            deg_corr=True if args.use_numba else False,
+            deg_corr=args.deg_corr,
             verbose=verbose,
             max_iter=args.max_iter,
             max_msg_iter=args.max_msg_iter,
