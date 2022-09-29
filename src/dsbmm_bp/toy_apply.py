@@ -361,6 +361,7 @@ if __name__ == "__main__":
                 }
 
                 model.dsbmm.set_params(true_params, freeze=True)
+                model.dsbmm.update_params()  # necessary to update the meta lkl suitably
                 ## Fit to given data
                 model.fit(learning_rate=0.2, msg_conv_tol=args.msg_conv_tol)
                 ## Score after fit
