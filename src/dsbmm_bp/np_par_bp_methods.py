@@ -753,7 +753,10 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
+        # REMOVE:
+        print(f"{np.isinf(self.log_meta_prob).sum()} inf values in meta lkl")
         log_spatial_msg += self.log_meta_prob
+        print(f"{np.isinf(log_spatial_msg).sum()} inf values in log spat msg")
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
         #     msg[:, t, :] = np.array(
@@ -770,17 +773,22 @@ class NumpyBP:
         #     msg *= meta_prob
 
         tmp = log_spatial_msg.copy()
+        # add alpha to all nodes at first timestep
         tmp[:, 0, :] += np.log(self.model._alpha)[np.newaxis, :]
+        # calc back term that enters nodes until T-1
         back_term = self.backward_temp_msg_term()
         log_back_term = np.log(
             back_term,
             where=self._pres_trans[:, :, np.newaxis],
             out=np.zeros_like(back_term),
         )
-        # log_back_term[~self._pres_trans, :] = 0.0
+        # make sure not sending info from t+1 to nodes that aren't present at t
+        log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
         ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
-        max_log_msg = -1000000000.0
+        max_log_msg = (
+            -1000000000.0
+        )  # for numerical stability - want to shift so at least one q value by defn doesn't vanish when take exp
         max_back_msg_log = tmp[:, 1:, :].max(axis=-1, keepdims=True)
         max_back_msg_log[max_back_msg_log < max_log_msg] = max_log_msg
         tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_back_msg_log)
