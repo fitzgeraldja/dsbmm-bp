@@ -303,7 +303,7 @@ if __name__ == "__main__":
                 if rho == 1.0:
                     try:
                         assert np.all(true_Z == np.argmax(sample["X"][0], axis=-1))
-                        print("Meta for rho=1.0 showing true labels correctly.")
+                        # print("Meta for rho=1.0 showing true labels correctly.")
                     except AssertionError:
                         print(sample["X"][0].shape)
                         print(true_Z.shape)
