@@ -68,7 +68,7 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--n_runs", type=int, default=5, help="Set number of runs, default = 5"
+    "--n_runs", type=int, default=1, help="Set number of initial runs, default is 1"
 )
 
 parser.add_argument(
