@@ -496,7 +496,7 @@ class NumpyBP:
                 self.deg_prod[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                     self.model.degs[just_js, t, 1] * self.model.degs[just_is, t, 0]
                 )
-                self._edge_vals[t] = self.A[t][just_js, just_is].toarray().squeeze()
+                self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
 
     def spatial_field_terms(
         self,
