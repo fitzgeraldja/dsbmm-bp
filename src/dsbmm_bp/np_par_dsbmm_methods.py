@@ -419,7 +419,6 @@ class NumpyDSBMM:
                     print("\tUpdated IB lkl contribution")
             elif mt == "categorical":
                 cat_params = self._meta_params[s]
-                print(f"Frozen: {self.frozen}")
                 log_cat_params = np.log(
                     cat_params,
                     where=cat_params > 0.0,

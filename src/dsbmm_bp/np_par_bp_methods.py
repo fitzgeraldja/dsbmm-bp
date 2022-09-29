@@ -753,10 +753,7 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        # REMOVE:
-        print(f"{np.isinf(self.log_meta_prob).sum()} inf values in meta lkl")
         log_spatial_msg += self.log_meta_prob
-        print(f"{np.isinf(log_spatial_msg).sum()} inf values in log spat msg")
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
         #     msg[:, t, :] = np.array(
