@@ -780,7 +780,7 @@ class NumpyBP:
         # log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
         ## UPDATE BACKWARDS MESSAGES FROM i AT t ##
-        max_log_msg = -1000000.0
+        max_log_msg = -1000000000.0
         max_back_msg_log = tmp[:, 1:, :].max(axis=-1, keepdims=True)
         max_back_msg_log[max_back_msg_log < max_log_msg] = max_log_msg
         tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_back_msg_log)
