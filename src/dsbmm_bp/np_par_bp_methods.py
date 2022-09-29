@@ -3,6 +3,7 @@ import numpy as np
 import yaml  # type: ignore
 from numba import njit
 from scipy import sparse
+from scipy.special import gammaln
 
 from dsbmm_bp.np_par_dsbmm_methods import NumpyDSBMM
 
@@ -50,7 +51,35 @@ class NumpyBP:
         if not self.frozen:
             self.twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
             self.twopoint_t_marg = np.zeros((self.N, self.T - 1, self.Q, self.Q))
+
         self.msg_diff = 0.0
+
+    def compute_DC_lkl(self):
+        # Sort computation for all pres edges simultaneously (in DSBMM),
+        # then just pass as matrix rather than computing on fly
+        dc_lkl = np.zeros((self.E_idxs[-1], self.Q, self.Q))
+        # want to take out deg of i * in deg of j at t if a_ijt!=0
+        # then multiply by lam_qrt for each edge
+        for t in range(self.T):
+            # np.einsum("e,qr->eqr", self.deg_prod, self._lam[:, :, t])
+            tmp_lam = (
+                self.deg_prod[
+                    self.E_idxs[t] : self.E_idxs[t + 1], np.newaxis, np.newaxis
+                ]
+                * self.model._lam[np.newaxis, :, :, t]
+            )
+
+            dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = self.dc_pois_lkl(
+                self._edge_vals[t], tmp_lam
+            )
+            if not self.directed:
+                tmp = dc_lkl[t].transpose(0, 2, 1)
+                diags = np.diag_indices(self.Q, ndim=2)
+                # don't double diagonals
+                tmp[:, diags] = 0
+                dc_lkl[t] = (dc_lkl[t] + tmp) / 2
+
+        self._dc_lkl = dc_lkl
 
     def zero_diff(self):
         self.msg_diff = 0.0
@@ -456,6 +485,18 @@ class NumpyBP:
                         raise RuntimeError(
                             "Problem w idxs, likely integer overflow error that should have been caught..."
                         )
+        if self.deg_corr:
+            self.deg_prod = np.zeros((self.E_idxs[-1],))
+            self._edge_vals = {}
+            for t in range(self.T):
+                just_is = self.flat_i_idxs[t]
+                just_js = np.mod(self.all_idxs[t]["j_idxs"][:: self.Q], self.N).astype(
+                    int
+                )
+                self.deg_prod[self.E_idxs[t] : self.E_idxs[t + 1]] = (
+                    self.model.degs[just_js, t, 1] * self.model.degs[just_is, t, 0]
+                )
+                self._edge_vals[t] = self.A[t][just_js, just_is].toarray().squeeze()
 
     def spatial_field_terms(
         self,
@@ -508,7 +549,11 @@ class NumpyBP:
             # so now have spatial term for all j to all i
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
             if self.deg_corr:
-                raise NotImplementedError("deg_corr not implemented")
+                field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
+                    self._psi_e[j_idxs, i_idxs].T.reshape(-1, self.Q)[..., np.newaxis]
+                    * self._dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1], ...],
+                    axis=-2,
+                )
                 # for q in range(Q):
                 #     for r in range(Q):
                 #         tmp[q] += dc_lkl[e_nbrs_inv[nbr_idx], r, q] * jtoi_msgs[r]
@@ -527,17 +572,27 @@ class NumpyBP:
             raise RuntimeError("Problem w spatial field terms")
         return field_terms
 
-    @property
-    def dc_lkl(self):
-        try:
-            return self._dc_lkl
-        except AttributeError:
-            self._dc_lkl = np.zeros((self.E_idxs[-1], self.Q, self.Q))
-            for t in range(self.T):
-                self._dc_lkl[
-                    self.E_idxs[t] : self.E_idxs[t + 1], :, :
-                ] = self.model.dc_lkl[t]
-            return self._dc_lkl
+    def dc_pois_lkl(self, k: np.ndarray, lam: np.ndarray):
+        # now have k is edge vals at t (1D, (e,)), and lam is
+        # d_out^i * d_in^j * lam_qr 3D (e, q, r)
+        # and want Pois(e, lam) -> (e, q, r)
+        # k_it,lam_qt -> e^-lam_qt * lam_qt^k_it / k_it!
+        # in log -> -lam_qt + k_it*log(lam_qt) - log(k_it!)
+        # log(n!) = gammaln(n+1)
+        return np.exp(
+            -lam
+            + np.einsum(
+                "e,eqr->eqr",
+                k,
+                np.log(
+                    lam,
+                    where=lam > 0.0,
+                    # out=np.log(TOL) * np.ones_like(lam, dtype=float),
+                    out=np.log(TOL) * np.ones_like(lam, dtype=float),
+                ),
+            )
+            - gammaln(k + 1)[:, np.newaxis, np.newaxis]
+        )
 
     @property
     def block_edge_prob(self):
@@ -648,7 +703,7 @@ class NumpyBP:
             self._h = np.nansum(
                 self.node_marg[..., np.newaxis]
                 * self.block_edge_prob.transpose(2, 0, 1)[np.newaxis, ...]
-                * self.degs[:, :, 1][..., np.newaxis, np.newaxis],
+                * self.model.degs[:, :, 1][..., np.newaxis, np.newaxis],
                 axis=(0, -2),
             ).T
         else:
@@ -1052,14 +1107,13 @@ class NumpyBP:
                 tmp[:, diags] = 0
                 unnorm_twopoint_e_marg[self.E_idxs[t] : self.E_idxs[t + 1]] += tmp
 
-            if self.deg_corr:
-                # NB make sure dc lkl is suitably symmetrised if undirected
-                unnorm_twopoint_e_marg *= self.dc_lkl
-            else:
-                for t in range(self.T):
-                    unnorm_twopoint_e_marg[
-                        self.E_idxs[t] : self.E_idxs[t + 1]
-                    ] *= self.block_edge_prob[np.newaxis, :, :, t]
+        if self.deg_corr:
+            unnorm_twopoint_e_marg *= self._dc_lkl[:, np.newaxis, np.newaxis]
+        else:
+            for t in range(self.T):
+                unnorm_twopoint_e_marg[
+                    self.E_idxs[t] : self.E_idxs[t + 1]
+                ] *= self.block_edge_prob[np.newaxis, :, :, t]
         f_spatlink = (
             np.log(unnorm_twopoint_e_marg.sum(axis=(-2, -1))).sum()
             / self.model._tot_N_pres
@@ -1127,23 +1181,22 @@ class NumpyBP:
                 tmp[:, diags] = 0
                 self.twopoint_e_marg[self.E_idxs[t] : self.E_idxs[t + 1]] += tmp
 
-            if self.deg_corr:
-                # NB make sure dc lkl is suitably symmetrised if undirected
-                self.twopoint_e_marg *= self.dc_lkl
-            else:
-                for t in range(self.T):
-                    self.twopoint_e_marg[
-                        self.E_idxs[t] : self.E_idxs[t + 1]
-                    ] *= self.block_edge_prob[np.newaxis, :, :, t]
-            tp_e_sums = self.twopoint_e_marg.sum(axis=(-2, -1), keepdims=True)
-            self.twopoint_e_marg = np.divide(
-                self.twopoint_e_marg,
-                tp_e_sums,
-                where=tp_e_sums > 0,
-                out=np.zeros_like(self.twopoint_e_marg),
-            )
-            # self.twopoint_e_marg[self.twopoint_e_marg < TOL] = TOL
-            # self.twopoint_e_marg = np.divide(self.twopoint_e_marg,self.twopoint_e_marg.sum(axis=(-2, -1),keepdims=True),where=
+        if self.deg_corr:
+            self.twopoint_e_marg *= self._dc_lkl
+        else:
+            for t in range(self.T):
+                self.twopoint_e_marg[
+                    self.E_idxs[t] : self.E_idxs[t + 1]
+                ] *= self.block_edge_prob[np.newaxis, :, :, t]
+        tp_e_sums = self.twopoint_e_marg.sum(axis=(-2, -1), keepdims=True)
+        self.twopoint_e_marg = np.divide(
+            self.twopoint_e_marg,
+            tp_e_sums,
+            where=tp_e_sums > 0,
+            out=np.zeros_like(self.twopoint_e_marg),
+        )
+        # self.twopoint_e_marg[self.twopoint_e_marg < TOL] = TOL
+        # self.twopoint_e_marg = np.divide(self.twopoint_e_marg,self.twopoint_e_marg.sum(axis=(-2, -1),keepdims=True),where=
         return self.twopoint_e_marg
 
     def update_twopoint_temp_marg(self):
