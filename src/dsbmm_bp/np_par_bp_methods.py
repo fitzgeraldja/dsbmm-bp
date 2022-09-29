@@ -753,10 +753,7 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        # REMOVE:
-        print(f"{np.isinf(self.log_meta_prob).sum()} inf values in meta lkl")
         log_spatial_msg += self.log_meta_prob
-        print(f"{np.isinf(log_spatial_msg).sum()} inf values in log spat msg")
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
         #     msg[:, t, :] = np.array(
@@ -792,9 +789,9 @@ class NumpyBP:
         max_back_msg_log = tmp[:, 1:, :].max(axis=-1, keepdims=True)
         max_back_msg_log[max_back_msg_log < max_log_msg] = max_log_msg
         tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_back_msg_log)
-        tmp_backwards_msg[
-            self.log_meta_prob[:, 1:, :] <= np.log(TOL)
-        ] = 0.0  # set to zero if meta suggests such
+        # tmp_backwards_msg[
+        #     self.log_meta_prob[:, 1:, :] <= np.log(TOL)
+        # ] = 0.0  # set to zero if meta suggests such - no longer necessary, found bug
         back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
         # REMOVE:
         try:
@@ -894,9 +891,9 @@ class NumpyBP:
         max_fwd_msg_log = log_forwards_msg.max(axis=-1, keepdims=True)
         max_fwd_msg_log[max_fwd_msg_log < max_log_msg] = max_log_msg
         tmp_forwards_msg = np.exp(log_forwards_msg - max_fwd_msg_log)
-        tmp_forwards_msg[
-            self.log_meta_prob[:, :-1, :] < np.log(TOL)
-        ] = 0.0  # set to zero if meta suggests
+        # tmp_forwards_msg[
+        #     self.log_meta_prob[:, :-1, :] < np.log(TOL)
+        # ] = 0.0  # set to zero if meta suggests
         forward_sums = tmp_forwards_msg.sum(axis=-1)
         tmp_forwards_msg = np.divide(
             tmp_forwards_msg,
@@ -927,7 +924,7 @@ class NumpyBP:
             out=np.zeros_like(tmp_marg),
         )
         # tmp_marg[tmp_marg < TOL] = TOL
-        tmp_marg[self.log_meta_prob <= np.log(TOL)] = 0.0  # set zero if meta suggests
+        # tmp_marg[self.log_meta_prob <= np.log(TOL)] = 0.0  # set zero if meta suggests
         tmp_marg = np.divide(
             tmp_marg,
             tmp_marg.sum(axis=-1, keepdims=True),
