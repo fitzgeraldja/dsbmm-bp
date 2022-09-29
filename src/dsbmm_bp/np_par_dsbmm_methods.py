@@ -547,54 +547,78 @@ class NumpyDSBMM:
             # UNFINISHED - either need to pass full A (inefficient
             # unless this works well with sparse also), or idx between
             # nodes and edges so can find idxs where z_i=q etc
-            lam_num = np.array(
-                [
+            if NON_INFORMATIVE_INIT:
+                lam_num = np.array(
                     [
                         [
-                            self.A[t][
-                                np.ix_(self.Z[:, t] == q, self.Z[:, t] == r)
-                            ].sum()
-                            for r in range(self.Q)
+                            [self.A[t].mean() for r in range(self.Q)]
+                            for q in range(self.Q)
                         ]
-                        for q in range(self.Q)
+                        for t in range(self.T)
                     ]
-                    for t in range(self.T)
-                ]
-            )
+                )
+                lam_den = np.ones((self.Q, self.Q, self.T))
+            else:
+                lam_num = np.array(
+                    [
+                        [
+                            [
+                                self.A[t][
+                                    np.ix_(self.Z[:, t] == q, self.Z[:, t] == r)
+                                ].sum()
+                                for r in range(self.Q)
+                            ]
+                            for q in range(self.Q)
+                        ]
+                        for t in range(self.T)
+                    ]
+                )
 
-            lam_den = np.einsum(
-                "tq,tr->tqr", self._kappa[:, :, 1], self._kappa[:, :, 0]
-            )
-            # lam_num[lam_num < TOL] = TOL
-            # lam_den[lam_den < TOL] = 1.0
-            if not self.directed:
-                lam_num = (lam_num + lam_num.transpose(1, 0, 2)) / 2
-                lam_den = (lam_den + lam_den.transpose(1, 0, 2)) / 2
-            # lam_num[lam_num < TOL] = TOL
-            # lam_den[lam_den < TOL] = 1.0
+                lam_den = np.einsum(
+                    "qt,rt->qrt", self._kappa[:, :, 1], self._kappa[:, :, 0]
+                )
+                # lam_num[lam_num < TOL] = TOL
+                # lam_den[lam_den < TOL] = 1.0
+                if not self.directed:
+                    lam_num = (lam_num + lam_num.transpose(1, 0, 2)) / 2
+                    lam_den = (lam_den + lam_den.transpose(1, 0, 2)) / 2
+                # lam_num[lam_num < TOL] = TOL
+                # lam_den[lam_den < TOL] = 1.0
         else:
             lam_num = np.dstack(
                 [
-                    np.einsum(
-                        "eqr,e->qr", self.twopoint_edge_marg[t], self._edge_vals[t]
+                    np.nansum(
+                        self.twopoint_edge_marg[t]
+                        * self._edge_vals[t][:, np.newaxis, np.newaxis],
+                        axis=0,
                     )
                     for t in range(self.T)
                 ]
             )
+            # enforce uniformity for identifiability
+            diag_vals = np.stack(
+                [np.diag(lam_num[:, :, t]) for t in range(self.T)], axis=-1
+            ).sum(axis=-1)
+            [np.fill_diagonal(lam_num[:, :, t], diag_vals) for t in range(self.T)]
+            if not self.directed:
+                lam_num = (lam_num + lam_num.transpose(1, 0, 2)) / 2
             # lam_num[lam_num < TOL] = TOL
             # NB einsums fail for missing data
             # lam_den_out = np.einsum("itq,it->qt", self.node_marg, self.degs[:, :, 1])
             # lam_den_in = np.einsum("itq,it->qt", self.node_marg, self.degs[:, :, 0])
             lam_den_out = np.nansum(
                 self.node_marg * self.degs[:, :, 1][..., np.newaxis], axis=0
-            )
+            ).T
             lam_den_in = np.nansum(
                 self.node_marg * self.degs[:, :, 0][..., np.newaxis], axis=0
-            )
+            ).T
             lam_den = np.einsum("qt,rt->qrt", lam_den_out, lam_den_in)
-            # lam_den[lam_den < TOL] = 1.0
+            # enforce uniformity for identifiability
+            diag_vals = np.stack(
+                [np.diag(lam_den[:, :, t]) for t in range(self.T)], axis=-1
+            ).sum(axis=-1)
+            [np.fill_diagonal(lam_den[:, :, t], diag_vals) for t in range(self.T)]
             if not self.directed:
-                lam_num = (lam_num + lam_num.transpose(1, 0, 2)) / 2
                 lam_den = (lam_den + lam_den.transpose(1, 0, 2)) / 2
             # lam_num[lam_num < TOL] = TOL
             # lam_den[lam_den < TOL] = 1.0
