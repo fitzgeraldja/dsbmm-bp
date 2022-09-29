@@ -276,8 +276,6 @@ class NumpyDSBMM:
                 # print(self.jit_model._meta_params)
                 print("\tUpdated meta")
         self.calc_log_meta_lkl()
-        if self.deg_corr:
-            self.compute_DC_lkl()
 
     def set_node_marg(self, values):
         self.node_marg = values
@@ -323,15 +321,6 @@ class NumpyDSBMM:
             i_idxs, j_idxs = np.argwhere(self.A[t]).T
             self.nz_idxs[t]["i_idxs"] = i_idxs
             self.nz_idxs[t]["j_idxs"] = j_idxs
-        # gives E x T array of deg prods for faster calc of DC lkl
-        if self.deg_corr:
-            self.deg_prod = np.hstack(
-                [
-                    self.degs[self.nz_idxs[t]["i_idxs"], t, 1]
-                    * self.degs[self.nz_idxs[t]["j_idxs"], t, 0]
-                    for t in range(self.T)
-                ]
-            )
 
     def log_meta_pois_lkl(self, k: np.ndarray, lam: np.ndarray):
         # k_it,lam_qt -> e^-lam_qt * lam_qt^k_it / k_it!
@@ -345,33 +334,11 @@ class NumpyDSBMM:
                 np.log(
                     lam,
                     where=lam > 0.0,
-                    # out=np.log(TOL) * np.ones_like(lam, dtype=float),
-                    out=np.zeros_like(lam, dtype=float),
+                    out=np.log(TOL) * np.ones_like(lam, dtype=float),
+                    # out=np.zeros_like(lam, dtype=float),
                 ),
             )
             - gammaln(k + 1)[:, :, np.newaxis]
-        )
-
-    def dc_pois_lkl(self, k: np.ndarray, lam: np.ndarray):
-        # now have k is edge vals at t (1D, (e,)), and lam is
-        # d_out^i * d_in^j * lam_qr 3D (e, q, r)
-        # and want Pois(e, lam) -> (e, q, r)
-        # k_it,lam_qt -> e^-lam_qt * lam_qt^k_it / k_it!
-        # in log -> -lam_qt + k_it*log(lam_qt) - log(k_it!)
-        # log(n!) = gammaln(n+1)
-        return np.exp(
-            -lam
-            + np.einsum(
-                "e,eqr->eqr",
-                k,
-                np.log(
-                    lam,
-                    where=lam > 0.0,
-                    # out=np.log(TOL) * np.ones_like(lam, dtype=float),
-                    out=np.zeros_like(lam, dtype=float),
-                ),
-            )
-            - gammaln(k + 1)[:, np.newaxis, np.newaxis]
         )
 
     def calc_log_meta_lkl(self):
@@ -459,6 +426,8 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 )
+                if self.verbose:
+                    print("\tUpdated multinomial lkl contribution")
             else:
                 raise NotImplementedError(
                     "Yet to implement metadata distribution of given type \nOptions are 'poisson', 'indep bernoulli', 'categorical' or 'multinomial'."
@@ -781,7 +750,7 @@ class NumpyDSBMM:
 
             else:
                 raise NotImplementedError(
-                    "Yet to implement metadata distribution of given type \nOptions are 'poisson', 'indep bernoulli', or 'categorical'"
+                    "Yet to implement metadata distribution of given type \nOptions are 'poisson', 'indep bernoulli', 'categorical' or 'multinomial'"
                 )  # NB can't use string formatting for print in numba
 
     def update_poisson_meta(self, init, s, learning_rate=0.2):
@@ -994,25 +963,6 @@ class NumpyDSBMM:
             self._meta_params[s] = tmp
         else:
             self._meta_params[s] = tmp
-
-    def compute_DC_lkl(self):
-        # Sort computation for all pres edges simultaneously (in DSBMM),
-        # then just pass as matrix rather than computing on fly
-        dc_lkl = {t: np.zeros((e, self.Q, self.Q)) for t, e in enumerate(self.E)}
-        # want to take out deg of i * in deg of j at t if a_ijt!=0
-        # then multiply by lam_qrt for each edge
-        for t in range(self.T):
-            tmp_lam = np.einsum("e,qr->eqr", self.deg_prod, self._lam[:, :, t])
-            dc_lkl[t] = self.dc_pois_lkl(self._edge_vals[t], tmp_lam)
-        # for q in range(Q):
-        #     for r in range(Q):
-        #         for e_idx in prange(_edge_vals.shape[0]):
-        #             i, j, t, a_ijt = _edge_vals[e_idx, :]
-        #             i, j, t = int(i), int(j), int(t)
-        #             dc_lkl[e_idx, q, r] = np_pois_lkl(
-        #                 a_ijt, degs[i, t, 1] * degs[j, t, 0] * _lam[q, r, t]
-        #             )
-        self.dc_lkl = dc_lkl
 
     def set_params(self, true_params, freeze=True):
         self.frozen = freeze
