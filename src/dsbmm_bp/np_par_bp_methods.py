@@ -547,6 +547,13 @@ class NumpyBP:
                     dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                         dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
                     ) / 2
+            # REMOVE:
+            try:
+                assert np.all(dc_lkl.sum(axis=-2) > 0)
+            except AssertionError:
+                print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
+                print(max_dc_log_lkl)
+                raise RuntimeError("Problem w DC lkl term")
         for t in range(self.T):
             beta = self.block_edge_prob[:, :, t]
             # msg_idxs[nz_idxs[i,t]:nz_idxs[i+1,t],:]+Q*N*t would give idxs of j in psi_e which connect to i at t, i.e. exactly what we want
