@@ -538,14 +538,14 @@ class NumpyBP:
                 axis=-2, keepdims=True
             )  # as will normalise over this, subtract for stability
             dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
-            # REMOVE:
-            try:
-                assert np.all(dc_lkl.sum(axis=-2) > 0)
-            except AssertionError:
-                print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
-                print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
-                print(dc_lkl.max(axis=-1))
-                raise RuntimeError("Problem w DC lkl term pre sym")
+            # # REMOVE:
+            # try:
+            #     assert np.all(dc_lkl.sum(axis=-2) > 0)
+            # except AssertionError:
+            #     print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
+            #     print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
+            #     print(dc_lkl.max(axis=-1))
+            #     raise RuntimeError("Problem w DC lkl term pre sym")
             if not self.directed:
                 for t in range(self.T):
                     tmp = (
@@ -575,15 +575,14 @@ class NumpyBP:
                     dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                         dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
                     ) / 2
-            # REMOVE:
-            try:
-                assert np.all(dc_lkl.sum(axis=-2) > 0)
-            except AssertionError:
-                print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
-                print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
-                print(dc_lkl.max(axis=-1))
-                raise RuntimeError("Problem w DC lkl term post sym")
-            # otherwise problem where loc where dc_lkl != 0 does not match w any loc where meta_lkl != 0...
+            # # REMOVE:
+            # try:
+            #     assert np.all(dc_lkl.sum(axis=-2) > 0)
+            # except AssertionError:
+            #     print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
+            #     print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
+            #     print(dc_lkl.max(axis=-1))
+            #     raise RuntimeError("Problem w DC lkl term post sym")
         for t in range(self.T):
             beta = self.block_edge_prob[:, :, t]
             # msg_idxs[nz_idxs[i,t]:nz_idxs[i+1,t],:]+Q*N*t would give idxs of j in psi_e which connect to i at t, i.e. exactly what we want
@@ -609,15 +608,15 @@ class NumpyBP:
                 field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = (
                     self._psi_e[j_idxs, i_idxs].T.reshape(-1, self.Q) @ beta
                 )
-        # REMOVE:
-        try:
-            assert np.all(field_terms.sum(axis=-1) > 0)
-        except AssertionError:
-            print(np.nonzero(field_terms <= 0.0))
-            print(np.count_nonzero(field_terms == 0))
-            print(np.count_nonzero(field_terms < 0))
-            print(np.isnan(field_terms).sum())
-            raise RuntimeError("Problem w spatial field terms")
+        # # REMOVE:
+        # try:
+        #     assert np.all(field_terms.sum(axis=-1) > 0)
+        # except AssertionError:
+        #     print(np.nonzero(field_terms <= 0.0))
+        #     print(np.count_nonzero(field_terms == 0))
+        #     print(np.count_nonzero(field_terms < 0))
+        #     print(np.isnan(field_terms).sum())
+        #     raise RuntimeError("Problem w spatial field terms")
         return field_terms
 
     def dc_pois_log_lkl(self, k: np.ndarray, lam: np.ndarray):
@@ -892,13 +891,13 @@ class NumpyBP:
         max_back_msg_log[max_back_msg_log < max_log_msg] = max_log_msg
         tmp_backwards_msg = np.exp(tmp[:, 1:, :] - max_back_msg_log)
         back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
-        # REMOVE:
-        try:
-            assert np.all(back_sums[self._pres_trans] > 0)
-        except AssertionError:
-            print(back_sums[self._pres_trans & back_sums <= 0])
-            print(np.count_nonzero(np.isnan(back_sums[self._pres_trans])))
-            raise RuntimeError("Problem w backwards msg")
+        # # REMOVE:
+        # try:
+        #     assert np.all(back_sums[self._pres_trans] > 0)
+        # except AssertionError:
+        #     print(back_sums[self._pres_trans & back_sums <= 0])
+        #     print(np.count_nonzero(np.isnan(back_sums[self._pres_trans])))
+        #     raise RuntimeError("Problem w backwards msg")
         tmp_backwards_msg = np.divide(
             tmp_backwards_msg,
             back_sums,
@@ -914,14 +913,14 @@ class NumpyBP:
         except AssertionError:
             raise RuntimeError("Problem w backwards msg")
         self.msg_diff = max(tmp_diff, self.msg_diff)
-        # REMOVE:
-        back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
-        try:
-            assert np.all(back_sums[self._pres_trans] > 0)
-        except AssertionError:
-            print(back_sums[self._pres_trans & (back_sums <= 0)])
-            print(np.count_nonzero(np.isnan(back_sums[self._pres_trans])))
-            raise RuntimeError("Problem w backwards msg")
+        # # REMOVE:
+        # back_sums = tmp_backwards_msg.sum(axis=-1, keepdims=True)
+        # try:
+        #     assert np.all(back_sums[self._pres_trans] > 0)
+        # except AssertionError:
+        #     print(back_sums[self._pres_trans & (back_sums <= 0)])
+        #     print(np.count_nonzero(np.isnan(back_sums[self._pres_trans])))
+        #     raise RuntimeError("Problem w backwards msg")
         self._psi_t[:, :, :, 0] = tmp_backwards_msg
         # include forward term now backwards term updated
         forward_term = self.forward_temp_msg_term()
