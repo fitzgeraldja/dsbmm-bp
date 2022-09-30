@@ -922,11 +922,13 @@ if __name__ == "__main__":
                 ],
                 sep="\n",
             )
+        RESULTS_DIR = DATA_DIR / "results"
+        RESULTS_DIR.mkdir(exist_ok=True)
         if testset_name == "scopus":
-            with open(f"../../results/{testset_name}_{link_choice}_Z.pkl", "wb") as f:
+            with open(RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl", "wb") as f:
                 pickle.dump(pred_Z, f)
         else:
-            with open(f"../../results/{testset_name}_Z.pkl", "wb") as f:
+            with open(RESULTS_DIR / f"{testset_name}_Z.pkl", "wb") as f:
                 pickle.dump(pred_Z, f)
 
     # TODO: clean up code and improve documentation, then
