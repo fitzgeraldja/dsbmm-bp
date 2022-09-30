@@ -554,10 +554,10 @@ class NumpyBP:
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
             if self.deg_corr:
                 field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
-                    self._psi_e[j_idxs, i_idxs].T.reshape(-1, self.Q)[..., np.newaxis]
+                    self._psi_e[j_idxs, i_idxs].T.A.reshape(-1, self.Q)[..., np.newaxis]
                     * self._dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1], ...],
                     axis=-2,
-                )
+                )  # NB .A now necessary to convert from matrix to array, as first constructing 3D array before summing
                 # for q in range(Q):
                 #     for r in range(Q):
                 #         tmp[q] += dc_lkl[e_nbrs_inv[nbr_idx], r, q] * jtoi_msgs[r]
