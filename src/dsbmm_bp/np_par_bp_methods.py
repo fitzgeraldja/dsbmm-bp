@@ -552,7 +552,7 @@ class NumpyBP:
                 assert np.all(dc_lkl.sum(axis=-2) > 0)
             except AssertionError:
                 print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
-                print(max_dc_log_lkl[dc_lkl.sum(axis=-2) == 0])
+                print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
                 print(dc_lkl.max(axis=-1))
                 raise RuntimeError("Problem w DC lkl term")
             # otherwise problem where loc where dc_lkl != 0 does not match w any loc where meta_lkl != 0...
