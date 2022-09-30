@@ -54,10 +54,10 @@ class NumpyBP:
 
         self.msg_diff = 0.0
 
-    def compute_DC_lkl(self):
+    def compute_DC_log_lkl(self):
         # Sort computation for all pres edges simultaneously (in DSBMM),
         # then just pass as matrix rather than computing on fly
-        dc_lkl = np.zeros((self.E_idxs[-1], self.Q, self.Q))
+        dc_log_lkl = np.zeros((self.E_idxs[-1], self.Q, self.Q))
         # want to take out deg of i * in deg of j at t if a_ijt!=0
         # then multiply by lam_qrt for each edge
         for t in range(self.T):
@@ -69,19 +69,11 @@ class NumpyBP:
                 * self.model._lam[np.newaxis, :, :, t]
             )
 
-            dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = self.dc_pois_lkl(
+            dc_log_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = self.dc_pois_log_lkl(
                 self._edge_vals[t], tmp_lam
             )
-            if not self.directed:
-                tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
-                diags = np.diag_indices(self.Q, ndim=2)
-                # don't double diagonals
-                tmp[:, diags] = 0
-                dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
-                    dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
-                ) / 2
 
-        self._dc_lkl = dc_lkl
+        self._dc_log_lkl = dc_log_lkl
 
     def zero_diff(self):
         self.msg_diff = 0.0
@@ -541,7 +533,20 @@ class NumpyBP:
         # s.t. extract all msgs from i at t in sequence, for each connected j, for each q, so total of in_degs[i,t]*Q msgs for i at t
         field_terms = np.zeros((self.E_idxs[-1], self.Q))
         if self.deg_corr:
-            self.compute_DC_lkl()
+            self.compute_DC_log_lkl()
+            max_dc_log_lkl = self._dc_log_lkl.max(
+                axis=-2, keepdims=True
+            )  # as will normalise over this, subtract for stability
+            dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
+            if not self.directed:
+                for t in range(self.T):
+                    tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
+                    diags = np.diag_indices(self.Q, ndim=2)
+                    # don't double diagonals
+                    tmp[:, diags] = 0
+                    dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
+                        dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
+                    ) / 2
         for t in range(self.T):
             beta = self.block_edge_prob[:, :, t]
             # msg_idxs[nz_idxs[i,t]:nz_idxs[i+1,t],:]+Q*N*t would give idxs of j in psi_e which connect to i at t, i.e. exactly what we want
@@ -552,10 +557,12 @@ class NumpyBP:
             # ...,psi_1^{j\to i},...,psi_Q^{j\to i},psi_1^{k\to i},...,psi_Q^{k\to i},..., for j,k \in N_i
             # so now have spatial term for all j to all i
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
+
             if self.deg_corr:
+
                 field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
                     self._psi_e[j_idxs, i_idxs].T.A.reshape(-1, self.Q)[..., np.newaxis]
-                    * self._dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1], ...],
+                    * dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1], ...],
                     axis=-2,
                 )  # NB .A now necessary to convert from matrix to array, as first constructing 3D array before summing
                 # for q in range(Q):
@@ -576,24 +583,21 @@ class NumpyBP:
             raise RuntimeError("Problem w spatial field terms")
         return field_terms
 
-    def dc_pois_lkl(self, k: np.ndarray, lam: np.ndarray):
+    def dc_pois_log_lkl(self, k: np.ndarray, lam: np.ndarray):
         # now have k is edge vals at t (1D, (e,)), and lam is
         # d_out^i * d_in^j * lam_qr 3D (e, q, r)
         # and want Pois(e, lam) -> (e, q, r)
         # k_it,lam_qt -> e^-lam_qt * lam_qt^k_it / k_it!
         # in log -> -lam_qt + k_it*log(lam_qt) - log(k_it!)
         # log(n!) = gammaln(n+1)
-        return np.exp(
+        return (
             -lam
-            + np.einsum(
-                "e,eqr->eqr",
-                k,
-                np.log(
-                    lam,
-                    where=lam > 0.0,
-                    # out=np.log(TOL) * np.ones_like(lam, dtype=float),
-                    out=np.log(TOL) * np.ones_like(lam, dtype=float),
-                ),
+            + k[:, np.newaxis, np.newaxis]
+            * np.log(
+                lam,
+                where=lam > 0.0,
+                # out=np.log(TOL) * np.ones_like(lam, dtype=float),
+                out=np.log(TOL) * np.ones_like(lam, dtype=float),
             )
             - gammaln(k + 1)[:, np.newaxis, np.newaxis]
         )
@@ -1112,7 +1116,20 @@ class NumpyBP:
                 unnorm_twopoint_e_marg[self.E_idxs[t] : self.E_idxs[t + 1]] += tmp
 
         if self.deg_corr:
-            unnorm_twopoint_e_marg *= self._dc_lkl[:, np.newaxis, np.newaxis]
+            max_dc_log_lkl = self._dc_log_lkl.max(
+                axis=(-2, -1), keepdims=True
+            )  # as will normalise over these, subtract for stability
+            dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
+            if not self.directed:
+                for t in range(self.T):
+                    tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
+                    diags = np.diag_indices(self.Q, ndim=2)
+                    # don't double diagonals
+                    tmp[:, diags] = 0
+                    dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
+                        dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
+                    ) / 2
+            unnorm_twopoint_e_marg *= dc_lkl
         else:
             for t in range(self.T):
                 unnorm_twopoint_e_marg[
@@ -1186,7 +1203,20 @@ class NumpyBP:
                 self.twopoint_e_marg[self.E_idxs[t] : self.E_idxs[t + 1]] += tmp
 
         if self.deg_corr:
-            self.twopoint_e_marg *= self._dc_lkl
+            max_dc_log_lkl = self._dc_log_lkl.max(
+                axis=(-2, -1), keepdims=True
+            )  # as will normalise over these, subtract for stability
+            dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
+            if not self.directed:
+                for t in range(self.T):
+                    tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
+                    diags = np.diag_indices(self.Q, ndim=2)
+                    # don't double diagonals
+                    tmp[:, diags] = 0
+                    dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
+                        dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
+                    ) / 2
+            self.twopoint_e_marg *= dc_lkl
         else:
             for t in range(self.T):
                 self.twopoint_e_marg[
