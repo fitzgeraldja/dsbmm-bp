@@ -545,13 +545,13 @@ class NumpyBP:
                 print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
                 print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
                 print(dc_lkl.max(axis=-1))
-                raise RuntimeError("Problem w DC lkl term")
+                raise RuntimeError("Problem w DC lkl term pre sym")
             if not self.directed:
                 for t in range(self.T):
                     tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
                     diags = np.diag_indices(self.Q, ndim=2)
                     # don't double diagonals
-                    tmp[:, diags] = 0
+                    tmp[:, diags] = 0.0
                     dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                         dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
                     ) / 2
@@ -562,7 +562,7 @@ class NumpyBP:
                 print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
                 print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
                 print(dc_lkl.max(axis=-1))
-                raise RuntimeError("Problem w DC lkl term")
+                raise RuntimeError("Problem w DC lkl term post sym")
             # otherwise problem where loc where dc_lkl != 0 does not match w any loc where meta_lkl != 0...
         for t in range(self.T):
             beta = self.block_edge_prob[:, :, t]
