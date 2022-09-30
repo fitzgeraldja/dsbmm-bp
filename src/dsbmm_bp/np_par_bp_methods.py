@@ -848,7 +848,9 @@ class NumpyBP:
             axis=1,
         )
         if self.deg_corr:
-            log_spatial_msg -= np.einsum("qt,it->itq", self._h, self.degs[:, :, 1])
+            log_spatial_msg -= np.einsum(
+                "qt,it->itq", self._h, self.model.degs[:, :, 1]
+            )
         else:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
@@ -1091,7 +1093,9 @@ class NumpyBP:
         )
 
         if self.deg_corr:
-            log_spatial_msg -= np.einsum("qt,it->itq", self._h, self.degs[:, :, 1])
+            log_spatial_msg -= np.einsum(
+                "qt,it->itq", self._h, self.model.degs[:, :, 1]
+            )
         else:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
