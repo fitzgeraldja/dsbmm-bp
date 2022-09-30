@@ -538,6 +538,14 @@ class NumpyBP:
                 axis=-2, keepdims=True
             )  # as will normalise over this, subtract for stability
             dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
+            # REMOVE:
+            try:
+                assert np.all(dc_lkl.sum(axis=-2) > 0)
+            except AssertionError:
+                print(np.count_nonzero(dc_lkl.sum(axis=-2) == 0))
+                print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
+                print(dc_lkl.max(axis=-1))
+                raise RuntimeError("Problem w DC lkl term")
             if not self.directed:
                 for t in range(self.T):
                     tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
