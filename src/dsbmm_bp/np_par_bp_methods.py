@@ -548,10 +548,30 @@ class NumpyBP:
                 raise RuntimeError("Problem w DC lkl term pre sym")
             if not self.directed:
                 for t in range(self.T):
-                    tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
-                    diags = np.diag_indices(self.Q, ndim=2)
+                    tmp = (
+                        dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]]
+                        .transpose(0, 2, 1)
+                        .copy()
+                    )
+                    # know that in flattened array, diag indices
+                    # are always at Q*Q*i + Q*q + q
+                    # i.e. Q*Q*i + (Q+1)*q
+                    diaginds = np.array(
+                        np.meshgrid(
+                            np.arange(tmp.shape[0]),
+                            np.arange(self.Q),
+                        )
+                    ).reshape(2, -1)
+                    diaginds = (
+                        diaginds[0] * self.Q * self.Q + (self.Q + 1) * diaginds[1]
+                    )
                     # don't double diagonals
-                    tmp[:, diags] = 0.0
+                    tmp[
+                        np.unravel_index(
+                            diaginds,
+                            shape=tmp.shape,
+                        )
+                    ] = 0.0
                     dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                         dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
                     ) / 2
@@ -1127,9 +1147,12 @@ class NumpyBP:
             ] += np.einsum("iq,ir->iqr", jtoi_msgs, itoj_msgs)
             if not self.directed:
                 tmp = np.einsum("iq,ir->iqr", itoj_msgs, jtoi_msgs)
-                diags = np.diag_indices(self.Q, ndim=2)
+                diaginds = np.array(
+                    np.meshgrid(np.arange(tmp.shape[0]), np.arange(self.Q))
+                ).reshape(2, -1)
+                diaginds = diaginds[0] * self.Q * self.Q + (self.Q + 1) * diaginds[1]
                 # don't double diagonals
-                tmp[:, diags] = 0
+                tmp[np.unravel_index(diaginds, shape=tmp.shape)] = 0.0
                 unnorm_twopoint_e_marg[self.E_idxs[t] : self.E_idxs[t + 1]] += tmp
 
         if self.deg_corr:
@@ -1139,10 +1162,19 @@ class NumpyBP:
             dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
             if not self.directed:
                 for t in range(self.T):
-                    tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
-                    diags = np.diag_indices(self.Q, ndim=2)
+                    tmp = (
+                        dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]]
+                        .transpose(0, 2, 1)
+                        .copy()
+                    )
+                    diaginds = np.array(
+                        np.meshgrid(np.arange(tmp.shape[0]), np.arange(self.Q))
+                    ).reshape(2, -1)
+                    diaginds = (
+                        diaginds[0] * self.Q * self.Q + (self.Q + 1) * diaginds[1]
+                    )
                     # don't double diagonals
-                    tmp[:, diags] = 0
+                    tmp[np.unravel_index(diaginds, shape=tmp.shape)] = 0.0
                     dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                         dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
                     ) / 2
@@ -1214,9 +1246,12 @@ class NumpyBP:
             ] += np.einsum("iq,ir->iqr", jtoi_msgs, itoj_msgs)
             if not self.directed:
                 tmp = np.einsum("iq,ir->iqr", itoj_msgs, jtoi_msgs)
-                diags = np.diag_indices(self.Q, ndim=2)
+                diaginds = np.array(
+                    np.meshgrid(np.arange(tmp.shape[0]), np.arange(self.Q))
+                ).reshape(2, -1)
+                diaginds = diaginds[0] * self.Q * self.Q + (self.Q + 1) * diaginds[1]
                 # don't double diagonals
-                tmp[:, diags] = 0
+                tmp[np.unravel_index(diaginds, shape=tmp.shape)] = 0.0
                 self.twopoint_e_marg[self.E_idxs[t] : self.E_idxs[t + 1]] += tmp
 
         if self.deg_corr:
@@ -1226,10 +1261,19 @@ class NumpyBP:
             dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
             if not self.directed:
                 for t in range(self.T):
-                    tmp = dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]].transpose(0, 2, 1)
-                    diags = np.diag_indices(self.Q, ndim=2)
+                    tmp = (
+                        dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]]
+                        .transpose(0, 2, 1)
+                        .copy()
+                    )
+                    diaginds = np.array(
+                        np.meshgrid(np.arange(tmp.shape[0]), np.arange(self.Q))
+                    ).reshape(2, -1)
+                    diaginds = (
+                        diaginds[0] * self.Q * self.Q + (self.Q + 1) * diaginds[1]
+                    )
                     # don't double diagonals
-                    tmp[:, diags] = 0
+                    tmp[np.unravel_index(diaginds, shape=tmp.shape)] = 0.0
                     dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                         dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] + tmp
                     ) / 2
