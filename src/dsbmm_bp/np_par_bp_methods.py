@@ -858,7 +858,7 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        if (self.log_meta_prob < 2 * self.log_spatial_msg).sum() > (
+        if (self.log_meta_prob < 2 * log_spatial_msg).sum() > (
             self.model._tot_N_pres * self.Q / 4
         ):
             warnings.warn(
