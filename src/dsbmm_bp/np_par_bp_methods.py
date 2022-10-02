@@ -1,4 +1,6 @@
 # numpy reimplementation of all methods for BP class that reasonably stand to gain from doing so
+import warnings
+
 import numpy as np
 import yaml  # type: ignore
 from numba import njit
@@ -556,6 +558,8 @@ class NumpyBP:
                     # know that in flattened array, diag indices
                     # are always at Q*Q*i + Q*q + q
                     # i.e. Q*Q*i + (Q+1)*q
+                    # nb could just use tmp[:,np.eye(Q,dtype=bool)]=0.0
+                    # but potentially this is slightly quicker if Q large
                     diaginds = np.array(
                         np.meshgrid(
                             np.arange(tmp.shape[0]),
@@ -854,6 +858,12 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
+        if (self.log_meta_prob < 2 * self.log_spatial_msg).sum() > (
+            self.model._tot_N_pres * self.Q / 4
+        ):
+            warnings.warn(
+                "Metadata contribution significantly greater than spatial in over a quarter of possible cases - likely suggests should reduce weighting of metadata."
+            )
         log_spatial_msg += self.log_meta_prob
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
