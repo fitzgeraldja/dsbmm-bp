@@ -905,8 +905,33 @@ if __name__ == "__main__":
             trial_Qs=trial_Qs,
             alpha_use_all=not args.alpha_use_first,
         )
-        ## Fit to given data
-        model.fit(learning_rate=args.learning_rate)
+        try:
+            ## Fit to given data
+            model.fit(learning_rate=args.learning_rate)
+        except KeyboardInterrupt:
+            print("Keyboard interrupt, stopping early")
+            current_energy = model.bp.compute_free_energy()
+            if model.best_val_q == 0.0:
+                model.max_energy = current_energy
+                # first iter, first run
+                model.best_val_q = current_energy
+                model.best_val = current_energy
+                model.poor_iter_ctr = 0
+                model.bp.model.set_Z_by_MAP()
+                model.best_Z = model.bp.model.Z.copy()
+                model.best_tun_param = model.dsbmm.tuning_param
+                model.max_energy_Z = model.bp.model.Z.copy()
+            elif current_energy < model.best_val_q:
+                # new best for q
+                model.poor_iter_ctr = 0
+                model.best_val_q = current_energy
+                model.bp.model.set_Z_by_MAP()
+                model.all_best_Zs[model.q_idx, :, :] = model.bp.model.Z.copy()
+                model.best_tun_pars[model.q_idx] = model.dsbmm.tuning_param
+                if model.best_val_q < model.best_val:
+                    model.best_val = model.best_val_q
+                    model.best_Z = model.bp.model.Z.copy()
+                    model.best_tun_param = model.dsbmm.tuning_param
         if args.ret_best_only:
             pred_Z = model.best_Z
         else:

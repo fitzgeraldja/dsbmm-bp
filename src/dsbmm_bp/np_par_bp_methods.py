@@ -166,14 +166,50 @@ class NumpyBP:
             # about being in group q,
             # so again 4d
             # assert np.all((_psi_t.sum(axis=3) - 1) ** 2 < 1e-14)
-        elif mode == "partial":
-            # initialise by partly planted partition plus some noise - others left random
-            # see planted below for info on how planting considered
-            ## INIT MARGINALS ##
-            pass
+        elif mode == "uniform":
+            # initialise with uniform messages, i.e. the previous FFP without metadata - should provide immediate bias towards
+            # meta groups in first step, so may improve performance for toy model
+            self.node_marg = np.ones((self.N, self.T, self.Q))
+            self.node_marg /= self.node_marg.sum(axis=2, keepdims=True)
+            self.node_marg[~self._pres_nodes] = 0.0
             ## INIT MESSAGES ##
-            pass
-            raise NotImplementedError("partial msg init not yet implemented")
+            self._psi_e.data = np.ones(len(self._psi_e.data))
+            # psi_e[np.arange(N*T*Q).reshape(T,Q,N)[0].T.flatten(),:].T # gives N,N*Q array where j, i*q + q entry is message from i to j about being in q at t
+            # so can reshape to N*N,Q, take sum along last axis, then reshape to N x N to get normalising sum for each i, then tile to make in right shape overall
+            @njit
+            def normalise_psi_e(psi_data, psi_indptr, N, T, Q):
+                for t in range(T):
+                    q_idxs = np.arange(N * T * Q).reshape(T, Q, N)[t].T
+                    for i in range(N):
+                        i_sums = np.zeros(
+                            psi_indptr[q_idxs[i, 0] + 1] - psi_indptr[q_idxs[i, 0]]
+                        )
+                        for q in range(Q):
+                            i_sums += psi_data[
+                                psi_indptr[q_idxs[i, q]] : psi_indptr[q_idxs[i, q] + 1]
+                            ]
+                        # assert np.all(i_sums>0)
+                        for q in range(Q):
+                            psi_data[
+                                psi_indptr[q_idxs[i, q]] : psi_indptr[q_idxs[i, q] + 1]
+                            ] /= i_sums
+                return psi_data
+
+            self._psi_e.data = normalise_psi_e(
+                self._psi_e.data, self._psi_e.indptr, self.N, self.T, self.Q
+            )
+            self._psi_t = np.ones((self.N, self.T - 1, self.Q, 2))
+            self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
+            self._psi_t[~self._pres_trans] = 0.0
+
+        # elif mode == "partial":
+        #     # initialise by partly planted partition plus some noise - others left random
+        #     # see planted below for info on how planting considered
+        #     ## INIT MARGINALS ##
+        #     pass
+        #     ## INIT MESSAGES ##
+        #     pass
+        #     raise NotImplementedError("partial msg init not yet implemented")
         elif mode == "planted":
             # initialise by given partition plus some random noise, with strength of info used
             # specified by plant_strength (shortened to ps below)
@@ -301,6 +337,10 @@ class NumpyBP:
             self._psi_t[..., 0] += p * one_hot_Z[:, 1:, :]
             self._psi_t[..., 1] += p * one_hot_Z[:, : self.T - 1, :]
             self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
+        else:
+            raise ValueError(
+                "Invalid message initialisation mode chosen: options are 'random', 'uniform' or 'planted'."
+            )
 
         try:
             assert self._psi_e.max() <= 1.0

@@ -43,7 +43,7 @@ parser.add_argument(
 parser.add_argument(
     "--msg_init_mode",
     type=str,
-    choices=["planted", "random"],
+    choices=["planted", "random", "uniform"],
     default="planted",
     help="Initialization mode for messages. Default is planted.",
 )
