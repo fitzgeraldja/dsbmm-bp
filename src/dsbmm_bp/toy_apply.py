@@ -112,6 +112,15 @@ if args.n_threads is not None:
 
 
 def max_overlap_over_perms(true_Z, pred_Z):
+    """Calculate normalised maximum overlap between true and predicted Z
+
+    :param true_Z: _description_
+    :type true_Z: _type_
+    :param pred_Z: _description_
+    :type pred_Z: _type_
+    :return: _description_
+    :rtype: _type_
+    """
     Q = len(np.unique(true_Z))
     perms = permutations(range(Q))
     max_ol = 0.0
@@ -119,7 +128,7 @@ def max_overlap_over_perms(true_Z, pred_Z):
         tmp_Z = np.zeros_like(pred_Z)
         for q in range(Q):
             tmp_Z[pred_Z == q] = perm[q]
-        tmp_ol = (tmp_Z == true_Z).mean()
+        tmp_ol = ((tmp_Z == true_Z).mean() - 1 / Q) / (1 - 1 / Q)
         if tmp_ol > max_ol:
             max_ol = tmp_ol
     return max_ol
