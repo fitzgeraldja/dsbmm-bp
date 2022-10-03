@@ -1002,13 +1002,13 @@ class NumpyBP:
         # tmp_spatial_msg = tmp_spatial_msg + 1e-3 * np.random.rand(
         #     *tmp_spatial_msg.shape
         # )
-        tmp_spat_sums = tmp_spatial_msg.sum(axis=1, keepdims=True)
-        tmp_spatial_msg = np.divide(
-            tmp_spatial_msg,
-            tmp_spat_sums,
-            where=tmp_spat_sums > 0,
-            out=np.zeros_like(tmp_spatial_msg),
-        )
+        # tmp_spat_sums = tmp_spatial_msg.sum(axis=1, keepdims=True)
+        # tmp_spatial_msg = np.divide(
+        #     tmp_spatial_msg,
+        #     tmp_spat_sums,
+        #     where=tmp_spat_sums > 0,
+        #     out=np.zeros_like(tmp_spatial_msg),
+        # )
         # tmp_spatial_msg[tmp_spatial_msg < TOL] = TOL
         # tmp_spatial_msg /= tmp_spatial_msg.sum(axis=1)[:, np.newaxis]
         for t in range(self.T):
