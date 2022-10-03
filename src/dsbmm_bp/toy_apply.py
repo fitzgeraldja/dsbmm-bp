@@ -206,7 +206,7 @@ if __name__ == "__main__":
 
     try:
         if args.params_path is not None:
-            params_ext = str(Path(args.params_path).stem).split("_")[-1]
+            params_ext = "_" + str(Path(args.params_path).stem).split("_")[-1]
         else:
             params_ext = args.name_ext
         with open(data_path / f"toy_samples{params_ext}.pkl", "rb") as f:
