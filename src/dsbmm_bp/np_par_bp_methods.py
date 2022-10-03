@@ -999,7 +999,7 @@ class NumpyBP:
             out=np.zeros_like(tmp_spatial_msg),
         )
         # inject small amount of noise
-        tmp_spatial_msg = tmp_spatial_msg + 1e-6 * np.random.rand(
+        tmp_spatial_msg = tmp_spatial_msg + 1e-3 * np.random.rand(
             *tmp_spatial_msg.shape
         )
         tmp_spat_sums = tmp_spatial_msg.sum(axis=1, keepdims=True)
