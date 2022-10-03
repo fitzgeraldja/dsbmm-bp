@@ -277,7 +277,7 @@ class EM:
                         verbose=self.verbose,
                         use_meta=self.use_meta,
                     )  # X=X,
-                    if self.frozen:
+                    if self.frozen or self.params_to_set is not None:
                         try:
                             assert self.params_to_set is not None
                         except AssertionError:
@@ -302,7 +302,7 @@ class EM:
                         verbose=self.verbose,
                         use_meta=self.use_meta,
                     )  # X=X,
-                    if self.frozen:
+                    if self.frozen or self.params_to_set is not None:
                         try:
                             assert self.params_to_set is not None
                         except AssertionError:
@@ -327,7 +327,7 @@ class EM:
                     verbose=self.verbose,
                     use_meta=self.use_meta,
                 )  # X=X,
-                if self.frozen:
+                if self.frozen or self.params_to_set is not None:
                     try:
                         assert self.params_to_set is not None
                     except AssertionError:
@@ -355,7 +355,7 @@ class EM:
                 verbose=self.verbose,
                 alpha_use_all=self.alpha_use_all,
             )
-            if self.frozen:
+            if self.frozen or self.params_to_set is not None:
                 try:
                     assert self.params_to_set is not None
                 except AssertionError:
