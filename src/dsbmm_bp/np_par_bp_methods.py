@@ -284,6 +284,13 @@ class NumpyBP:
             self._psi_t[..., 1] += p * one_hot_Z[:, : self.T - 1, :]
             self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
 
+        try:
+            assert self._psi_e.max() <= 1.0
+            assert self._psi_t.max() <= 1.0
+        except AssertionError:
+            print(self._psi_e.max(), self._psi_t.max())
+            raise RuntimeError("Problem initialising messages")
+
         self._psi_t[~self._pres_trans, :, :] = 0.0
         self.n_tot_msgs = self._psi_e.nnz + np.count_nonzero(self._psi_t)
 
