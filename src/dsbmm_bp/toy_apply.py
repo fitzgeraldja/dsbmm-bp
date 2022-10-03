@@ -103,6 +103,12 @@ parser.add_argument(
     help="Path to set of parameters to test. Default is None (use default params).",
 )
 
+parser.add_argument(
+    "--unfreeze",
+    action="store_true",
+    help="Allow parameter updating",
+)
+
 args = parser.parse_args()
 
 if args.n_threads is not None:
@@ -385,7 +391,9 @@ if __name__ == "__main__":
                     "meta_params": meta_params,
                 }
 
-                model.set_params(true_params, freeze=True)
+                model.set_params(true_params, freeze=not args.unfreeze)
+                if args.unfreeze:
+                    model.bp.model.frozen = False
                 ## Fit to given data
                 model.fit(learning_rate=0.2, msg_conv_tol=args.msg_conv_tol)
                 ## Score after fit
