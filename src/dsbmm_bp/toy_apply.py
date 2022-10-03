@@ -3,6 +3,7 @@ import os
 import pickle
 import time
 import warnings
+from itertools import permutations
 from pathlib import Path
 
 import csr
@@ -108,6 +109,20 @@ if args.n_threads is not None:
     from numba import set_num_threads
 
     set_num_threads(args.n_threads)
+
+
+def max_overlap_over_perms(true_Z, pred_Z):
+    Q = len(np.unique(true_Z))
+    perms = permutations(range(Q))
+    max_ol = 0.0
+    for perm in perms:
+        tmp_Z = np.zeros_like(pred_Z)
+        for q in range(Q):
+            tmp_Z[pred_Z == q] = perm[q]
+        tmp_ol = (tmp_Z == true_Z).mean()
+        if tmp_ol > max_ol:
+            max_ol = tmp_ol
+    return max_ol
 
 
 if __name__ == "__main__":
@@ -267,6 +282,7 @@ if __name__ == "__main__":
     max_en_aris = np.zeros_like(test_aris)
     test_times = np.zeros((n_tests, n_samps - 1))
     init_times = np.zeros_like(test_times)
+    max_ols = np.zeros((n_tests, n_samps))
 
     testset_name = "toy"
     for test_no, (samples, params) in enumerate(zip(tqdm(all_samples), param_grid)):
@@ -380,6 +396,10 @@ if __name__ == "__main__":
                     tqdm.write(
                         f"{np.round_(model.ari_score(true_Z, pred_Z=model.k_means_init_Z),3)}"
                     )
+                ol = max_overlap_over_perms(true_Z, model.best_Z)
+                max_ols[test_no, samp_no] = ol
+                tqdm.write("Max overlap:")
+                tqdm.write(f"{ol:.3f}")
 
                 # print("Z inferred:", model.bp.model.jit_model.Z)
                 if verbose:
