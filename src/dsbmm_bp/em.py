@@ -488,6 +488,9 @@ class EM:
             for msg_iter in tqdm(
                 range(self.max_msg_iter), desc="Message iter", leave=False
             ):
+                print(self.bp.model._pi)
+                print(self.bp.model._beta[:, :, 0])
+                print(self.bp.model._meta_params[0][:, 0, :])
                 if n_iter < 5 and self.max_iter > 1:
                     if msg_iter > self.max_msg_iter // 3:
                         # Use fewer max msg updates for first few EM steps, where params usually inaccurate
