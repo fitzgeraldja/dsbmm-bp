@@ -205,9 +205,13 @@ if __name__ == "__main__":
     results_dir.mkdir(exist_ok=True)
 
     try:
-        with open(data_path / f"toy_samples{args.name_ext}.pkl", "rb") as f:
+        if args.params_path is not None:
+            params_ext = str(Path(args.params_path).stem).split("_")[-1]
+        else:
+            params_ext = args.name_ext
+        with open(data_path / f"toy_samples{params_ext}.pkl", "rb") as f:
             all_samples = pickle.load(f)
-        with open(data_path / f"toy_param_grid{args.name_ext}.pkl", "rb") as f:
+        with open(data_path / f"toy_param_grid{params_ext}.pkl", "rb") as f:
             param_grid = pickle.load(f)
     except FileNotFoundError:
         print("Existing samples not found, generating data...")
@@ -222,9 +226,9 @@ if __name__ == "__main__":
             rho_grid=rho_grid,
             mesh_grid=mesh_grid,
         )
-        with open(data_path / f"toy_samples{args.name_ext}.pkl", "wb") as f:  # type: ignore
+        with open(data_path / f"toy_samples{params_ext}.pkl", "wb") as f:  # type: ignore
             pickle.dump(all_samples, f)
-        with open(data_path / f"toy_param_grid{args.name_ext}.pkl", "wb") as f:  # type: ignore
+        with open(data_path / f"toy_param_grid{params_ext}.pkl", "wb") as f:  # type: ignore
             pickle.dump(param_grid, f)
 
     if args.check_conn:
