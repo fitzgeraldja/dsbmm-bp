@@ -118,24 +118,46 @@ class NumpyBP:
             self._psi_e.data = np.random.rand(len(self._psi_e.data))
             # psi_e[np.arange(N*T*Q).reshape(T,Q,N)[0].T.flatten(),:].T # gives N,N*Q array where j, i*q + q entry is message from i to j about being in q at t
             # so can reshape to N*N,Q, take sum along last axis, then reshape to N x N to get normalising sum for each i, then tile to make in right shape overall
-            sums = sparse.vstack(
-                [
-                    sparse.csr_matrix(
-                        self._psi_e[
-                            np.arange(self.N * self.T * self.Q)
-                            .reshape(self.T, self.Q, self.N)[t]
-                            .T.flatten(),
-                            :,
-                        ]
-                        .T.reshape(self.N * self.N, self.Q)
-                        .sum(axis=-1)
-                        .reshape(self.N, self.N)
-                    )
-                    for t in range(self.T)
-                    for _ in range(self.Q)
-                ]
+            @njit
+            def normalise_psi_e(psi_data, psi_indptr, N, T, Q):
+                for t in range(T):
+                    q_idxs = np.arange(N * T * Q).reshape(T, Q, N)[t].T
+                    for i in range(N):
+                        i_sums = np.zeros(
+                            psi_indptr[q_idxs[i, 0] + 1] - psi_indptr[q_idxs[i, 0]]
+                        )
+                        for q in range(Q):
+                            i_sums += psi_data[
+                                psi_indptr[q_idxs[i, q]] : psi_indptr[q_idxs[i, q] + 1]
+                            ]
+                        # assert np.all(i_sums>0)
+                        for q in range(Q):
+                            psi_data[
+                                psi_indptr[q_idxs[i, q]] : psi_indptr[q_idxs[i, q] + 1]
+                            ] /= i_sums
+                return psi_data
+
+            self._psi_e.data = normalise_psi_e(
+                self._psi_e.data, self._psi_e.indptr, self.N, self.T, self.Q
             )
-            self._psi_e.data /= sums.data  # normalise messages
+            # sums = sparse.vstack(
+            #     [
+            #         sparse.csr_matrix(
+            #             self._psi_e[
+            #                 np.arange(self.N * self.T * self.Q)
+            #                 .reshape(self.T, self.Q, self.N)[t]
+            #                 .T.flatten(),
+            #                 :,
+            #             ]
+            #             .T.reshape(self.N * self.N, self.Q)
+            #             .sum(axis=-1)
+            #             .reshape(self.N, self.N)
+            #         )
+            #         for t in range(self.T)
+            #         for _ in range(self.Q)
+            #     ]
+            # )
+            # self._psi_e.data /= sums.data  # normalise messages
 
             self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, 2)
             self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
