@@ -464,6 +464,11 @@ if __name__ == "__main__":
                     "wb",
                 ) as f:
                     pickle.dump(init_times, f)
+                with open(  # type: ignore
+                    results_dir / f"{testset_name}_max_ols{tp_str}{args.name_ext}.pkl",
+                    "wb",
+                ) as f:
+                    pickle.dump(max_ols, f)
 
         tqdm.write(f"Finished test {test_no+1} for true params:")
         tqdm.write(f"{params}")
