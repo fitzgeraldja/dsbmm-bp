@@ -1303,7 +1303,7 @@ class NumpyBP:
         # print("Temporal link energy: ", f_templink)
         # print("Site energy: ", f_site)
         # print("Non-link energy: ", last_term)
-        self.free_energy = f_spatlink + f_templink - f_site - last_term
+        self.free_energy = f_spatlink + f_templink - f_site + last_term
         return self.free_energy
 
     def update_twopoint_marginals(
