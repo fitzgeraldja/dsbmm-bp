@@ -509,7 +509,8 @@ class NumpyDSBMM:
                             for r in range(self.Q)
                         ]
                         for q in range(self.Q)
-                    ]
+                    ],
+                    dtype=float,
                 )
                 qqprime_trans /= qqprime_trans.sum(axis=1, keepdims=True)
                 unif_trans = np.ones((self.Q, self.Q)) / self.Q
