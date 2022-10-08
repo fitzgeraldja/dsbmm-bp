@@ -901,7 +901,6 @@ if __name__ == "__main__":
     else:
         T = len(data["A"])
         N = data["A"][0].shape[0]
-        n_runs = args.n_runs
         if args.ret_best_only:
             if args.h_l is None:
                 pred_Z = np.zeros((N, T))
@@ -973,7 +972,7 @@ if __name__ == "__main__":
                     sparse_adj=True,
                     try_parallel=try_parallel,
                     tuning_param=args.tuning_param,
-                    n_runs=n_runs,
+                    n_runs=args.n_runs,
                     patience=args.patience,
                     deg_corr=args.deg_corr,
                     verbose=verbose,
@@ -1075,7 +1074,7 @@ if __name__ == "__main__":
                             sparse_adj=True,
                             try_parallel=try_parallel,
                             tuning_param=args.tuning_param,
-                            n_runs=n_runs,
+                            n_runs=args.n_runs,
                             patience=args.patience,
                             deg_corr=args.deg_corr,
                             verbose=verbose,
