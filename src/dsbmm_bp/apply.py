@@ -171,6 +171,24 @@ parser.add_argument(
     help="Use only first and previously missing node marginals to update alpha, rather than all marginals.",
 )
 
+parser.add_argument(
+    "--h_l", type=int, default=None, help="Max number of layers in hierarchy"
+)
+
+parser.add_argument(
+    "--h_Q",
+    type=int,
+    default=8,
+    help="Max number of groups to look for at each layer in the hierarchy, NB if h_Q>N/h_min_N then take h_Q = floor(N/h_min_N) instead",
+)
+
+parser.add_argument(
+    "--h_min_N",
+    type=int,
+    default=20,
+    help="Minimum number of nodes in group to be considered for recursion.",
+)
+
 args = parser.parse_args()
 
 if args.n_threads is not None:
@@ -656,12 +674,12 @@ if __name__ == "__main__":
                         model = em.EM(
                             sample,
                             verbose=verbose,
-                            tuning_param=args.tuning_param,
                             n_runs=args.n_runs,
                             patience=args.patience,
                             max_iter=args.max_iter,
                             max_msg_iter=args.max_msg_iter,
                             use_numba=args.use_numba,
+                            tuning_param=args.tuning_param,
                             alpha_use_all=not args.alpha_use_first,
                         )
                     else:
@@ -869,11 +887,22 @@ if __name__ == "__main__":
             if not args.ret_best_only
             else np.zeros((N, T))
         )
+        # args.h_l, default=None, max. no. layers in hier
+        # args.h_Q, default=8, max. no. groups at hier layer,
+        # = 4 if h_Q > N_l / 4
+        # args.h_min_N, default=20, min. nodes for split
+
         if (
             args.min_Q is not None
             or args.max_Q is not None
             or args.max_trials is not None
         ):
+            try:
+                assert args.h_l is None
+            except AssertionError:
+                raise NotImplementedError(
+                    "Hierarchical search over range of Q at each level currently not supported"
+                )
             try:
                 assert args.min_Q is not None
                 assert args.max_Q is not None
@@ -883,78 +912,187 @@ if __name__ == "__main__":
                     "If specifying search for Q, must specify all of --min_Q, --max_Q, and --max_trials"
                 )
             trial_Qs = np.linspace(args.min_Q, args.max_Q, args.max_trials, dtype=int)
-            data["Q"] = trial_Qs[0]
         else:
-            trial_Qs = None
+            if args.h_l is None:
+                trial_Qs = [args.num_groups]
+            else:
+                trial_Qs = [
+                    args.h_Q
+                    if args.h_Q < N / args.h_min_N
+                    else np.floor(N / args.h_min_N)
+                ]
+                try:
+                    assert trial_Qs[0] > 0
+                except AssertionError:
+                    raise ValueError(
+                        "Minimum number of nodes to consider at each level of hierarchy must be less than total number of nodes."
+                    )
+                args.ret_best_only = True
+                pred_Z = np.zeros((args.h_l, N, T))
+                # args.h_min_N
+        data["Q"] = trial_Qs[0]
 
         print("*" * 15, "Running empirical data", "*" * 15)
         ## Initialise
-        model = em.EM(
-            data,
-            sparse_adj=True,
-            try_parallel=try_parallel,
-            tuning_param=np.linspace(0.8, 1.8, 11),
-            n_runs=n_runs,
-            patience=args.patience,
-            deg_corr=args.deg_corr,
-            verbose=verbose,
-            max_iter=args.max_iter,
-            max_msg_iter=args.max_msg_iter,
-            use_meta=not args.ignore_meta,
-            use_numba=args.use_numba,
-            trial_Qs=trial_Qs,
-            alpha_use_all=not args.alpha_use_first,
-        )
-        try:
-            ## Fit to given data
-            model.fit(learning_rate=args.learning_rate)
-        except KeyboardInterrupt:
-            print("Keyboard interrupt, stopping early")
-            current_energy = model.bp.compute_free_energy()
-            if model.best_val_q == 0.0:
-                model.max_energy = current_energy
-                # first iter, first run
-                model.best_val_q = current_energy
-                model.best_val = current_energy
-                model.poor_iter_ctr = 0
-                model.bp.model.set_Z_by_MAP()
-                model.best_Z = model.bp.model.Z.copy()
-                model.best_tun_param = model.dsbmm.tuning_param
-                model.max_energy_Z = model.bp.model.Z.copy()
-            elif current_energy < model.best_val_q:
-                # new best for q
-                model.poor_iter_ctr = 0
-                model.best_val_q = current_energy
-                model.bp.model.set_Z_by_MAP()
-                model.all_best_Zs[model.q_idx, :, :] = model.bp.model.Z.copy()
-                model.best_tun_pars[model.q_idx] = model.dsbmm.tuning_param
-                if model.best_val_q < model.best_val:
-                    model.best_val = model.best_val_q
-                    model.best_Z = model.bp.model.Z.copy()
-                    model.best_tun_param = model.dsbmm.tuning_param
-        if args.ret_best_only:
-            pred_Z = model.best_Z
+        if args.h_l is None:
+            hierarchy_layers = [0]
         else:
-            pred_Z = model.all_best_Zs
-        if args.ret_best_only:
-            print(f"Best tuning param: {model.best_tun_param}")
-        else:
-            print(f"Best tuning params for each Q:")
-            print(
-                *[
-                    f"Q = {q}:  {tunpar}"
-                    for q, tunpar in zip(trial_Qs, model.best_tun_pars)
-                ],
-                sep="\n",
-            )
-        RESULTS_DIR = DATA_DIR / "results"
-        RESULTS_DIR.mkdir(exist_ok=True)
-        if testset_name == "scopus":
-            with open(RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl", "wb") as f:
-                pickle.dump(pred_Z, f)
-        else:
-            with open(RESULTS_DIR / f"{testset_name}_Z.pkl", "wb") as f:
-                pickle.dump(pred_Z, f)
+            hierarchy_layers = np.arange(args.h_l)
+        for layer in hierarchy_layers:
+            if args.h_l is not None:
+                print(f"{'%'*15} At hierarchy layer {layer+1}/{args.h_l} {'%'*15}")
+
+            if layer == 0:
+                model = em.EM(
+                    data,
+                    sparse_adj=True,
+                    try_parallel=try_parallel,
+                    tuning_param=args.tuning_param,
+                    n_runs=n_runs,
+                    patience=args.patience,
+                    deg_corr=args.deg_corr,
+                    verbose=verbose,
+                    max_iter=args.max_iter,
+                    max_msg_iter=args.max_msg_iter,
+                    use_meta=not args.ignore_meta,
+                    use_numba=args.use_numba,
+                    trial_Qs=trial_Qs,
+                    alpha_use_all=not args.alpha_use_first,
+                )
+                try:
+                    ## Fit to given data
+                    model.fit(learning_rate=args.learning_rate)
+                except KeyboardInterrupt:
+                    print("Keyboard interrupt, stopping early")
+                    current_energy = model.bp.compute_free_energy()
+                    if model.best_val_q == 0.0:
+                        model.max_energy = current_energy
+                        # first iter, first run
+                        model.best_val_q = current_energy
+                        model.best_val = current_energy
+                        model.poor_iter_ctr = 0
+                        model.bp.model.set_Z_by_MAP()
+                        model.best_Z = model.bp.model.Z.copy()
+                        model.best_tun_param = model.dsbmm.tuning_param
+                        model.max_energy_Z = model.bp.model.Z.copy()
+                    elif current_energy < model.best_val_q:
+                        # new best for q
+                        model.poor_iter_ctr = 0
+                        model.best_val_q = current_energy
+                        model.bp.model.set_Z_by_MAP()
+                        model.all_best_Zs[model.q_idx, :, :] = model.bp.model.Z.copy()
+                        model.best_tun_pars[model.q_idx] = model.dsbmm.tuning_param
+                        if model.best_val_q < model.best_val:
+                            model.best_val = model.best_val_q
+                            model.best_Z = model.bp.model.Z.copy()
+                            model.best_tun_param = model.dsbmm.tuning_param
+                if args.ret_best_only:
+                    if args.h_l is None:
+                        pred_Z = model.best_Z
+                    else:
+                        pred_Z[layer, :, :] = model.best_Z
+                else:
+                    pred_Z = model.all_best_Zs
+                if args.ret_best_only:
+                    print(f"Best tuning param: {model.best_tun_param}")
+                else:
+                    print(f"Best tuning params for each Q:")
+                    print(
+                        *[
+                            f"Q = {q}:  {tunpar}"
+                            for q, tunpar in zip(trial_Qs, model.best_tun_pars)
+                        ],
+                        sep="\n",
+                    )
+            else:
+                old_Z = pred_Z[layer - 1, :, :]
+                qs = np.unique(old_Z[old_Z != -1])
+                node_group_cnts = np.stack(
+                    [(old_Z == q).sum(axis=1) for q in qs], axis=0
+                )
+                old_node_labels = np.argmax(
+                    node_group_cnts, axis=0
+                )  # assigns each node its most common label
+                q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
+                suff_large_q_idxs = q_idxs[group_cnts > args.h_min_N]
+                for no_q, q in enumerate(suff_large_q_idxs):
+                    print(
+                        f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
+                    )
+                    N = group_cnts[q]
+                    sub_data = {
+                        "A": [
+                            data["A"][t][
+                                np.ix_(old_node_labels == q, old_node_labels == q)
+                            ]
+                            for t in range(T)
+                        ],
+                        "X": [
+                            data["X"][s][old_node_labels == q, :, :]
+                            for s in range(len(data["X"]))
+                        ],
+                        "Q": args.h_Q
+                        if args.h_Q < N / args.h_min_N
+                        else max(np.floor(N / args.h_min_N), 2),
+                        "meta_types": data["meta_types"],
+                    }
+                    model = em.EM(
+                        sub_data,
+                        sparse_adj=True,
+                        try_parallel=try_parallel,
+                        tuning_param=args.tuning_param,
+                        n_runs=n_runs,
+                        patience=args.patience,
+                        deg_corr=args.deg_corr,
+                        verbose=verbose,
+                        max_iter=args.max_iter,
+                        max_msg_iter=args.max_msg_iter,
+                        use_meta=not args.ignore_meta,
+                        use_numba=args.use_numba,
+                        alpha_use_all=not args.alpha_use_first,
+                    )
+                    try:
+                        ## Fit to given data
+                        model.fit(learning_rate=args.learning_rate)
+                    except KeyboardInterrupt:
+                        print("Keyboard interrupt, stopping early")
+                        current_energy = model.bp.compute_free_energy()
+                        if model.best_val_q == 0.0:
+                            model.max_energy = current_energy
+                            # first iter, first run
+                            model.best_val_q = current_energy
+                            model.best_val = current_energy
+                            model.poor_iter_ctr = 0
+                            model.bp.model.set_Z_by_MAP()
+                            model.best_Z = model.bp.model.Z.copy()
+                            model.best_tun_param = model.dsbmm.tuning_param
+                            model.max_energy_Z = model.bp.model.Z.copy()
+                        elif current_energy < model.best_val_q:
+                            # new best for q
+                            model.poor_iter_ctr = 0
+                            model.best_val_q = current_energy
+                            model.bp.model.set_Z_by_MAP()
+                            model.all_best_Zs[
+                                model.q_idx, :, :
+                            ] = model.bp.model.Z.copy()
+                            model.best_tun_pars[model.q_idx] = model.dsbmm.tuning_param
+                            if model.best_val_q < model.best_val:
+                                model.best_val = model.best_val_q
+                                model.best_Z = model.bp.model.Z.copy()
+                                model.best_tun_param = model.dsbmm.tuning_param
+
+                    print(f"Best tuning param: {model.best_tun_param}")
+                    pred_Z[layer, old_node_labels == q, :] = model.best_Z
+            RESULTS_DIR = DATA_DIR / "results"
+            RESULTS_DIR.mkdir(exist_ok=True)
+            if testset_name == "scopus":
+                with open(
+                    RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl", "wb"
+                ) as f:
+                    pickle.dump(pred_Z, f)
+            else:
+                with open(RESULTS_DIR / f"{testset_name}_Z.pkl", "wb") as f:
+                    pickle.dump(pred_Z, f)
 
     # TODO: clean up code and improve documentation, then
     # run poetry publish

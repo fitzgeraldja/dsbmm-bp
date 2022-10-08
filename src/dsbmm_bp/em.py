@@ -549,6 +549,7 @@ class EM:
                     self.bp.model.set_Z_by_MAP()
                     self.best_Z = self.bp.model.Z.copy()
                     self.best_tun_param = self.dsbmm.tuning_param
+                    self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
                     self.max_energy_Z = self.bp.model.Z.copy()
                 elif current_energy < self.best_val_q:
                     # new best for q

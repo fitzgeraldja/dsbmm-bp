@@ -1294,16 +1294,31 @@ class NumpyBP:
         )
 
         # calc last term
-        marg_sums = self.node_marg.sum(axis=0)
-        last_term = np.einsum("qrt,tq,tr->", self.model._beta, marg_sums, marg_sums)
-        last_term /= self.model._tot_N_pres
+        if not self.deg_corr:
+            marg_sums = self.node_marg.sum(axis=0)
+            last_term = np.einsum("qrt,tq,tr->", self.model._beta, marg_sums, marg_sums)
+            last_term /= self.model._tot_N_pres
+        else:
+            out_deg_weighted_marg_sums = (
+                self.node_marg * self.model.degs[:, :, 1][..., np.newaxis]
+            ).sum(axis=0)
+            in_deg_weighted_marg_sums = (
+                self.node_marg * self.model.degs[:, :, 0][..., np.newaxis]
+            ).sum(axis=0)
+            last_term = np.einsum(
+                "qrt,tq,tr->",
+                self.model._lam,
+                out_deg_weighted_marg_sums,
+                in_deg_weighted_marg_sums,
+            )
+            last_term /= self.model._tot_N_pres
 
         # if self.verbose:
         # print("Spatial link energy: ", f_spatlink)
         # print("Temporal link energy: ", f_templink)
         # print("Site energy: ", f_site)
         # print("Non-link energy: ", last_term)
-        self.free_energy = f_spatlink + f_templink - f_site - last_term
+        self.free_energy = f_spatlink + f_templink - f_site + last_term
         return self.free_energy
 
     def update_twopoint_marginals(
