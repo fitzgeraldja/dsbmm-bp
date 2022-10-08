@@ -512,6 +512,7 @@ class NumpyDSBMM:
                     ],
                     dtype=float,
                 )
+                qqprime_trans = qqprime_trans.mean(axis=-1)
                 qqprime_trans /= qqprime_trans.sum(axis=1, keepdims=True)
                 unif_trans = np.ones((self.Q, self.Q)) / self.Q
                 qqprime_trans = (
