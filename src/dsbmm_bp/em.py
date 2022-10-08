@@ -55,6 +55,7 @@ class EM:
         trial_Qs=None,
         alpha_use_all=True,
         non_informative_init=True,
+        planted_p=0.6,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
@@ -70,6 +71,7 @@ class EM:
         self.frozen = False
         self.params_to_set = None
         self.non_informative_init = non_informative_init
+        self.planted_p = planted_p
         if type(tuning_param) == float:
             self.tuning_params = [tuning_param]
         else:
@@ -373,7 +375,7 @@ class EM:
         ## Initialise model params
         if self.verbose:
             print(f"Now {retext}initialising model:")
-        self.bp.model.update_params(init=True)
+        self.bp.model.update_params(init=True, planted_p=self.planted_p)
         if self.verbose:
             print("\tInitialised all DSBMM params!")
         self.bp.init_messages(mode=self.msg_init_mode)

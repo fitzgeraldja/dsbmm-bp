@@ -179,6 +179,13 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--planted_p",
+    type=float,
+    default=0.6,
+    help="Weighting of parameter initialisation from initial partition vs non-informative initialisation, default is 0.6.",
+)
+
+parser.add_argument(
     "--h_l", type=int, default=None, help="Max number of layers in hierarchy"
 )
 
@@ -676,6 +683,7 @@ if __name__ == "__main__":
                             else 1.0,
                             alpha_use_all=not args.alpha_use_first,
                             non_informative_init=not args.partial_informative_dsbmm_init,
+                            planted_p=args.planted_p,
                         )
                     elif testset_name == "align":
                         tqdm.write(f"alignment = {params['meta_aligned']}")
@@ -690,6 +698,7 @@ if __name__ == "__main__":
                             tuning_param=args.tuning_param,
                             alpha_use_all=not args.alpha_use_first,
                             non_informative_init=not args.partial_informative_dsbmm_init,
+                            planted_p=args.planted_p,
                         )
                     else:
                         # scaling tests
@@ -709,6 +718,7 @@ if __name__ == "__main__":
                             else 1.0,
                             alpha_use_all=not args.alpha_use_first,
                             non_informative_init=not args.partial_informative_dsbmm_init,
+                            planted_p=args.planted_p,
                         )
                     if samp_no > 0:
                         init_times[test_no, samp_no - 1] = time.time() - start_time
@@ -974,6 +984,7 @@ if __name__ == "__main__":
                     trial_Qs=trial_Qs,
                     alpha_use_all=not args.alpha_use_first,
                     non_informative_init=not args.partial_informative_dsbmm_init,
+                    planted_p=args.planted_p,
                 )
                 try:
                     ## Fit to given data
@@ -1074,6 +1085,7 @@ if __name__ == "__main__":
                             use_numba=args.use_numba,
                             alpha_use_all=not args.alpha_use_first,
                             non_informative_init=not args.partial_informative_dsbmm_init,
+                            planted_p=args.planted_p,
                         )
                         try:
                             ## Fit to given data
