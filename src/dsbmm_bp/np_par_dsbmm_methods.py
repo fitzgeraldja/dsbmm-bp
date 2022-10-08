@@ -40,6 +40,7 @@ class NumpyDSBMM:
         n_threads=None,
         frozen=False,
         alpha_use_all=True,
+        non_informative_init=True,
     ):
         """Initialise the class
 
@@ -64,6 +65,7 @@ class NumpyDSBMM:
         self.frozen = frozen
         self.deg_corr = deg_corr
         self.alpha_use_all = alpha_use_all
+        self.non_informative_init = non_informative_init
 
         self.directed = directed
         self.verbose = verbose
@@ -121,7 +123,7 @@ class NumpyDSBMM:
         self.directed = directed
         self.tuning_param = tuning_param
         self.degs = self.compute_degs(self.A)
-        # if not NON_INFORMATIVE_INIT: # for some reason can't make these conditional in numba
+        # if not self.non_informative_init: # for some reason can't make these conditional in numba
         self._kappa = self.compute_group_degs()
         self._n_qt = self.compute_group_counts()
         # else:
@@ -237,12 +239,14 @@ class NumpyDSBMM:
         """
         pass
 
-    def update_params(self, init=False, learning_rate=0.2):
+    def update_params(self, init=False, learning_rate=0.2, planted_p=0.5):
         """Given marginals, update parameters suitably
 
         Args:
             messages (_type_): _description_
         """
+        if init:
+            self.planted_p = planted_p
         if not self.frozen:
             # first init of parameters given initial groups if init=True, else use provided marginals
             self.update_alpha(
@@ -441,12 +445,18 @@ class NumpyDSBMM:
 
     def update_alpha(self, init=False, learning_rate=0.2, use_all_marg=False):
         if init:
-            if NON_INFORMATIVE_INIT:
+            if self.non_informative_init:
                 self._alpha = np.ones(self.Q) / self.Q
             else:
                 # case of no marginals / true partition provided to calculate most likely params
-                self._alpha = np.array(
+                planted_alpha = np.array(
                     [(self.Z == q).sum() / self._tot_N_pres for q in range(self.Q)]
+                )
+                if planted_alpha.sum() > 0:
+                    planted_alpha /= planted_alpha.sum()
+                self._alpha = (
+                    self.planted_p * planted_alpha
+                    + (1 - self.planted_p) * np.ones(self.Q) / self.Q
                 )
                 if self._alpha.sum() > 0:
                     self._alpha /= self._alpha.sum()
@@ -486,7 +496,7 @@ class NumpyDSBMM:
     def update_pi(self, init=False, learning_rate=0.2):
         qqprime_trans = np.zeros((self.Q, self.Q))
         if init:
-            if NON_INFORMATIVE_INIT:
+            if self.non_informative_init:
                 qqprime_trans = np.ones((self.Q, self.Q))
             else:
                 qqprime_trans = np.array(
@@ -502,9 +512,9 @@ class NumpyDSBMM:
                     ]
                 )
                 qqprime_trans /= qqprime_trans.sum(axis=1, keepdims=True)
-                p = 0.8
-                qqprime_trans = p * qqprime_trans + (1 - p) * np.random.rand(
-                    *qqprime_trans.shape
+                unif_trans = np.ones((self.Q, self.Q)) / self.Q
+                qqprime_trans = (
+                    self.planted_p * qqprime_trans + (1 - self.planted_p) * unif_trans
                 )
         else:
             qqprime_trans = np.nansum(self.twopoint_time_marg, axis=(0, 1))
@@ -547,7 +557,7 @@ class NumpyDSBMM:
             # UNFINISHED - either need to pass full A (inefficient
             # unless this works well with sparse also), or idx between
             # nodes and edges so can find idxs where z_i=q etc
-            if NON_INFORMATIVE_INIT:
+            if self.non_informative_init:
                 lam_num = np.array(
                     [
                         [
@@ -641,13 +651,24 @@ class NumpyDSBMM:
             self.diff = max(tmp_diff, self.diff)
             self._lam = tmp
         else:
+            if not self.non_informative_init:
+                unif_lam_num = np.array(
+                    [
+                        [
+                            [self.A[t].mean() for t in range(self.T)]
+                            for r in range(self.Q)
+                        ]
+                        for q in range(self.Q)
+                    ]
+                )
+                tmp = self.planted_p * tmp + (1 - self.planted_p) * unif_lam_num
             self._lam = tmp
 
     def update_beta(self, init: bool = False, learning_rate=0.2):
         beta_num = np.zeros((self.Q, self.Q, self.T))
         beta_den = np.ones((self.Q, self.Q, self.T))
         if init:
-            if NON_INFORMATIVE_INIT:
+            if self.non_informative_init:
                 # assign as near uniform - just assume edges twice as likely in comms as out,
                 # and that all groups have same average out-degree at each timestep
                 Ns = self._pres_nodes.sum(axis=0)
@@ -742,6 +763,23 @@ class NumpyDSBMM:
             self.diff = max(tmp_diff, self.diff)
             self._beta = tmp
         else:
+            if not self.non_informative_init:
+                Ns = self._pres_nodes.sum(axis=0)
+                av_degs = self.degs.sum(axis=0)[:, 1] / Ns
+                # beta_in = 2*beta_out
+                # N*(beta_in + (Q - 1)*beta_out) = av_degs
+                # = (Q + 1)*beta_out*N
+                beta_out = av_degs / (Ns * (self.Q + 1))
+                beta_in = 2 * beta_out
+                beta_num = np.stack(
+                    [
+                        (beta_in[t] - beta_out[t]) * np.eye(self.Q)
+                        + beta_out[t] * np.ones((self.Q, self.Q))
+                        for t in range(self.T)
+                    ],
+                    axis=-1,
+                )
+                tmp = self.planted_p * tmp + (1 - self.planted_p) * beta_num
             self._beta = tmp
 
     def update_meta_params(self, init=False, learning_rate=0.2):
@@ -781,7 +819,7 @@ class NumpyDSBMM:
         xi = np.ones((self.Q, self.T, 1))
         zeta = np.zeros((self.Q, self.T, 1))
         if init:
-            if NON_INFORMATIVE_INIT:
+            if self.non_informative_init:
                 xi[:, :, 0] = np.ones((self.Q, self.T), dtype=float)
                 zeta[:, :, :] = np.nanmean(self.X[s], axis=0, keepdims=True)
             else:
@@ -836,6 +874,9 @@ class NumpyDSBMM:
                 print("tmp pois params:")
                 print(tmp)
                 raise RuntimeError("Problem updating poisson params")
+            if not self.non_informative_init:
+                unif_zeta = np.nanmean(self.X[s], axis=0, keepdims=True)
+                tmp = self.planted_p * tmp + (1 - self.planted_p) * unif_zeta
             self._meta_params[s] = tmp
 
     def update_indep_bern_meta(self, init, s, learning_rate=0.2):
@@ -843,7 +884,7 @@ class NumpyDSBMM:
         L = self.X[s].shape[-1]
         rho = np.zeros((self.Q, self.T, L))
         if init:
-            if NON_INFORMATIVE_INIT:
+            if self.non_informative_init:
                 xi = np.ones_like(xi, dtype=float)
                 rho[:, :, :] = np.nanmean(self.X[s], axis=0, keepdims=True)
             else:
@@ -887,13 +928,16 @@ class NumpyDSBMM:
             self.diff = max(tmp_diff, self.diff)
             self._meta_params[s] = tmp
         else:
+            if not self.non_informative_init:
+                unif_rho = np.nanmean(self.X[s], axis=0, keepdims=True)
+                tmp = self.planted_p * tmp + (1 - self.planted_p) * unif_rho
             self._meta_params[s] = tmp
 
     def update_cat_meta(self, init, s, learning_rate=0.2):
         L = self.X[s].shape[-1]
         rho = np.zeros((self.Q, self.T, L))
         if init:
-            if NON_INFORMATIVE_INIT:
+            if self.non_informative_init:
                 rho[:, :, :] = np.nanmean(self.X[s], axis=0, keepdims=True)
             else:
                 rho = np.array(
@@ -927,6 +971,9 @@ class NumpyDSBMM:
             self.diff = max(tmp_diff, self.diff)
             self._meta_params[s] = tmp
         else:
+            if not self.non_informative_init:
+                unif_rho = np.nanmean(self.X[s], axis=0, keepdims=True)
+                tmp = self.planted_p * tmp + (1 - self.planted_p) * unif_rho
             self._meta_params[s] = tmp
 
     def update_multi_meta(self, init, s, learning_rate=0.2):
@@ -937,7 +984,7 @@ class NumpyDSBMM:
             axis=-1, keepdims=True
         )  # shape (N,T,1), OK for not using nansum as should only have either all or no meta missing for i,t
         if init:
-            if NON_INFORMATIVE_INIT:
+            if self.non_informative_init:
                 xi[:, :, :] = np.nansum(xsums, axis=0, keepdims=True)
                 rho[:, :, :] = np.nansum(self.X[s], axis=0, keepdims=True)
             else:
@@ -986,6 +1033,11 @@ class NumpyDSBMM:
             self.diff = max(tmp_diff, self.diff)
             self._meta_params[s] = tmp
         else:
+            if not self.non_informative_init:
+                unif_xi = np.nansum(xsums, axis=0, keepdims=True)
+                unif_rho = np.zeros((self.Q, self.T, L))
+                unif_rho[:, :, :] = np.nansum(self.X[s], axis=0, keepdims=True)
+                tmp = self.planted_p * tmp + (1 - self.planted_p) * unif_rho
             self._meta_params[s] = tmp
 
     def set_params(self, true_params, freeze=True):

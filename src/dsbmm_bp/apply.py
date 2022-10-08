@@ -172,6 +172,13 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--partial_informative_dsbmm_init",
+    "-pidsbmm",
+    action="store_true",
+    help="Use initial partition to partially plant DSBMM params, otherwise use minimally informative initialisation.",
+)
+
+parser.add_argument(
     "--h_l", type=int, default=None, help="Max number of layers in hierarchy"
 )
 
@@ -668,6 +675,7 @@ if __name__ == "__main__":
                             if args.tuning_param is not None
                             else 1.0,
                             alpha_use_all=not args.alpha_use_first,
+                            non_informative_init=not args.partial_informative_dsbmm_init,
                         )
                     elif testset_name == "align":
                         tqdm.write(f"alignment = {params['meta_aligned']}")
@@ -681,6 +689,7 @@ if __name__ == "__main__":
                             use_numba=args.use_numba,
                             tuning_param=args.tuning_param,
                             alpha_use_all=not args.alpha_use_first,
+                            non_informative_init=not args.partial_informative_dsbmm_init,
                         )
                     else:
                         # scaling tests
@@ -699,6 +708,7 @@ if __name__ == "__main__":
                             if args.tuning_param is not None
                             else 1.0,
                             alpha_use_all=not args.alpha_use_first,
+                            non_informative_init=not args.partial_informative_dsbmm_init,
                         )
                     if samp_no > 0:
                         init_times[test_no, samp_no - 1] = time.time() - start_time
@@ -963,6 +973,7 @@ if __name__ == "__main__":
                     use_numba=args.use_numba,
                     trial_Qs=trial_Qs,
                     alpha_use_all=not args.alpha_use_first,
+                    non_informative_init=not args.partial_informative_dsbmm_init,
                 )
                 try:
                     ## Fit to given data
@@ -1062,6 +1073,7 @@ if __name__ == "__main__":
                             use_meta=not args.ignore_meta,
                             use_numba=args.use_numba,
                             alpha_use_all=not args.alpha_use_first,
+                            non_informative_init=not args.partial_informative_dsbmm_init,
                         )
                         try:
                             ## Fit to given data

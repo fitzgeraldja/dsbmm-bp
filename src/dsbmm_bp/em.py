@@ -54,6 +54,7 @@ class EM:
         max_msg_iter=10,
         trial_Qs=None,
         alpha_use_all=True,
+        non_informative_init=True,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
@@ -68,6 +69,7 @@ class EM:
         self.A = data["A"]
         self.frozen = False
         self.params_to_set = None
+        self.non_informative_init = non_informative_init
         if type(tuning_param) == float:
             self.tuning_params = [tuning_param]
         else:
@@ -354,6 +356,7 @@ class EM:
                 tuning_param=tuning_param,
                 verbose=self.verbose,
                 alpha_use_all=self.alpha_use_all,
+                non_informative_init=self.non_informative_init,
             )
             if self.frozen or self.params_to_set is not None:
                 try:
