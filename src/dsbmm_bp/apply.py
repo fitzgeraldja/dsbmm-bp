@@ -882,11 +882,16 @@ if __name__ == "__main__":
         T = len(data["A"])
         N = data["A"][0].shape[0]
         n_runs = args.n_runs
-        pred_Z = (
-            np.zeros((args.max_trials, N, T))
-            if not args.ret_best_only
-            else np.zeros((N, T))
-        )
+        if args.ret_best_only:
+            if args.h_l is None:
+                pred_Z = np.zeros((N, T))
+            else:
+                pred_Z = np.zeros((args.h_l, N, T))
+        else:
+            if args.h_l is None:
+                pred_Z = np.zeros((args.max_trials, N, T))
+            else:
+                pred_Z = np.zeros((args.n_runs, args.h_l, N, T))
         # args.h_l, default=None, max. no. layers in hier
         # args.h_Q, default=8, max. no. groups at hier layer,
         # = 4 if h_Q > N_l / 4
@@ -920,15 +925,15 @@ if __name__ == "__main__":
                     args.h_Q
                     if args.h_Q < N / args.h_min_N
                     else np.floor(N / args.h_min_N)
-                ]
+                ] * args.n_runs
                 try:
                     assert trial_Qs[0] > 0
                 except AssertionError:
                     raise ValueError(
                         "Minimum number of nodes to consider at each level of hierarchy must be less than total number of nodes."
                     )
-                args.ret_best_only = True
-                pred_Z = np.zeros((args.h_l, N, T))
+                args.ret_best_only = args.n_runs == 1
+                args.n_runs = 1
                 # args.h_min_N
         data["Q"] = trial_Qs[0]
 
@@ -992,7 +997,10 @@ if __name__ == "__main__":
                     else:
                         pred_Z[layer, :, :] = model.best_Z
                 else:
-                    pred_Z = model.all_best_Zs
+                    if args.h_l is None:
+                        pred_Z = model.all_best_Zs
+                    else:
+                        pred_Z[:, layer, :, :] = model.all_best_Zs
                 if args.ret_best_only:
                     print(f"Best tuning param: {model.best_tun_param}")
                 else:
@@ -1005,84 +1013,96 @@ if __name__ == "__main__":
                         sep="\n",
                     )
             else:
-                old_Z = pred_Z[layer - 1, :, :]
-                qs = np.unique(old_Z[old_Z != -1])
-                node_group_cnts = np.stack(
-                    [(old_Z == q).sum(axis=1) for q in qs], axis=0
-                )
-                old_node_labels = np.argmax(
-                    node_group_cnts, axis=0
-                )  # assigns each node its most common label
-                q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
-                suff_large_q_idxs = q_idxs[group_cnts > args.h_min_N]
-                for no_q, q in enumerate(suff_large_q_idxs):
-                    print(
-                        f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
+                if len(pred_Z.shape) == 3:
+                    # only one run
+                    pred_Z = [pred_Z]
+                for run_Z in pred_Z:
+                    old_Z = run_Z[layer - 1, :, :]
+                    qs = np.unique(old_Z[old_Z != -1])
+                    node_group_cnts = np.stack(
+                        [(old_Z == q).sum(axis=1) for q in qs], axis=0
                     )
-                    N = group_cnts[q]
-                    sub_data = {
-                        "A": [
-                            data["A"][t][
-                                np.ix_(old_node_labels == q, old_node_labels == q)
-                            ]
-                            for t in range(T)
-                        ],
-                        "X": [
-                            data["X"][s][old_node_labels == q, :, :]
-                            for s in range(len(data["X"]))
-                        ],
-                        "Q": args.h_Q
-                        if args.h_Q < N / args.h_min_N
-                        else max(np.floor(N / args.h_min_N), 2),
-                        "meta_types": data["meta_types"],
-                    }
-                    model = em.EM(
-                        sub_data,
-                        sparse_adj=True,
-                        try_parallel=try_parallel,
-                        tuning_param=args.tuning_param,
-                        n_runs=n_runs,
-                        patience=args.patience,
-                        deg_corr=args.deg_corr,
-                        verbose=verbose,
-                        max_iter=args.max_iter,
-                        max_msg_iter=args.max_msg_iter,
-                        use_meta=not args.ignore_meta,
-                        use_numba=args.use_numba,
-                        alpha_use_all=not args.alpha_use_first,
-                    )
-                    try:
-                        ## Fit to given data
-                        model.fit(learning_rate=args.learning_rate)
-                    except KeyboardInterrupt:
-                        print("Keyboard interrupt, stopping early")
-                        current_energy = model.bp.compute_free_energy()
-                        if model.best_val_q == 0.0:
-                            model.max_energy = current_energy
-                            # first iter, first run
-                            model.best_val_q = current_energy
-                            model.best_val = current_energy
-                            model.poor_iter_ctr = 0
-                            model.bp.model.set_Z_by_MAP()
-                            model.best_Z = model.bp.model.Z.copy()
-                            model.best_tun_param = model.dsbmm.tuning_param
-                            model.max_energy_Z = model.bp.model.Z.copy()
-                        elif current_energy < model.best_val_q:
-                            # new best for q
-                            model.poor_iter_ctr = 0
-                            model.best_val_q = current_energy
-                            model.bp.model.set_Z_by_MAP()
-                            model.all_best_Zs[
-                                model.q_idx, :, :
-                            ] = model.bp.model.Z.copy()
-                            model.best_tun_pars[model.q_idx] = model.dsbmm.tuning_param
-                            if model.best_val_q < model.best_val:
-                                model.best_val = model.best_val_q
+                    old_node_labels = np.argmax(
+                        node_group_cnts, axis=0
+                    )  # assigns each node its most common label
+                    q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
+                    suff_large_q_idxs = q_idxs[group_cnts > args.h_min_N]
+                    for no_q, q in enumerate(suff_large_q_idxs):
+                        print(
+                            f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
+                        )
+                        N = group_cnts[q]
+                        sub_data = {
+                            "A": [
+                                data["A"][t][
+                                    np.ix_(old_node_labels == q, old_node_labels == q)
+                                ]
+                                for t in range(T)
+                            ],
+                            "X": [
+                                data["X"][s][old_node_labels == q, :, :]
+                                for s in range(len(data["X"]))
+                            ],
+                            "Q": args.h_Q
+                            if args.h_Q < N / args.h_min_N
+                            else max(np.floor(N / args.h_min_N), 2),
+                            "meta_types": data["meta_types"],
+                        }
+                        model = em.EM(
+                            sub_data,
+                            sparse_adj=True,
+                            try_parallel=try_parallel,
+                            tuning_param=args.tuning_param,
+                            n_runs=n_runs,
+                            patience=args.patience,
+                            deg_corr=args.deg_corr,
+                            verbose=verbose,
+                            max_iter=args.max_iter,
+                            max_msg_iter=args.max_msg_iter,
+                            use_meta=not args.ignore_meta,
+                            use_numba=args.use_numba,
+                            alpha_use_all=not args.alpha_use_first,
+                        )
+                        try:
+                            ## Fit to given data
+                            model.fit(learning_rate=args.learning_rate)
+                        except KeyboardInterrupt:
+                            print("Keyboard interrupt, stopping early")
+                            current_energy = model.bp.compute_free_energy()
+                            if model.best_val_q == 0.0:
+                                model.max_energy = current_energy
+                                # first iter, first run
+                                model.best_val_q = current_energy
+                                model.best_val = current_energy
+                                model.poor_iter_ctr = 0
+                                model.bp.model.set_Z_by_MAP()
                                 model.best_Z = model.bp.model.Z.copy()
                                 model.best_tun_param = model.dsbmm.tuning_param
+                                model.max_energy_Z = model.bp.model.Z.copy()
+                            elif current_energy < model.best_val_q:
+                                # new best for q
+                                model.poor_iter_ctr = 0
+                                model.best_val_q = current_energy
+                                model.bp.model.set_Z_by_MAP()
+                                model.all_best_Zs[
+                                    model.q_idx, :, :
+                                ] = model.bp.model.Z.copy()
+                                model.best_tun_pars[
+                                    model.q_idx
+                                ] = model.dsbmm.tuning_param
+                                if model.best_val_q < model.best_val:
+                                    model.best_val = model.best_val_q
+                                    model.best_Z = model.bp.model.Z.copy()
+                                    model.best_tun_param = model.dsbmm.tuning_param
 
-                    print(f"Best tuning param: {model.best_tun_param}")
-                    pred_Z[layer, old_node_labels == q, :] = model.best_Z
+                        print(f"Best tuning param: {model.best_tun_param}")
+                        tmp_Z = model.best_Z
+                        missing_nodes = tmp_Z == -1
+                        tmp_Z += (
+                            args.h_Q * layer * len(suff_large_q_idxs) + args.h_Q * no_q
+                        )  # shift labels to avoid overlap
+                        tmp_Z[missing_nodes] = -1
+                        run_Z[layer, old_node_labels == q, :] = tmp_Z
             RESULTS_DIR = DATA_DIR / "results"
             RESULTS_DIR.mkdir(exist_ok=True)
             if testset_name == "scopus":
