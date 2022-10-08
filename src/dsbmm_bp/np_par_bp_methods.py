@@ -277,6 +277,9 @@ class NumpyBP:
                 self._psi_e.data, self._psi_e.indptr, self.N, self.T, self.Q
             )
 
+            self._psi_e.data *= 1 - p
+            self._psi_e.data += tmp.data
+
             # else:
             # sums = sparse.vstack(
             #     [
