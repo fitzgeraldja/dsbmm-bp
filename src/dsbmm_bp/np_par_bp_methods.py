@@ -879,6 +879,11 @@ class NumpyBP:
         # handles missing nodes correctly (?)
         # get spatial
         spatial_field_terms = self.spatial_field_terms()
+        log_spatial_field_terms = np.log(
+            spatial_field_terms,
+            where=spatial_field_terms > 0,
+            out=np.log(spatial_field_terms[spatial_field_terms > 0].min()),
+        )
         # just leave as doing via logs, should be fine and probably faster
         # large_degs = degs[:,:,0] > LARGE_DEG_THR
 
@@ -893,18 +898,16 @@ class NumpyBP:
                 np.array(
                     [
                         np.sum(
-                            np.log(
-                                spatial_field_terms[
-                                    self.E_idxs[t]
-                                    + self.nz_idxs[t][self.nz_is[t] == i][
-                                        0
-                                    ] : self.E_idxs[t]
-                                    + self.nz_idxs[t][
-                                        np.flatnonzero(self.nz_is[t] == i)[0] + 1
-                                    ],
-                                    :,
+                            log_spatial_field_terms[
+                                self.E_idxs[t]
+                                + self.nz_idxs[t][self.nz_is[t] == i][0] : self.E_idxs[
+                                    t
                                 ]
-                            ),
+                                + self.nz_idxs[t][
+                                    np.flatnonzero(self.nz_is[t] == i)[0] + 1
+                                ],
+                                :,
+                            ],
                             axis=0,
                         )
                         if self._pres_nodes[i, t]
@@ -1014,7 +1017,7 @@ class NumpyBP:
         tmp[:, 1:, :] += log_forward_term
 
         ## UPDATE SPATIAL MESSAGES FROM i AT t ##
-        tmp_spatial_msg = -1.0 * np.log(spatial_field_terms).copy()
+        tmp_spatial_msg = -1.0 * log_spatial_field_terms.copy()
         for t in range(self.T):
             # need inv idxs for locs where i sends msgs to j
             # all_inv_idxs[t] gives order of field_term s.t.
@@ -1148,24 +1151,27 @@ class NumpyBP:
 
         # get spatial
         spatial_field_terms = self.spatial_field_terms()
+        log_spatial_field_terms = np.log(
+            spatial_field_terms,
+            where=spatial_field_terms > 0,
+            out=np.log(spatial_field_terms[spatial_field_terms > 0].min()),
+        )
 
         log_spatial_msg = np.stack(
             [
                 np.array(
                     [
                         np.sum(
-                            np.log(
-                                spatial_field_terms[
-                                    self.E_idxs[t]
-                                    + self.nz_idxs[t][self.nz_is[t] == i][
-                                        0
-                                    ] : self.E_idxs[t]
-                                    + self.nz_idxs[t][
-                                        np.flatnonzero(self.nz_is[t] == i)[0] + 1
-                                    ],
-                                    :,
+                            log_spatial_field_terms[
+                                self.E_idxs[t]
+                                + self.nz_idxs[t][self.nz_is[t] == i][0] : self.E_idxs[
+                                    t
                                 ]
-                            ),
+                                + self.nz_idxs[t][
+                                    np.flatnonzero(self.nz_is[t] == i)[0] + 1
+                                ],
+                                :,
+                            ],
                             axis=0,
                         )
                         if self._pres_nodes[i, t]
