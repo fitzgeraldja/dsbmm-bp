@@ -513,7 +513,12 @@ class NumpyDSBMM:
                     dtype=float,
                 )
                 qqprime_trans = qqprime_trans.mean(axis=-1)
-                qqprime_trans /= qqprime_trans.sum(axis=1, keepdims=True)
+                qqprime_trans = np.divide(
+                    qqprime_trans,
+                    qqprime_trans.sum(axis=1, keepdims=True),
+                    where=qqprime_trans.sum(axis=1, keepdims=True) > 0,
+                    out=np.zeros_like(qqprime_trans),
+                )
                 unif_trans = np.ones((self.Q, self.Q)) / self.Q
                 qqprime_trans = (
                     self.planted_p * qqprime_trans + (1 - self.planted_p) * unif_trans
