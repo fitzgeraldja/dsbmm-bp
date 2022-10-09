@@ -882,7 +882,8 @@ class NumpyBP:
         log_spatial_field_terms = np.log(
             spatial_field_terms,
             where=spatial_field_terms > 0,
-            out=np.log(spatial_field_terms[spatial_field_terms > 0].min()),
+            out=np.ones_like(spatial_field_terms)
+            * np.log(spatial_field_terms[spatial_field_terms > 0].min()),
         )
         # just leave as doing via logs, should be fine and probably faster
         # large_degs = degs[:,:,0] > LARGE_DEG_THR
@@ -1154,7 +1155,8 @@ class NumpyBP:
         log_spatial_field_terms = np.log(
             spatial_field_terms,
             where=spatial_field_terms > 0,
-            out=np.log(spatial_field_terms[spatial_field_terms > 0].min()),
+            out=np.ones_like(spatial_field_terms)
+            * np.log(spatial_field_terms[spatial_field_terms > 0].min()),
         )
 
         log_spatial_msg = np.stack(
