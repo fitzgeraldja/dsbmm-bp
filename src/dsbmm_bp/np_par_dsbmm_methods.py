@@ -542,7 +542,12 @@ class NumpyDSBMM:
             #         raise RuntimeError("Problem with node marginals")
             # qqprime_trans[q, :] = TOL
             # correct_pi()
-        qqprime_trans /= qqprime_trans.sum(axis=1, keepdims=True)
+        qqprime_trans = np.divide(
+            qqprime_trans,
+            qqprime_trans.sum(axis=1, keepdims=True),
+            where=qqprime_trans.sum(axis=1, keepdims=True) > 0,
+            out=np.zeros_like(qqprime_trans),
+        )
         # qqprime_trans[qqprime_trans < TOL] = TOL
         # qqprime_trans /= qqprime_trans.sum(axis=1)[:, np.newaxis]
         if not init:
