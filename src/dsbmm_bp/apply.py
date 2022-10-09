@@ -193,7 +193,7 @@ parser.add_argument(
     "--h_Q",
     type=int,
     default=8,
-    help="Max number of groups to look for at each layer in the hierarchy, NB if h_Q>N/h_min_N then take h_Q = floor(N/h_min_N) instead",
+    help="Max number of groups to look for at each layer in the hierarchy, NB if h_Q>N/h_min_N then take h_Q = N//h_min_N instead",
 )
 
 parser.add_argument(
@@ -941,9 +941,7 @@ if __name__ == "__main__":
                 trial_Qs = [args.num_groups]
             else:
                 trial_Qs = [
-                    args.h_Q
-                    if args.h_Q < N / args.h_min_N
-                    else np.floor(N / args.h_min_N)
+                    args.h_Q if args.h_Q < N / args.h_min_N else N // args.h_min_N
                 ] * args.n_runs
                 try:
                     assert trial_Qs[0] > 0
@@ -1066,7 +1064,7 @@ if __name__ == "__main__":
                             ],
                             "Q": args.h_Q
                             if args.h_Q < N / args.h_min_N
-                            else max(np.floor(N / args.h_min_N), 2),
+                            else max(N // args.h_min_N, 2),
                             "meta_types": data["meta_types"],
                         }
                         model = em.EM(
