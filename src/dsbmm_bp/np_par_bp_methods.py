@@ -1023,7 +1023,9 @@ class NumpyBP:
             out=np.zeros_like(forward_term),
         )
         # use alpha where i not present at t-1 if i present at t
-        log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
+        log_forward_term[~self._pres_trans, :] = np.log(
+            self.model._alpha[np.newaxis, :]
+        )
         log_forward_term[~self._pres_nodes[:, 1:], :] = 0.0
         tmp[:, 1:, :] += log_forward_term
 
@@ -1228,7 +1230,9 @@ class NumpyBP:
             out=np.zeros_like(forward_term),
         )
         # use alpha where i not present at t-1, if i present at t
-        log_forward_term[~self._pres_trans, :] = self.model._alpha[np.newaxis, :]
+        log_forward_term[~self._pres_trans, :] = np.log(
+            self.model._alpha[np.newaxis, :]
+        )
         log_forward_term[~self._pres_nodes[:, 1:], :] = 0.0
         tmp[:, 1:, :] += log_forward_term
         # log_marg_max = tmp.max(axis=-1, keepdims=True)
