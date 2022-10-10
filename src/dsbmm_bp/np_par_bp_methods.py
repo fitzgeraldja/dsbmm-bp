@@ -894,6 +894,7 @@ class NumpyBP:
         #             for i,t in zip(*large_degs.nonzero())
         #         ]
         #     )
+        # TODO: consider replacing this calc with numba implementation else likely bottleneck
         log_spatial_msg = np.stack(
             [
                 np.array(

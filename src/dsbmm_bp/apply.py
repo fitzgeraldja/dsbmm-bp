@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import pickle
 import time
@@ -956,13 +957,17 @@ if __name__ == "__main__":
 
         print("*" * 15, "Running empirical data", "*" * 15)
         ## Initialise
+
+        logging.basicConfig(filename="./empirical.log", level=logging.INFO)
         if args.h_l is None:
             hierarchy_layers = [0]
         else:
             hierarchy_layers = np.arange(args.h_l)
         for layer in hierarchy_layers:
             if args.h_l is not None:
-                print(f"{'%'*15} At hierarchy layer {layer+1}/{args.h_l} {'%'*15}")
+                logging.info(
+                    print(f"{'%'*15} At hierarchy layer {layer+1}/{args.h_l} {'%'*15}")
+                )
 
             if layer == 0:
                 model = em.EM(
@@ -987,7 +992,7 @@ if __name__ == "__main__":
                     ## Fit to given data
                     model.fit(learning_rate=args.learning_rate)
                 except KeyboardInterrupt:
-                    print("Keyboard interrupt, stopping early")
+                    logging.info(print("Keyboard interrupt, stopping early"))
                     current_energy = model.bp.compute_free_energy()
                     if model.best_val_q == 0.0:
                         model.max_energy = current_energy
@@ -1035,8 +1040,8 @@ if __name__ == "__main__":
                 if len(pred_Z.shape) == 3:
                     # only one run
                     pred_Z = [pred_Z]
-                for run_Z in pred_Z:
-                    old_Z = run_Z[layer - 1, :, :]
+                for run_idx in range(pred_Z.shape[0]):
+                    old_Z = pred_Z[run_idx, layer - 1, :, :]
                     qs = np.unique(old_Z[old_Z != -1])
                     node_group_cnts = np.stack(
                         [(old_Z == q).sum(axis=1) for q in qs], axis=0
@@ -1047,10 +1052,13 @@ if __name__ == "__main__":
                     q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
                     suff_large_q_idxs = q_idxs[group_cnts > args.h_min_N]
                     for no_q, q in enumerate(suff_large_q_idxs):
-                        print(
-                            f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
+                        logging.info(
+                            print(
+                                f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
+                            )
                         )
                         N = group_cnts[q]
+                        logging.info(print(f"\t\t Considering {N} nodes..."))
                         sub_data = {
                             "A": [
                                 data["A"][t][
@@ -1088,7 +1096,7 @@ if __name__ == "__main__":
                             ## Fit to given data
                             model.fit(learning_rate=args.learning_rate)
                         except KeyboardInterrupt:
-                            print("Keyboard interrupt, stopping early")
+                            logging.info(print("Keyboard interrupt, stopping early"))
                             current_energy = model.bp.compute_free_energy()
                             if model.best_val_q == 0.0:
                                 model.max_energy = current_energy
@@ -1123,7 +1131,12 @@ if __name__ == "__main__":
                             args.h_Q * layer * len(suff_large_q_idxs) + args.h_Q * no_q
                         )  # shift labels to avoid overlap
                         tmp_Z[missing_nodes] = -1
-                        run_Z[layer, old_node_labels == q, :] = tmp_Z
+                        logging.info(f"Found {len(np.unique(tmp_Z[tmp_Z!=-1]))} groups")
+                        pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
+                        logging.info(
+                            f"Transferred {len(np.unique(pred_Z[run_idx, layer, old_node_labels == q, :][pred_Z[run_idx, layer, old_node_labels == q, :]!=-1]))} groups"
+                        )
+            logging.info("Run complete, saving...")
             RESULTS_DIR = DATA_DIR / "results"
             RESULTS_DIR.mkdir(exist_ok=True)
             if testset_name == "scopus":
@@ -1132,7 +1145,10 @@ if __name__ == "__main__":
                 ) as f:
                     pickle.dump(pred_Z, f)
             else:
-                with open(RESULTS_DIR / f"{testset_name}_Z.pkl", "wb") as f:
+                with open(
+                    RESULTS_DIR / f"{testset_name}_Z{'_h' if args.h_l else ''}.pkl",
+                    "wb",
+                ) as f:
                     pickle.dump(pred_Z, f)
 
     # TODO: clean up code and improve documentation, then
