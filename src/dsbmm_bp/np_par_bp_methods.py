@@ -937,6 +937,15 @@ class NumpyBP:
             warnings.warn(
                 "Metadata contribution significantly greater than spatial in over a quarter of possible cases - likely suggests should reduce weighting of metadata."
             )
+            tuning_fac = np.divide(
+                log_spatial_msg,
+                self.log_meta_prob,
+                where=self.log_meta_prob != 0,
+                out=10 * np.ones_like(log_spatial_msg),
+            ).mean()
+            print(
+                f"Tuning parameter might be better replaced by something around {tuning_fac}."
+            )
         log_spatial_msg += self.log_meta_prob
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
