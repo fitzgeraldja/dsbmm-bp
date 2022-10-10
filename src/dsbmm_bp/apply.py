@@ -963,10 +963,10 @@ if __name__ == "__main__":
             hierarchy_layers = [0]
         else:
             hierarchy_layers = np.arange(args.h_l)
-        for layer in hierarchy_layers:
+        for layer in tqdm(hierarchy_layers, desc="Hier. lvl"):
             if args.h_l is not None:
                 logging.info(
-                    print(f"{'%'*15} At hierarchy layer {layer+1}/{args.h_l} {'%'*15}")
+                    print(f"{'%'*15} At hierarchy level {layer+1}/{args.h_l} {'%'*15}")
                 )
 
             if layer == 0:
@@ -1051,7 +1051,7 @@ if __name__ == "__main__":
                     )  # assigns each node its most common label
                     q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
                     suff_large_q_idxs = q_idxs[group_cnts > args.h_min_N]
-                    for no_q, q in enumerate(suff_large_q_idxs):
+                    for no_q, q in enumerate(tqdm(suff_large_q_idxs, desc="q_l")):
                         logging.info(
                             print(
                                 f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
