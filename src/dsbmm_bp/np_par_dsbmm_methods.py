@@ -271,10 +271,10 @@ class NumpyDSBMM:
                 if self.verbose:
                     print(self._beta.transpose(2, 0, 1))
                     print("\tUpdated beta")
-                if not self.directed:
-                    assert np.all(
-                        np.abs(self._beta.transpose(1, 0, 2) - self._beta) < 1e-10
-                    )
+                # if not self.directed:
+                #     assert np.all(
+                #         np.abs(self._beta.transpose(1, 0, 2) - self._beta) < 1e-10
+                #     )
             self.update_meta_params(init=init, learning_rate=learning_rate)
             if self.verbose:
                 # print(self.jit_model._meta_params)
@@ -355,7 +355,7 @@ class NumpyDSBMM:
                 pois_contrib = self.log_meta_pois_lkl(
                     self.X[s][:, :, 0], pois_params[:, :, 0]
                 )
-                assert np.all(pois_contrib <= 0)
+                # assert np.all(pois_contrib <= 0)
                 self.log_meta_lkl += pois_contrib
                 if self.verbose:
                     print("\tUpdated Poisson lkl contribution")
@@ -385,7 +385,7 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 ).transpose(0, 2, 1)
-                assert np.all(ib_contrib <= 0)
+                # assert np.all(ib_contrib <= 0)
                 self.log_meta_lkl += ib_contrib
                 if self.verbose:
                     print("\tUpdated IB lkl contribution")
@@ -399,7 +399,7 @@ class NumpyDSBMM:
                     else -np.inf * np.ones_like(cat_params),
                     # out=np.zeros_like(cat_params),
                 )[np.newaxis, ...]
-                assert np.all(self.X[s].sum(axis=-1) == 1)  # REMOVE
+                # assert np.all(self.X[s].sum(axis=-1) == 1)  # REMOVE
                 self.log_meta_lkl += np.nansum(
                     np.multiply(
                         log_cat_params,
@@ -416,16 +416,11 @@ class NumpyDSBMM:
                     print("\tUpdated categorical lkl contribution")
             elif mt == "multinomial":
                 multi_params = self._meta_params[s]  # shape (Q,T,L)
-                # TODO: stop recalculating xsums for multinomial each time
-                xsums = np.nansum(self.X[s], axis=-1, keepdims=True)
-                assert np.all(
-                    gammaln(xsums + 1)
-                    - np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
-                    < 0
-                )
+                # neglect sums as don't change lkl w.r.t. groups, but for poor parameter estimates can result in +ve log lkl problems
+                # xsums = np.nansum(self.X[s], axis=-1, keepdims=True)
                 multi_contrib = (
-                    gammaln(xsums + 1)
-                    - np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
+                    # gammaln(xsums + 1)
+                    -np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
                     + np.nansum(
                         self.X[s][:, :, np.newaxis, :]
                         * np.log(
