@@ -418,6 +418,7 @@ class NumpyDSBMM:
                 multi_params = self._meta_params[s]  # shape (Q,T,L)
                 # neglect sums as don't change lkl w.r.t. groups, but for poor parameter estimates can result in +ve log lkl problems
                 # xsums = np.nansum(self.X[s], axis=-1, keepdims=True)
+                assert np.all(multi_params <= 1.0)
                 multi_contrib = (
                     # gammaln(xsums + 1)
                     -np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
@@ -1052,7 +1053,13 @@ class NumpyDSBMM:
                 unif_xi = np.nansum(xsums, axis=0, keepdims=True)
                 unif_rho = np.zeros((self.Q, self.T, L))
                 unif_rho[:, :, :] = np.nansum(self.X[s], axis=0, keepdims=True)
-                tmp = self.planted_p * tmp + (1 - self.planted_p) * unif_rho
+                unif_multi_init = np.divide(
+                    unif_rho,
+                    unif_xi,
+                    where=unif_xi > 0,
+                    out=np.zeros_like(unif_rho, dtype=float),
+                )
+                tmp = self.planted_p * tmp + (1 - self.planted_p) * unif_multi_init
             self._meta_params[s] = tmp
 
     def set_params(self, true_params, freeze=True):
