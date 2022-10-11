@@ -934,11 +934,11 @@ class NumpyBP:
             ]  # NB don't need / N as using p_ab to calc, not c_ab
         if (
             self.log_meta_prob[
-                ~np.isnan(self.log_meta_prob) & self.log_meta_prob != np.log(TOL)
+                (~np.isnan(self.log_meta_prob)) & (self.log_meta_prob != np.log(TOL))
             ]
             < 2
             * log_spatial_msg[
-                ~np.isnan(self.log_meta_prob) & self.log_meta_prob != np.log(TOL)
+                (~np.isnan(self.log_meta_prob)) & (self.log_meta_prob != np.log(TOL))
             ]
         ).sum() > (self.model._tot_N_pres * self.Q / 4):
             warnings.warn(
