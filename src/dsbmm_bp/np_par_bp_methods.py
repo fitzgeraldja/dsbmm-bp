@@ -1199,7 +1199,7 @@ class NumpyBP:
             ],
             axis=1,
         )
-
+        print("Spatial only ", (log_spatial_msg > 0).sum())
         if self.deg_corr:
             log_spatial_msg -= np.einsum(
                 "qt,it->itq", self._h, self.model.degs[:, :, 1]
@@ -1211,8 +1211,10 @@ class NumpyBP:
         log_spatial_msg += self.log_meta_prob
 
         tmp = log_spatial_msg
+        print("After meta and external ", (tmp > 0).sum())
         # add alpha
         tmp[:, 0, :] += np.log(self.model._alpha)[np.newaxis, :]
+        print("With alpha ", (tmp > 0).sum())
         # include backward msgs
         back_term = self.backward_temp_msg_term()
         log_back_term = np.log(
@@ -1222,6 +1224,7 @@ class NumpyBP:
         )
         # log_back_term[~self._pres_trans, :] = 0.0
         tmp[:, :-1, :] += log_back_term
+        print("With backwards ", (tmp > 0).sum())
         # include forward term
         forward_term = self.forward_temp_msg_term()
         log_forward_term = np.log(
@@ -1235,6 +1238,7 @@ class NumpyBP:
         )
         log_forward_term[~self._pres_nodes[:, 1:], :] = 0.0
         tmp[:, 1:, :] += log_forward_term
+        print("With forwards ", (tmp > 0).sum())
         # log_marg_max = tmp.max(axis=-1, keepdims=True)
         tmp_marg = np.exp(
             tmp
