@@ -355,16 +355,18 @@ class NumpyDSBMM:
                 pois_params = self._meta_params[s]  # shape (Q x T x 1)
                 # recall X[s] has shape (N x T x Ds), w Ds = 1 here
                 # pois_lkl(k;lam) = e^-lam lam^k / k!
-                self.log_meta_lkl += self.log_meta_pois_lkl(
+                pois_contrib = self.log_meta_pois_lkl(
                     self.X[s][:, :, 0], pois_params[:, :, 0]
                 )
+                assert np.all(pois_contrib <= 0)
+                self.log_meta_lkl += pois_contrib
                 if self.verbose:
                     print("\tUpdated Poisson lkl contribution")
             elif mt == "indep bernoulli":
                 # print("In IB")
                 ib_params = self._meta_params[s]  # shape (Q x T x L)
                 # recall X[s] has shape (N x T x Ds), w Ds = L here
-                self.log_meta_lkl += (
+                ib_contrib = (
                     np.sum(
                         np.log(
                             ib_params,
@@ -386,6 +388,8 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 ).transpose(0, 2, 1)
+                assert np.all(ib_contrib <= 0)
+                self.log_meta_lkl += ib_contrib
                 if self.verbose:
                     print("\tUpdated IB lkl contribution")
             elif mt == "categorical":
@@ -417,7 +421,7 @@ class NumpyDSBMM:
                 multi_params = self._meta_params[s]  # shape (Q,T,L)
                 # TODO: stop recalculating xsums for multinomial each time
                 xsums = self.X[s].sum(axis=-1, keepdims=True)
-                self.log_meta_lkl += (
+                multi_contrib = (
                     gammaln(xsums + 1)
                     - gammaln(self.X[s] + 1).sum(axis=-1, keepdims=True)
                     + np.sum(
@@ -425,11 +429,13 @@ class NumpyDSBMM:
                         * np.log(
                             multi_params,
                             where=multi_params > 0.0,
-                            out=np.zeros_like(multi_params, dtype=float),
+                            out=np.log(TOL) * np.ones_like(multi_params, dtype=float),
                         ).transpose(1, 0, 2)[np.newaxis, ...],
                         axis=-1,
                     )
                 )
+                assert np.all(multi_contrib < 0)
+                self.log_meta_lkl += multi_contrib
                 if self.verbose:
                     print("\tUpdated multinomial lkl contribution")
             else:

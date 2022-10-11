@@ -1199,8 +1199,7 @@ class NumpyBP:
             ],
             axis=1,
         )
-        print("External field", (self._h < 0).sum())
-        print("Meta", (self.log_meta_prob > 0).sum())
+
         if self.deg_corr:
             log_spatial_msg -= np.einsum(
                 "qt,it->itq", self._h, self.model.degs[:, :, 1]
