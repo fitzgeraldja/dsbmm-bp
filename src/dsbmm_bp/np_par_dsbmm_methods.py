@@ -418,6 +418,11 @@ class NumpyDSBMM:
                 multi_params = self._meta_params[s]  # shape (Q,T,L)
                 # TODO: stop recalculating xsums for multinomial each time
                 xsums = np.nansum(self.X[s], axis=-1, keepdims=True)
+                assert np.all(
+                    gammaln(xsums + 1)
+                    - np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
+                    < 0
+                )
                 multi_contrib = (
                     gammaln(xsums + 1)
                     - np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
@@ -431,7 +436,6 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 )
-                assert np.all(self.X[s][~np.isnan(self.X[s])] >= 0)
                 assert np.all(multi_contrib <= 0)
                 self.log_meta_lkl += multi_contrib
                 if self.verbose:
