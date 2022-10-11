@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import pickle
+import sys
 import time
 import warnings
 from functools import reduce
@@ -957,16 +958,24 @@ if __name__ == "__main__":
 
         print("*" * 15, "Running empirical data", "*" * 15)
         ## Initialise
-
-        logging.basicConfig(filename="./empirical.log", level=logging.INFO)
+        file_handler = logging.FileHandler(filename="./empirical.log")
+        stdout_handler = logging.StreamHandler(stream=sys.stdout)
+        handlers = [file_handler, stdout_handler]
+        logging.basicConfig(
+            level=logging.INFO, format="[%(asctime)s] %(message)s", handlers=handlers  # type: ignore
+        )
         if args.h_l is None:
             hierarchy_layers = [0]
         else:
             hierarchy_layers = np.arange(args.h_l)
+
+        RESULTS_DIR = DATA_DIR / "results"
+        RESULTS_DIR.mkdir(exist_ok=True)
+
         for layer in tqdm(hierarchy_layers, desc="Hier. lvl"):
             if args.h_l is not None:
                 logging.info(
-                    print(f"{'%'*15} At hierarchy level {layer+1}/{args.h_l} {'%'*15}")
+                    f"{'%'*15} At hierarchy level {layer+1}/{args.h_l} {'%'*15}"
                 )
 
             if layer == 0:
@@ -992,7 +1001,7 @@ if __name__ == "__main__":
                     ## Fit to given data
                     model.fit(learning_rate=args.learning_rate)
                 except KeyboardInterrupt:
-                    logging.info(print("Keyboard interrupt, stopping early"))
+                    logging.info("Keyboard interrupt, stopping early")
                     current_energy = model.bp.compute_free_energy()
                     if model.best_val_q == 0.0:
                         model.max_energy = current_energy
@@ -1053,12 +1062,10 @@ if __name__ == "__main__":
                     suff_large_q_idxs = q_idxs[group_cnts > args.h_min_N]
                     for no_q, q in enumerate(tqdm(suff_large_q_idxs, desc="q_l")):
                         logging.info(
-                            print(
-                                f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
-                            )
+                            f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
                         )
                         N = group_cnts[q]
-                        logging.info(print(f"\t\t Considering {N} nodes..."))
+                        logging.info(f"\t\t Considering {N} nodes...")
                         sub_data = {
                             "A": [
                                 data["A"][t][
@@ -1096,7 +1103,7 @@ if __name__ == "__main__":
                             ## Fit to given data
                             model.fit(learning_rate=args.learning_rate)
                         except KeyboardInterrupt:
-                            logging.info(print("Keyboard interrupt, stopping early"))
+                            logging.info("Keyboard interrupt, stopping early")
                             current_energy = model.bp.compute_free_energy()
                             if model.best_val_q == 0.0:
                                 model.max_energy = current_energy
@@ -1136,9 +1143,21 @@ if __name__ == "__main__":
                         logging.info(
                             f"Transferred {len(np.unique(pred_Z[run_idx, layer, old_node_labels == q, :][pred_Z[run_idx, layer, old_node_labels == q, :]!=-1]))} groups"
                         )
-            logging.info("Run complete, saving...")
-            RESULTS_DIR = DATA_DIR / "results"
-            RESULTS_DIR.mkdir(exist_ok=True)
+                        # save after each iteration in case of errors
+                        if testset_name == "scopus":
+                            with open(
+                                RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl",
+                                "wb",
+                            ) as f:
+                                pickle.dump(pred_Z, f)
+                        else:
+                            with open(
+                                RESULTS_DIR
+                                / f"{testset_name}_Z{'_h' if args.h_l else ''}.pkl",
+                                "wb",
+                            ) as f:
+                                pickle.dump(pred_Z, f)
+            logging.info("Run complete, saving final time...")
             if testset_name == "scopus":
                 with open(
                     RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl", "wb"
