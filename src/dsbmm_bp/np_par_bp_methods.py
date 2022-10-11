@@ -458,8 +458,11 @@ class NumpyBP:
             self.nz_idxs[t] = np.concatenate([[0], unq_cumdeg], dtype=int)
             self.nz_is[t] = np.concatenate(
                 [nz_is, [self.N]], dtype=int
-            )  # extend to make same length - now ns_is[t] == i gives posn of i in nz_idxs[t] that itself gives e_idx start posn of i at t
+            )  # extend to make same length - now nz_is[t] == i gives posn of i in nz_idxs[t] that itself gives e_idx start posn of i at t
         self.E_idxs = np.concatenate([[0], self.bin_degs.sum(axis=0).cumsum()])
+        self.present_T = np.flatnonzero(
+            np.diff(self.E_idxs)
+        )  # so can skip empty timeslices
         self.all_idxs = {}
         self.flat_i_idxs = {}
         self.all_inv_idxs = {}
@@ -1045,7 +1048,7 @@ class NumpyBP:
 
         ## UPDATE SPATIAL MESSAGES FROM i AT t ##
         tmp_spatial_msg = -1.0 * log_spatial_field_terms.copy()
-        for t in range(self.T):
+        for t in self.present_T:
             # need inv idxs for locs where i sends msgs to j
             # all_inv_idxs[t] gives order of field_term s.t.
             # all_inv_idxs[t][nz_idx[t][i]:nz_idxs[t][i+1]]
@@ -1084,7 +1087,7 @@ class NumpyBP:
         # )
         # tmp_spatial_msg[tmp_spatial_msg < TOL] = TOL
         # tmp_spatial_msg /= tmp_spatial_msg.sum(axis=1)[:, np.newaxis]
-        for t in range(self.T):
+        for t in self.present_T:
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
             tmp_diff = np.abs(
                 tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]].flatten()
