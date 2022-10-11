@@ -332,16 +332,13 @@ class NumpyDSBMM:
         # log(n!) = gammaln(n+1)
         return (
             -lam.T
-            + np.einsum(
-                "it,qt->itq",
-                k,
-                np.log(
-                    lam,
-                    where=lam > 0.0,
-                    out=np.log(TOL) * np.ones_like(lam, dtype=float),
-                    # out=np.zeros_like(lam, dtype=float),
-                ),
-            )
+            + k[:, :, np.newaxis]
+            * np.log(
+                lam,
+                where=lam > 0.0,
+                out=np.log(TOL) * np.ones_like(lam, dtype=float),
+                # out=np.zeros_like(lam, dtype=float),
+            ).T[np.newaxis, ...]
             - gammaln(k + 1)[:, :, np.newaxis]
         )
 
@@ -367,7 +364,7 @@ class NumpyDSBMM:
                 ib_params = self._meta_params[s]  # shape (Q x T x L)
                 # recall X[s] has shape (N x T x Ds), w Ds = L here
                 ib_contrib = (
-                    np.sum(
+                    np.nansum(
                         np.log(
                             ib_params,
                             where=ib_params > 0.0,
@@ -377,7 +374,7 @@ class NumpyDSBMM:
                         * self.X[s][:, np.newaxis, :, :],
                         axis=-1,
                     )
-                    + np.sum(
+                    + np.nansum(
                         np.log(
                             1 - ib_params,
                             where=1 - ib_params > 0.0,
@@ -403,7 +400,7 @@ class NumpyDSBMM:
                     # out=np.zeros_like(cat_params),
                 )[np.newaxis, ...]
                 assert np.all(self.X[s].sum(axis=-1) == 1)  # REMOVE
-                self.log_meta_lkl += np.sum(
+                self.log_meta_lkl += np.nansum(
                     np.multiply(
                         log_cat_params,
                         self.X[s][:, np.newaxis, :, :],
@@ -420,11 +417,11 @@ class NumpyDSBMM:
             elif mt == "multinomial":
                 multi_params = self._meta_params[s]  # shape (Q,T,L)
                 # TODO: stop recalculating xsums for multinomial each time
-                xsums = self.X[s].sum(axis=-1, keepdims=True)
+                xsums = np.nansum(self.X[s], axis=-1, keepdims=True)
                 multi_contrib = (
                     gammaln(xsums + 1)
-                    - gammaln(self.X[s] + 1).sum(axis=-1, keepdims=True)
-                    + np.sum(
+                    - np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
+                    + np.nansum(
                         self.X[s][:, :, np.newaxis, :]
                         * np.log(
                             multi_params,
@@ -434,7 +431,7 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 )
-                assert np.all(multi_contrib < 0)
+                assert np.all(multi_contrib <= 0)
                 self.log_meta_lkl += multi_contrib
                 if self.verbose:
                     print("\tUpdated multinomial lkl contribution")
