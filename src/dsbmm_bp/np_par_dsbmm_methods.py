@@ -431,6 +431,7 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 )
+                assert np.all(self.X[s][~np.isnan(self.X[s])] >= 0)
                 assert np.all(multi_contrib <= 0)
                 self.log_meta_lkl += multi_contrib
                 if self.verbose:
