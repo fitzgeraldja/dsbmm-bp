@@ -173,7 +173,7 @@ def indep_bern_contrib(
     n_t: np.ndarray,
     x_it: np.ndarray,
 ):
-    """Contribution from independent Bernoulli or categorical metadata
+    """Contribution from independent Bernoulli
 
     :param old_q: old group
     :type old_q: int
@@ -211,4 +211,51 @@ def indep_bern_contrib(
     return res
 
 
-# TODO: derive greedy contribution for multinomial metadata
+@njit
+def cat_contrib(
+    old_q: int,
+    new_r: int,
+    X_t: np.ndarray,
+    n_t: np.ndarray,
+    x_it: np.ndarray,
+):
+    res = 0.0
+    for l in range(x_it.shape[0]):
+        res += (
+            xlogx(X_t[old_q, l] - x_it[l])
+            - xlogx(X_t[old_q, l])
+            + xlogx(X_t[new_r, l] + x_it[l])
+            - xlogx(X_t[new_r, l])
+        )
+    res += (
+        xlogx(n_t[old_q])
+        - xlogx(n_t[old_q] - 1)
+        + xlogx(n_t[new_r])
+        - xlogx(n_t[new_r] + 1)
+    )
+    return res
+
+
+@njit
+def multi_contrib(
+    old_q: int,
+    new_r: int,
+    X_lt: np.ndarray,
+    X_t: np.ndarray,
+    x_it: np.ndarray,
+):
+    res = 0.0
+    for l in range(x_it.shape[0]):
+        res += (
+            xlogx(X_lt[old_q, l] - x_it[l])
+            - xlogx(X_lt[old_q, l])
+            + xlogx(X_lt[new_r, l] + x_it[l])
+            - xlogx(X_lt[new_r, l])
+        )
+    res += (
+        xlogx(X_t[old_q])
+        - xlogx(X_t[old_q] - x_it.sum())
+        + xlogx(X_t[new_r])
+        - xlogx(X_t[new_r] + x_it.sum())
+    )
+    return res
