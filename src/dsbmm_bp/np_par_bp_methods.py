@@ -6,6 +6,7 @@ import yaml  # type: ignore
 from numba import njit
 from scipy import sparse
 from scipy.special import gammaln
+from tqdm import tqdm
 
 from dsbmm_bp.np_par_dsbmm_methods import NumpyDSBMM
 
@@ -931,9 +932,15 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        if (self.log_meta_prob < 2 * log_spatial_msg).sum() > (
-            self.model._tot_N_pres * self.Q / 4
-        ):
+        if (
+            self.log_meta_prob[
+                ~np.isnan(self.log_meta_prob) & self.log_meta_prob != np.log(TOL)
+            ]
+            < 2
+            * log_spatial_msg[
+                ~np.isnan(self.log_meta_prob) & self.log_meta_prob != np.log(TOL)
+            ]
+        ).sum() > (self.model._tot_N_pres * self.Q / 4):
             warnings.warn(
                 "Metadata contribution significantly greater than spatial in over a quarter of possible cases - likely suggests should reduce weighting of metadata."
             )
@@ -943,7 +950,7 @@ class NumpyBP:
                 where=self.log_meta_prob != 0,
                 out=10 * np.ones_like(log_spatial_msg),
             ).mean()
-            print(
+            tqdm.write(
                 f"Tuning parameter might be better replaced by something around {tuning_fac}."
             )
         log_spatial_msg += self.log_meta_prob
