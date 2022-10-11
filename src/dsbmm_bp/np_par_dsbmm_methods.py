@@ -417,11 +417,11 @@ class NumpyDSBMM:
             elif mt == "multinomial":
                 multi_params = self._meta_params[s]  # shape (Q,T,L)
                 # neglect sums as don't change lkl w.r.t. groups, but for poor parameter estimates can result in +ve log lkl problems
-                xsums = np.nansum(self.X[s], axis=-1, keepdims=True)
+                # xsums = np.nansum(self.X[s], axis=-1, keepdims=True)
                 # assert np.all(multi_params <= 1.0)
                 multi_contrib = (
-                    gammaln(xsums + 1)
-                    - np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
+                    # gammaln(xsums + 1)
+                    -np.nansum(gammaln(self.X[s] + 1), axis=-1, keepdims=True)
                     + np.nansum(
                         self.X[s][:, :, np.newaxis, :]
                         * np.log(
@@ -432,7 +432,7 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 )
-                assert np.all(multi_contrib <= 0)
+                # assert np.all(multi_contrib <= 0)
                 self.log_meta_lkl += multi_contrib
                 if self.verbose:
                     print("\tUpdated multinomial lkl contribution")
