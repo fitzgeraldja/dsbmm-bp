@@ -1251,7 +1251,6 @@ class NumpyBP:
         )
         log_forward_term[~self._pres_nodes[:, 1:], :] = 0.0
         tmp[:, 1:, :] += log_forward_term
-        print("With forwards ", (tmp > 0).sum())
         # log_marg_max = tmp.max(axis=-1, keepdims=True)
         tmp_marg = np.exp(
             tmp
