@@ -55,6 +55,8 @@ class NumpyBP:
             self.twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
             self.twopoint_t_marg = np.zeros((self.N, self.T - 1, self.Q, self.Q))
 
+        self.tun_par_heuristic = True
+
         self.msg_diff = 0.0
 
     def compute_DC_log_lkl(self):
@@ -932,27 +934,32 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        if (
-            self.log_meta_prob[
-                (~np.isnan(self.log_meta_prob)) & (self.log_meta_prob != np.log(TOL))
-            ]
-            < 2
-            * log_spatial_msg[
-                (~np.isnan(self.log_meta_prob)) & (self.log_meta_prob != np.log(TOL))
-            ]
-        ).sum() > (self.model._tot_N_pres * self.Q / 4):
-            warnings.warn(
-                "Metadata contribution significantly greater than spatial in over a quarter of possible cases - likely suggests should reduce weighting of metadata."
-            )
-            tuning_fac = np.divide(
-                log_spatial_msg,
-                self.log_meta_prob,
-                where=self.log_meta_prob != 0,
-                out=10 * np.ones_like(log_spatial_msg),
-            ).mean()
-            tqdm.write(
-                f"Tuning parameter might be better replaced by something around {tuning_fac}."
-            )
+        if self.tun_par_heuristic:
+            if (
+                self.log_meta_prob[
+                    (~np.isnan(self.log_meta_prob))
+                    & (self.log_meta_prob != np.log(TOL))
+                ]
+                < 2
+                * log_spatial_msg[
+                    (~np.isnan(self.log_meta_prob))
+                    & (self.log_meta_prob != np.log(TOL))
+                ]
+            ).sum() > (self.model._tot_N_pres * self.Q / 4):
+                warnings.warn(
+                    "Metadata contribution significantly greater than spatial in over a quarter of possible cases - likely suggests should reduce weighting of metadata."
+                )
+                tuning_fac = np.divide(
+                    log_spatial_msg,
+                    self.log_meta_prob,
+                    where=self.log_meta_prob != 0,
+                    out=10 * np.ones_like(log_spatial_msg),
+                ).mean()
+                tqdm.write(
+                    f"Tuning parameter might be better replaced by something around {tuning_fac}."
+                )
+            self.tun_par_heuristic = False
+
         log_spatial_msg += self.log_meta_prob
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
