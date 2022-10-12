@@ -959,7 +959,7 @@ class NumpyBP:
                     out=10 * np.ones_like(log_spatial_msg),
                 ).mean()
                 tqdm.write(
-                    f"Tuning parameter might be better replaced by something around {tuning_fac}."
+                    f"Tuning parameter might be better replaced by something around {tuning_fac:.2g}."
                 )
             self.tun_par_heuristic = False
 

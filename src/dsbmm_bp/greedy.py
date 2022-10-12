@@ -219,6 +219,19 @@ def cat_contrib(
     n_t: np.ndarray,
     x_it: np.ndarray,
 ):
+    """Contribution from categorical
+
+    :param old_q: old group
+    :type old_q: int
+    :param new_r: new group
+    :type new_r: int
+    :param X_t: sum of metadata within each category, assigned to groups at t
+    :type X_t: np.ndarray, shape (Q,L)
+    :param n_t: total number of nodes present in each group at t
+    :type n_t: np.ndarray, shape (Q,)
+    :param x_it: value of metadata for node changing groups for each category
+    :type x_it: np.ndarray, shape (L,)
+    """
     res = 0.0
     for l in range(x_it.shape[0]):
         res += (
@@ -244,6 +257,19 @@ def multi_contrib(
     X_t: np.ndarray,
     x_it: np.ndarray,
 ):
+    """Contribution from multinomial
+
+    :param old_q: old group
+    :type old_q: int
+    :param new_r: new group
+    :type new_r: int
+    :param X_lt: sum of metadata within each category, assigned to groups at t
+    :type X_lt: np.ndarray, shape (Q,L)
+    :param X_t: total sum of metadata within each group at t
+    :type X_t: np.ndarray, shape (Q,)
+    :param x_it: value of metadata for node changing groups for each category
+    :type x_it: np.ndarray, shape (L,)
+    """
     res = 0.0
     for l in range(x_it.shape[0]):
         res += (

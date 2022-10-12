@@ -17,6 +17,8 @@ from numba.typed import List
 from scipy import sparse
 from tqdm import tqdm
 
+from dsbmm_bp.utils import max_overlap_over_perms
+
 parser = argparse.ArgumentParser(description="Apply model to data.")
 
 parser.add_argument(
@@ -115,29 +117,6 @@ if args.n_threads is not None:
     from numba import set_num_threads
 
     set_num_threads(args.n_threads)
-
-
-def max_overlap_over_perms(true_Z, pred_Z):
-    """Calculate normalised maximum overlap between true and predicted Z
-
-    :param true_Z: _description_
-    :type true_Z: _type_
-    :param pred_Z: _description_
-    :type pred_Z: _type_
-    :return: _description_
-    :rtype: _type_
-    """
-    Q = len(np.unique(true_Z))
-    perms = permutations(range(Q))
-    max_ol = 0.0
-    for perm in perms:
-        tmp_Z = np.zeros_like(pred_Z)
-        for q in range(Q):
-            tmp_Z[pred_Z == q] = perm[q]
-        tmp_ol = ((tmp_Z == true_Z).mean() - 1 / Q) / (1 - 1 / Q)
-        if tmp_ol > max_ol:
-            max_ol = tmp_ol
-    return max_ol
 
 
 if __name__ == "__main__":

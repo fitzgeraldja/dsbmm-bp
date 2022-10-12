@@ -1157,7 +1157,7 @@ if __name__ == "__main__":
                                 "wb",
                             ) as f:
                                 pickle.dump(pred_Z, f)
-            logging.info("Run complete, saving final time...")
+            logging.info(f"Run complete for level {layer}, saving...")
             if testset_name == "scopus":
                 with open(
                     RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl", "wb"
