@@ -1,3 +1,4 @@
+from itertools import permutations
 from typing import Generator
 
 import numpy as np
