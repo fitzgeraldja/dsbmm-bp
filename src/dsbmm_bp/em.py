@@ -56,6 +56,7 @@ class EM:
         alpha_use_all=True,
         non_informative_init=True,
         planted_p=0.6,
+        auto_tune=False,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
@@ -67,6 +68,7 @@ class EM:
         self.max_msg_iter = max_msg_iter
         self.init_Z_mode = init_Z_mode
         self.alpha_use_all = alpha_use_all
+        self.auto_tune = auto_tune
         self.A = data["A"]
         self.frozen = False
         self.params_to_set = None
@@ -280,6 +282,7 @@ class EM:
                         tuning_param=tuning_param,
                         verbose=self.verbose,
                         use_meta=self.use_meta,
+                        auto_tune=self.auto_tune,
                     )  # X=X,
                     if self.frozen or self.params_to_set is not None:
                         try:
@@ -305,6 +308,7 @@ class EM:
                         tuning_param=tuning_param,
                         verbose=self.verbose,
                         use_meta=self.use_meta,
+                        auto_tune=self.auto_tune,
                     )  # X=X,
                     if self.frozen or self.params_to_set is not None:
                         try:
@@ -330,6 +334,7 @@ class EM:
                     tuning_param=tuning_param,
                     verbose=self.verbose,
                     use_meta=self.use_meta,
+                    auto_tune=self.auto_tune,
                 )  # X=X,
                 if self.frozen or self.params_to_set is not None:
                     try:
@@ -359,6 +364,7 @@ class EM:
                 verbose=self.verbose,
                 alpha_use_all=self.alpha_use_all,
                 non_informative_init=self.non_informative_init,
+                auto_tune=self.auto_tune,
             )
             if self.frozen or self.params_to_set is not None:
                 try:

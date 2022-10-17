@@ -38,6 +38,7 @@ class NumpyBP:
         self.use_meta = self.model.use_meta
         self.verbose = self.model.verbose
         self.frozen = self.model.frozen
+        self.auto_tune = self.model.auto_tune
         self.A = self.model.A
         self.n_msgs = self.model.E.sum() + self.N * (self.T - 1) * 2
         self.X = self.model.X
@@ -958,9 +959,15 @@ class NumpyBP:
                     where=self.log_meta_prob != 0,
                     out=10 * np.ones_like(log_spatial_msg),
                 ).mean()
-                tqdm.write(
-                    f"Tuning parameter might be better replaced by something around {tuning_fac:.2g}."
-                )
+                if self.auto_tune:
+                    tqdm.write(
+                        f"Automatically changing tuning parameter to {tuning_fac:.3g}."
+                    )
+                    self.model.tuning_param = tuning_fac
+                else:
+                    tqdm.write(
+                        f"Tuning parameter might be better replaced by something around {tuning_fac:.3g}."
+                    )
             self.tun_par_heuristic = False
 
         log_spatial_msg += self.log_meta_prob

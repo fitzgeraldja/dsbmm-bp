@@ -41,6 +41,7 @@ class NumpyDSBMM:
         frozen=False,
         alpha_use_all=True,
         non_informative_init=True,
+        auto_tune=False,
     ):
         """Initialise the class
 
@@ -66,6 +67,7 @@ class NumpyDSBMM:
         self.deg_corr = deg_corr
         self.alpha_use_all = alpha_use_all
         self.non_informative_init = non_informative_init
+        self.auto_tune = auto_tune
 
         self.directed = directed
         self.verbose = verbose

@@ -149,6 +149,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--auto_tune",
+    action="store_true",
+    help="Choose tuning parameter automatically according to heuristic suggested",
+)
+
+parser.add_argument(
     "--ignore_meta",
     action="store_true",
     help="Ignore metadata, use only network edges for fitting model",
@@ -686,6 +692,7 @@ if __name__ == "__main__":
                             alpha_use_all=not args.alpha_use_first,
                             non_informative_init=not args.partial_informative_dsbmm_init,
                             planted_p=args.planted_p,
+                            auto_tune=args.auto_tune,
                         )
                     elif testset_name == "align":
                         tqdm.write(f"alignment = {params['meta_aligned']}")
@@ -701,6 +708,7 @@ if __name__ == "__main__":
                             alpha_use_all=not args.alpha_use_first,
                             non_informative_init=not args.partial_informative_dsbmm_init,
                             planted_p=args.planted_p,
+                            auto_tune=args.auto_tune,
                         )
                     else:
                         # scaling tests
@@ -721,6 +729,7 @@ if __name__ == "__main__":
                             alpha_use_all=not args.alpha_use_first,
                             non_informative_init=not args.partial_informative_dsbmm_init,
                             planted_p=args.planted_p,
+                            auto_tune=args.auto_tune,
                         )
                     if samp_no > 0:
                         init_times[test_no, samp_no - 1] = time.time() - start_time
@@ -996,6 +1005,7 @@ if __name__ == "__main__":
                     alpha_use_all=not args.alpha_use_first,
                     non_informative_init=not args.partial_informative_dsbmm_init,
                     planted_p=args.planted_p,
+                    auto_tune=args.auto_tune,
                 )
                 try:
                     ## Fit to given data
@@ -1098,6 +1108,7 @@ if __name__ == "__main__":
                             alpha_use_all=not args.alpha_use_first,
                             non_informative_init=not args.partial_informative_dsbmm_init,
                             planted_p=args.planted_p,
+                            auto_tune=args.auto_tune,
                         )
                         try:
                             ## Fit to given data
