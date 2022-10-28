@@ -19,7 +19,9 @@ from tqdm import tqdm
 
 from dsbmm_bp.utils import max_overlap_over_perms
 
-parser = argparse.ArgumentParser(description="Apply model to data.")
+parser = argparse.ArgumentParser(
+    description="Apply model to data simulated from toy model."
+)
 
 parser.add_argument(
     "--data",
@@ -45,7 +47,7 @@ parser.add_argument(
 parser.add_argument(
     "--msg_init_mode",
     type=str,
-    choices=["planted", "random", "uniform"],
+    choices=["planted", "random", "uniform", "planted_meta"],
     default="planted",
     help="Initialization mode for messages. Default is planted.",
 )

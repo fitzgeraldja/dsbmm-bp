@@ -344,6 +344,149 @@ class NumpyBP:
             self._psi_t[..., 0] += p * one_hot_Z[:, 1:, :]
             self._psi_t[..., 1] += p * one_hot_Z[:, : self.T - 1, :]
             self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
+        elif mode == "planted_meta":
+            # initialise by metadata partition plus some random noise, with strength of info used
+            # specified by plant_strength (shortened to ps below)
+            # i.e. if z_0(i,t) = r,
+            # \psi^{it}_q = \delta_{qr}(ps + (1 - ps)*rand) + (1 - \delta_{qr})*(1 - ps)*rand
+            p = PLANTED_P
+            try:
+                assert self.model.meta_types == ["categorical"]
+            except AssertionError:
+                raise ValueError(
+                    "Planted meta mode only works for categorical metadata that can be interpreted as group labels"
+                )
+            ## INIT MARGINALS ##
+            one_hot_Z = self.X[0]  # in shape N x T x D_s
+            if one_hot_Z.shape[-1] != self.Q:
+                one_hot_Z = np.pad(
+                    one_hot_Z,
+                    pad_width=((0, 0), (0, 0), (0, self.Q - one_hot_Z.shape[-1])),
+                    mode="constant",
+                    constant_values=0,
+                )
+            one_hot_Z[~self._pres_nodes] = 0.0
+            marg_noise = np.random.rand(self.N, self.T, self.Q)
+            marg_noise /= marg_noise.sum(axis=-1, keepdims=True)
+            self.node_marg = p * one_hot_Z + (1 - p) * marg_noise
+            self.node_marg /= self.node_marg.sum(axis=-1, keepdims=True)
+            self.node_marg[~self._pres_nodes] = 0.0
+
+            ## INIT MESSAGES ##
+            tmp = sparse.csr_matrix(
+                (self._psi_e.data, self._psi_e.indices, self._psi_e.indptr),
+                shape=self._psi_e.shape,
+            )
+            Z_idxs = np.flatnonzero(one_hot_Z.transpose(1, 2, 0))
+            # column indices for row i are stored in
+            # indices[indptr[i]:indptr[i+1]]
+            # and corresponding values are stored in
+            # data[indptr[i]:indptr[i+1]]
+            tmp_indptr = tmp.indptr
+
+            @njit
+            def update_data_locs(tmp_data, tmp_indptr, locs, p):
+                for i in locs:
+                    tmp_data[tmp_indptr[i] : tmp_indptr[i + 1]] *= p
+                return tmp_data
+
+            tmp.data = update_data_locs(tmp.data, tmp_indptr, Z_idxs, p)
+            other_idxs = np.arange(self.N * self.T * self.Q)
+            other_idxs = np.setdiff1d(other_idxs, Z_idxs)
+            tmp.data = update_data_locs(tmp.data, tmp_indptr, other_idxs, 0)
+
+            self._psi_e.data = np.random.rand(len(self._psi_e.data))
+
+            if self.verbose and self.N > 1000:
+                print("Normalising init messages...")
+            # if self.N > 1000:
+
+            @njit
+            def normalise_psi_e(psi_data, psi_indptr, N, T, Q):
+                for t in range(T):
+                    q_idxs = np.arange(N * T * Q).reshape(T, Q, N)[t].T
+                    for i in range(N):
+                        i_sums = np.zeros(
+                            psi_indptr[q_idxs[i, 0] + 1] - psi_indptr[q_idxs[i, 0]]
+                        )
+                        for q in range(Q):
+                            i_sums += psi_data[
+                                psi_indptr[q_idxs[i, q]] : psi_indptr[q_idxs[i, q] + 1]
+                            ]
+                        # assert np.all(i_sums>0)
+                        for q in range(Q):
+                            psi_data[
+                                psi_indptr[q_idxs[i, q]] : psi_indptr[q_idxs[i, q] + 1]
+                            ] /= i_sums
+                return psi_data
+
+            self._psi_e.data = normalise_psi_e(
+                self._psi_e.data, self._psi_e.indptr, self.N, self.T, self.Q
+            )
+
+            self._psi_e.data *= 1 - p
+            self._psi_e.data += tmp.data
+
+            # else:
+            # sums = sparse.vstack(
+            #     [
+            #         sparse.csr_matrix(
+            #             self._psi_e[
+            #                 np.arange(self.N * self.T * self.Q)
+            #                 .reshape(self.T, self.Q, self.N)[t]
+            #                 .T.flatten(),
+            #                 :,
+            #             ]
+            #             .T.reshape(self.N * self.N, self.Q)
+            #             .sum(axis=-1)
+            #             .reshape(self.N, self.N)
+            #         )
+            #         for t in range(self.T)
+            #         for _ in range(self.Q)
+            #     ]
+            # )
+            # self._psi_e.data /= sums.data  # normalise noise
+            # self._psi_e.data *= 1 - p
+            # self._psi_e.data += tmp.data
+
+            if self.verbose and self.N > 1000:
+                print("Done for random init...")
+
+            # renormalise just in case
+            if self.verbose and self.N > 1000:
+                print("Now added planted information, calculating renormalisation...")
+            # if self.N > 1000:
+            self._psi_e.data = normalise_psi_e(
+                self._psi_e.data, self._psi_e.indptr, self.N, self.T, self.Q
+            )
+            if self.verbose and self.N > 1000:
+                print("Done!")
+            # else:
+            #     sums = sparse.vstack(
+            #         [
+            #             sparse.csr_matrix(
+            #                 self._psi_e[
+            #                     np.arange(self.N * self.T * self.Q)
+            #                     .reshape(self.T, self.Q, self.N)[t]
+            #                     .T.flatten(),
+            #                     :,
+            #                 ]
+            #                 .T.reshape(self.N * self.N, self.Q)
+            #                 .sum(axis=-1)
+            #                 .reshape(self.N, self.N)
+            #             )
+            #             for t in range(self.T)
+            #             for _ in range(self.Q)
+            #         ]
+            #     )
+            #     self._psi_e.data /= sums.data
+
+            self._psi_t = np.random.rand(self.N, self.T - 1, self.Q, 2)
+            self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
+            self._psi_t *= 1 - p
+            self._psi_t[..., 0] += p * one_hot_Z[:, 1:, :]
+            self._psi_t[..., 1] += p * one_hot_Z[:, : self.T - 1, :]
+            self._psi_t /= self._psi_t.sum(axis=2, keepdims=True)
         else:
             raise ValueError(
                 "Invalid message initialisation mode chosen: options are 'random', 'uniform' or 'planted'."
