@@ -382,11 +382,11 @@ if __name__ == "__main__":
                     "meta_params": meta_params,
                 }
 
+                if args.unfreeze_meta:
+                    model.bp.model.unfreeze_meta()
                 model.set_params(true_params, freeze=not args.unfreeze)
                 if args.unfreeze:
                     model.bp.model.frozen = False
-                elif args.unfreeze_meta:
-                    model.bp.model.unfreeze_meta()
                 ## Fit to given data
                 model.fit(learning_rate=0.2, msg_conv_tol=args.msg_conv_tol)
                 ## Score after fit

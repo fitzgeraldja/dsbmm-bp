@@ -265,7 +265,7 @@ class EM:
         self.frozen = freeze
         self.params_to_set = params
         self.dsbmm.set_params(params, freeze=True)
-        self.dsbmm.update_params()  # necessary to update the meta lkl suitably
+        self.dsbmm.update_params(init=True)  # necessary to update the meta lkl suitably
 
     def reset_model(self, tuning_param, set_Z=None, reinit=True):
         retext = "re" if reinit else ""
