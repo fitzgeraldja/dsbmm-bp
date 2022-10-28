@@ -351,7 +351,10 @@ class NumpyBP:
             # \psi^{it}_q = \delta_{qr}(ps + (1 - ps)*rand) + (1 - \delta_{qr})*(1 - ps)*rand
             p = PLANTED_P
             try:
-                assert self.model.meta_types == ["categorical"]
+                assert (
+                    len(self.model.meta_types) == 1
+                    and self.model.meta_types[0] == "categorical"
+                )
             except AssertionError:
                 raise ValueError(
                     "Planted meta mode only works for categorical metadata that can be interpreted as group labels"
