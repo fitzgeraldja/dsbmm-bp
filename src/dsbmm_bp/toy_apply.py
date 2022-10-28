@@ -339,7 +339,7 @@ if __name__ == "__main__":
                     msg_init_mode=args.msg_init_mode,
                     n_runs=args.n_runs,
                     sparse_adj=True,
-                    max_iter=1,
+                    max_iter=1 if not args.unfreeze or not args.unfreeze_meta else 50,
                     patience=100,
                     max_msg_iter=args.max_msg_iter,
                     use_numba=args.use_numba,
