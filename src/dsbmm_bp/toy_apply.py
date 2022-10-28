@@ -113,6 +113,12 @@ parser.add_argument(
     help="Allow parameter updating",
 )
 
+parser.add_argument(
+    "--unfreeze_meta",
+    action="store_true",
+    help="Allow parameter updating for metadata only (to circumvent permutation fixing problem).",
+)
+
 args = parser.parse_args()
 
 if args.n_threads is not None:
@@ -379,6 +385,8 @@ if __name__ == "__main__":
                 model.set_params(true_params, freeze=not args.unfreeze)
                 if args.unfreeze:
                     model.bp.model.frozen = False
+                elif args.unfreeze_meta:
+                    model.bp.model.unfreeze_meta()
                 ## Fit to given data
                 model.fit(learning_rate=0.2, msg_conv_tol=args.msg_conv_tol)
                 ## Score after fit

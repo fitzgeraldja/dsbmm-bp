@@ -144,6 +144,7 @@ class NumpyDSBMM:
         self.diff = 0.0
         self.verbose = verbose
         self.frozen = frozen
+        self.unfrozen_meta = not frozen
 
     @property
     def num_nodes(self):
@@ -277,6 +278,7 @@ class NumpyDSBMM:
                 #     assert np.all(
                 #         np.abs(self._beta.transpose(1, 0, 2) - self._beta) < 1e-10
                 #     )
+        if self.unfrozen_meta:
             self.update_meta_params(init=init, learning_rate=learning_rate)
             if self.verbose:
                 # print(self.jit_model._meta_params)
@@ -1071,3 +1073,6 @@ class NumpyDSBMM:
         self._lam = true_params.get("lam", None)
         self._pi = true_params["pi"]
         self._meta_params = true_params["meta_params"]
+
+    def unfreeze_meta(self):
+        self.unfrozen_meta = True
