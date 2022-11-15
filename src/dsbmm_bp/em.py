@@ -99,10 +99,19 @@ class EM:
                 # symmetrising and binarising
                 if not self.directed:
                     try:
-                        self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
+                        if not self.deg_corr:
+                            # binarise and symmetrise
+                            self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
+                        else:
+                            # symmetrise by taking average w transpose
+                            self.A = [(A_t + A_t.T) / 2.0 for A_t in self.A]
                     except ValueError:
                         print(*[A_t.shape for A_t in self.A], sep="\n")
                         raise ValueError("Problem w non-square adj matrix input")
+                else:
+                    if not self.deg_corr:
+                        # binarise
+                        self.A = [(A_t > 0) * 1.0 for A_t in self.A]
 
         except Exception:  # AssertionError:
             # symmetrise for this test case

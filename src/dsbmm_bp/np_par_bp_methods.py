@@ -713,16 +713,7 @@ class NumpyBP:
                 self.deg_prod[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                     self.model.degs[just_js, t, 1] * self.model.degs[just_is, t, 0]
                 )
-                if not self.directed:
-                    self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
-                else:
-                    self._edge_vals[t] = np.stack(
-                        [
-                            self.A[t][just_js, just_is].squeeze(),
-                            self.A[t][just_is, just_js].squeeze(),
-                        ],
-                        axis=-1,
-                    )
+                self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
 
     def spatial_field_terms(
         self,
@@ -831,7 +822,7 @@ class NumpyBP:
             if self.deg_corr:
 
                 field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
-                    self._psi_e[j_idxs, i_idxs].T.A.reshape(-1, self.Q)[..., np.newaxis]
+                    self._psi_e[j_idxs, i_idxs].A.reshape(-1, self.Q)[..., np.newaxis]
                     * dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1], ...],
                     axis=-2,
                 )  # NB .A now necessary to convert from matrix to array, as first constructing 3D array before summing
@@ -839,9 +830,29 @@ class NumpyBP:
                 #     for r in range(Q):
                 #         tmp[q] += dc_lkl[e_nbrs_inv[nbr_idx], r, q] * jtoi_msgs[r]
             else:
-                field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = (
-                    self._psi_e[j_idxs, i_idxs].T.reshape(-1, self.Q) @ beta
-                )
+                if not self.directed:
+                    field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = (
+                        self._psi_e[j_idxs, i_idxs].reshape(-1, self.Q) @ beta
+                    )
+                else:
+                    # NB _edge_vals contains all edges j->i in order,
+                    # so can use inv_idxs constructed to get edges i->j
+                    # in same order
+                    jtoi_edges = self._edge_vals
+                    itoj_edges = self._edge_vals[self.all_inv_idxs[t]]
+                    edgewise_block_terms = np.power(
+                        beta[np.newaxis, ...], jtoi_edges[:, np.newaxis, np.newaxis]
+                    ) * np.power(
+                        beta.T[np.newaxis, ...], itoj_edges[:, np.newaxis, np.newaxis]
+                    )
+                    field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
+                        self._psi_e[j_idxs, i_idxs].A.reshape(-1, self.Q)[
+                            ..., np.newaxis
+                        ]
+                        * edgewise_block_terms,
+                        axis=-2,
+                    )
+
         # # REMOVE:
         # try:
         #     assert np.all(field_terms.sum(axis=-1) > 0)
