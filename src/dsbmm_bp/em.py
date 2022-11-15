@@ -48,6 +48,7 @@ class EM:
         patience=None,
         tuning_param=1.0,
         deg_corr=False,
+        leave_directed=False,
         verbose=True,
         use_meta=True,
         max_iter=30,
@@ -80,6 +81,7 @@ class EM:
             # assume passing list of values to try
             self.tuning_params = tuning_param
         self.deg_corr = deg_corr
+        self.directed = leave_directed
         self.n_runs = n_runs
         self.run_idx = 0
         try:
@@ -93,12 +95,14 @@ class EM:
                 # NB numpy version takes sparse by default
                 assert np.allclose(self.A, self.A.transpose(1, 0, 2))
             else:
-                # TODO: fix properly - currently just force symmetrising and binarising
-                try:
-                    self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
-                except ValueError:
-                    print(*[A_t.shape for A_t in self.A], sep="\n")
-                    raise ValueError("Problem w non-square adj matrix input")
+                # TODO: fix properly - currently just force
+                # symmetrising and binarising
+                if not self.directed:
+                    try:
+                        self.A = [((A_t + A_t.T) > 0) * 1.0 for A_t in self.A]
+                    except ValueError:
+                        print(*[A_t.shape for A_t in self.A], sep="\n")
+                        raise ValueError("Problem w non-square adj matrix input")
 
         except Exception:  # AssertionError:
             # symmetrise for this test case

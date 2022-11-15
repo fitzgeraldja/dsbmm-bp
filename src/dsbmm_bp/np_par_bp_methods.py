@@ -612,6 +612,7 @@ class NumpyBP:
         )  # so can skip empty timeslices
         self.all_idxs = {}
         self.flat_i_idxs = {}
+        self.flat_j_idxs = {}
         self.all_inv_idxs = {}
         for t in range(self.T):
             # np.flatnonzero fails for sparse matrix,
@@ -661,6 +662,7 @@ class NumpyBP:
             just_is = i_idxs[:: self.Q].astype(int)
             self.flat_i_idxs[t] = just_is
             just_js = np.mod(j_idxs[:: self.Q], self.N).astype(int)
+            self.flat_j_idxs[t] = just_js
             try:
                 self.all_inv_idxs[t] = np.array(
                     [
@@ -707,13 +709,20 @@ class NumpyBP:
             self._edge_vals = {}
             for t in range(self.T):
                 just_is = self.flat_i_idxs[t]
-                just_js = np.mod(self.all_idxs[t]["j_idxs"][:: self.Q], self.N).astype(
-                    int
-                )
+                just_js = self.flat_j_idxs[t]
                 self.deg_prod[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                     self.model.degs[just_js, t, 1] * self.model.degs[just_is, t, 0]
                 )
-                self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
+                if not self.directed:
+                    self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
+                else:
+                    self._edge_vals[t] = np.stack(
+                        [
+                            self.A[t][just_js, just_is].squeeze(),
+                            self.A[t][just_is, just_js].squeeze(),
+                        ],
+                        axis=-1,
+                    )
 
     def spatial_field_terms(
         self,
@@ -1105,6 +1114,7 @@ class NumpyBP:
                     where=self.log_meta_prob != 0,
                     out=10 * np.ones_like(log_spatial_msg),
                 ).mean()
+
                 if self.auto_tune:
                     tqdm.write(
                         f"Automatically changing tuning parameter to {tuning_fac:.3g}."
@@ -1114,7 +1124,12 @@ class NumpyBP:
                     tqdm.write(
                         f"Tuning parameter might be better replaced by something around {tuning_fac:.3g}."
                     )
-            self.tun_par_heuristic = False
+                # make sure tuning factor isn't too big/small
+                # given init likely not amazing
+                # tuning_fac = min(tuning_fac,20)
+                # tuning_fac = max(5e-2,tuning_fac)
+                if (tuning_fac > 5e-2) and (tuning_fac < 20):
+                    self.tun_par_heuristic = False
 
         log_spatial_msg += self.log_meta_prob
         # if small_deg:
