@@ -991,6 +991,28 @@ class NumpyBP:
                 * self.block_edge_prob.transpose(2, 0, 1)[np.newaxis, ...],
                 axis=(0, -2),
             ).T
+        if self.directed:
+            if self.deg_corr:
+                # self._h = np.einsum(
+                #     "itr,rqt,it->qt",
+                #     self.node_marg,
+                #     self.block_edge_prob,
+                #     self.degs[:, :, 1],
+                # )
+                self._h += np.nansum(
+                    self.node_marg[..., np.newaxis]
+                    * self.block_edge_prob.transpose(2, 1, 0)[np.newaxis, ...]
+                    * self.model.degs[:, :, 1][..., np.newaxis, np.newaxis],
+                    axis=(0, -2),
+                ).T
+            else:
+                # self._h = np.einsum("itr,rqt->qt", self.node_marg, self.block_edge_prob)
+                self._h += np.nansum(
+                    self.node_marg[..., np.newaxis]
+                    * self.block_edge_prob.transpose(2, 1, 0)[np.newaxis, ...],
+                    axis=(0, -2),
+                ).T
+
         # print("h after init:", _h)
 
     # def np_update_h(Q, sign, i, t, degs, deg_corr, block_edge_prob, _h, node_marg):
