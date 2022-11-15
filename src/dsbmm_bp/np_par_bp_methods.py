@@ -1226,10 +1226,12 @@ class NumpyBP:
             # which contains all terms corresponding to messages
             # TO i, from each j
             # NB all_idxs[t]["i_idxs"] designed for
-            i_idxs = self.flat_i_idxs[t]
+            # i_idxs = self.flat_i_idxs[t]
+            j_idxs = self.flat_j_idxs[t]
             inv_idxs = self.all_inv_idxs[t]
+            # now can just use \psi^{j\to i} = \psi^j / field_term(i\to j)
             tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]] = (
-                tmp[i_idxs, t, :]
+                tmp[j_idxs, t, :]
                 + tmp_spatial_msg[self.E_idxs[t] : self.E_idxs[t + 1]][inv_idxs, :]
             )
         log_field_term_max = tmp_spatial_msg.max(axis=1, keepdims=True)
