@@ -636,9 +636,15 @@ class NumpyBP:
                 nz_is = nz_is[unq_cumdeg != 0]
                 unq_cumdeg = unq_cumdeg[unq_cumdeg != 0]
             self.nz_idxs[t] = np.concatenate([[0], unq_cumdeg], dtype=int)
-            self.nz_is[t] = np.concatenate(
+            tmp_nz_is = np.concatenate(
                 [nz_is, [self.N]], dtype=int
-            )  # extend to make same length - now nz_is[t] == i gives posn of i in nz_idxs[t] that itself gives e_idx start posn of i at t
+            )  # extend to make same length - now tmp_nz_is == i gives posn of i in nz_idxs[t] that itself gives e_idx start posn of i at t
+            self.nz_is[t] = {
+                i: np.flatnonzero(tmp_nz_is == i)
+                for i in range(self.N)
+                if self._pres_nodes[i, t]
+            }
+
         self.E_idxs = np.concatenate([[0], self.bin_degs.sum(axis=0).cumsum()])
         self.present_T = np.flatnonzero(
             np.diff(self.E_idxs)
@@ -699,13 +705,13 @@ class NumpyBP:
             try:
                 self.all_inv_idxs[t] = np.array(
                     [
-                        self.nz_idxs[t][self.nz_is[t] == j][0]
+                        self.nz_idxs[t][self.nz_is[t][j]][0]
                         # only using these to index within each timestep, so don't need to place within full _psi_e
                         + np.flatnonzero(
                             just_js[
-                                self.nz_idxs[t][self.nz_is[t] == j][0] : self.nz_idxs[
-                                    t
-                                ][np.flatnonzero(self.nz_is[t] == j)[0] + 1]
+                                self.nz_idxs[t][self.nz_is[t][j]][0] : self.nz_idxs[t][
+                                    self.nz_is[t][j] + 1
+                                ]
                             ]
                             == i
                         )[0]
@@ -716,10 +722,8 @@ class NumpyBP:
             except IndexError:
                 for i, j in zip(just_is, just_js):
                     try:
-                        start = self.nz_idxs[t][self.nz_is[t] == j][0]
-                        stop = self.nz_idxs[t][
-                            np.flatnonzero(self.nz_is[t] == j)[0] + 1
-                        ]
+                        start = self.nz_idxs[t][self.nz_is[t][j]][0]
+                        stop = self.nz_idxs[t][np.flatnonzero(self.nz_is[t][j])[0] + 1]
                         test_i = self.flat_i_idxs[0][start:stop]
                         test_j = just_js[start:stop]
                         test_ij = np.flatnonzero(test_j == i)
@@ -1152,11 +1156,9 @@ class NumpyBP:
                         np.sum(
                             log_spatial_field_terms[
                                 self.E_idxs[t]
-                                + self.nz_idxs[t][self.nz_is[t] == i][0] : self.E_idxs[
-                                    t
-                                ]
+                                + self.nz_idxs[t][self.nz_is[t][i]][0] : self.E_idxs[t]
                                 + self.nz_idxs[t][
-                                    np.flatnonzero(self.nz_is[t] == i)[0] + 1
+                                    np.flatnonzero(self.nz_is[t][i])[0] + 1
                                 ],
                                 :,
                             ],
@@ -1458,11 +1460,9 @@ class NumpyBP:
                         np.sum(
                             log_spatial_field_terms[
                                 self.E_idxs[t]
-                                + self.nz_idxs[t][self.nz_is[t] == i][0] : self.E_idxs[
-                                    t
-                                ]
+                                + self.nz_idxs[t][self.nz_is[t][i]][0] : self.E_idxs[t]
                                 + self.nz_idxs[t][
-                                    np.flatnonzero(self.nz_is[t] == i)[0] + 1
+                                    np.flatnonzero(self.nz_is[t][i])[0] + 1
                                 ],
                                 :,
                             ],
