@@ -74,7 +74,15 @@ class NumpyDSBMM:
         self.N = A[0].shape[0]
         self.E = np.array([A_t.nnz for A_t in self.A])
         self.T = len(A)
-        self._edge_vals = {t: A_t.data for t, A_t in enumerate(self.A)}
+        # can't use below for edge vals as esp in directed
+        # case the edges won't be in same order (and there
+        # won't be same quantity) - instead just take
+        # from bp
+        # TODO: change calc of twopoint marginals in directed
+        # case to only operate over existing edges, as
+        # otherwise perform potentially a large number of
+        # unnecessary calculations
+        # self._edge_vals = {t: A_t.data for t, A_t in enumerate(self.A)}
         self._pres_nodes = np.array(
             np.vstack(
                 [
@@ -615,11 +623,13 @@ class NumpyDSBMM:
                 # lam_num[lam_num < TOL] = TOL
                 # lam_den[lam_den < TOL] = 1.0
         else:
+            if not hasattr(self, "_nz_e"):
+                self._nz_e = {t: self.bp._edge_vals[t] > 0.0 for t in range(self.T)}
             lam_num = np.dstack(
                 [
                     np.nansum(
-                        self.twopoint_edge_marg[t]
-                        * self._edge_vals[t][:, np.newaxis, np.newaxis],
+                        self.twopoint_edge_marg[t][self._nz_e[t]]
+                        * self.bp._edge_vals[t][self._nz_e[t], np.newaxis, np.newaxis],
                         axis=0,
                     )
                     for t in range(self.T)
@@ -741,8 +751,13 @@ class NumpyDSBMM:
                 [np.fill_diagonal(beta_den[:, :, t], diag_vals) for t in range(self.T)]
 
         else:
+            if not hasattr(self, "_nz_e"):
+                self._nz_e = {t: self.bp._edge_vals[t] > 0.0 for t in range(self.T)}
             beta_num = np.dstack(
-                [np.nansum(self.twopoint_edge_marg[t], axis=0) for t in range(self.T)]
+                [
+                    np.nansum(self.twopoint_edge_marg[t][self._nz_e[t], ...], axis=0)
+                    for t in range(self.T)
+                ]
             )
             # enforce uniformity for identifiability
             diag_vals = np.stack(
@@ -1076,3 +1091,6 @@ class NumpyDSBMM:
 
     def unfreeze_meta(self):
         self.unfrozen_meta = True
+
+    def set_bp(self, bp):
+        self.bp = bp

@@ -60,6 +60,8 @@ class NumpyBP:
 
         self.msg_diff = 0.0
 
+        self.model.set_bp(self)
+
     def compute_DC_log_lkl(self):
         # Sort computation for all pres edges simultaneously (in DSBMM),
         # then just pass as matrix rather than computing on fly
@@ -80,6 +82,9 @@ class NumpyBP:
                     self._edge_vals[t], tmp_lam
                 )
         else:
+            # make extra param for the term without the
+            # symmetrising aspect for the twopoint marginals
+            tp_dc_log_lkl = np.zeros((self.E_idxs[-1], self.Q, self.Q))
             for t in range(self.T):
                 # NB deg_prod in same order as msgs,
                 # so can use same trick as for NDC case
@@ -97,11 +102,15 @@ class NumpyBP:
                     ]
                     * self.model._lam[..., t].T[np.newaxis, ...]
                 )
-                dc_log_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = self.dc_pois_log_lkl(
-                    self._edge_vals[t], tmp_lam_out
-                ) + self.dc_pois_log_lkl(
+                tp_dc_log_lkl[
+                    self.E_idxs[t] : self.E_idxs[t + 1]
+                ] = self.dc_pois_log_lkl(self._edge_vals[t], tmp_lam_out)
+                dc_log_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = tp_dc_log_lkl[
+                    self.E_idxs[t] : self.E_idxs[t + 1]
+                ] + self.dc_pois_log_lkl(
                     self._edge_vals[t][self.all_inv_idxs[t]], tmp_lam_in
                 )
+            self._tp_dc_log_lkl = tp_dc_log_lkl
 
         self._dc_log_lkl = dc_log_lkl
 
@@ -1657,10 +1666,16 @@ class NumpyBP:
                 self.twopoint_e_marg[self.E_idxs[t] : self.E_idxs[t + 1]] += tmp
 
         if self.deg_corr:
-            max_dc_log_lkl = self._dc_log_lkl.max(
-                axis=(-2, -1), keepdims=True
-            )  # as will normalise over these, subtract for stability
-            dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
+            if not self.directed:
+                max_dc_log_lkl = self._dc_log_lkl.max(
+                    axis=(-2, -1), keepdims=True
+                )  # as will normalise over these, subtract for stability
+                dc_lkl = np.exp(self._dc_log_lkl - max_dc_log_lkl)
+            else:
+                max_dc_log_lkl = self._tp_dc_log_lkl.max(
+                    axis=(-2, -1), keepdims=True
+                )  # as will normalise over these, subtract for stability
+                dc_lkl = np.exp(self._tp_dc_log_lkl - max_dc_log_lkl)
             if not self.directed:
                 for t in range(self.T):
                     tmp = (
