@@ -66,18 +66,42 @@ class NumpyBP:
         dc_log_lkl = np.zeros((self.E_idxs[-1], self.Q, self.Q))
         # want to take out deg of i * in deg of j at t if a_ijt!=0
         # then multiply by lam_qrt for each edge
-        for t in range(self.T):
-            # np.einsum("e,qr->eqr", self.deg_prod, self._lam[:, :, t])
-            tmp_lam = (
-                self.deg_prod[
-                    self.E_idxs[t] : self.E_idxs[t + 1], np.newaxis, np.newaxis
-                ]
-                * self.model._lam[np.newaxis, :, :, t]
-            )
+        if not self.directed:
+            for t in range(self.T):
+                # np.einsum("e,qr->eqr", self.deg_prod, self._lam[:, :, t])
+                tmp_lam = (
+                    self.deg_prod[
+                        self.E_idxs[t] : self.E_idxs[t + 1], np.newaxis, np.newaxis
+                    ]
+                    * self.model._lam[np.newaxis, :, :, t]
+                )
 
-            dc_log_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = self.dc_pois_log_lkl(
-                self._edge_vals[t], tmp_lam
-            )
+                dc_log_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = self.dc_pois_log_lkl(
+                    self._edge_vals[t], tmp_lam
+                )
+        else:
+            for t in range(self.T):
+                # NB deg_prod in same order as msgs,
+                # so can use same trick as for NDC case
+                # to use inv_idxs to reorder for opposite
+                # direction
+                tmp_lam_out = (
+                    self.deg_prod[
+                        self.E_idxs[t] : self.E_idxs[t + 1], np.newaxis, np.newaxis
+                    ]
+                    * self.model._lam[np.newaxis, :, :, t]
+                )
+                tmp_lam_in = (
+                    self.deg_prod[self.E_idxs[t] : self.E_idxs[t + 1]][
+                        self.all_inv_idxs[t], np.newaxis, np.newaxis
+                    ]
+                    * self.model._lam[..., t].T[np.newaxis, ...]
+                )
+                dc_log_lkl[self.E_idxs[t] : self.E_idxs[t + 1]] = self.dc_pois_log_lkl(
+                    self._edge_vals[t], tmp_lam_out
+                ) + self.dc_pois_log_lkl(
+                    self._edge_vals[t][self.all_inv_idxs[t]], tmp_lam_in
+                )
 
         self._dc_log_lkl = dc_log_lkl
 
@@ -820,7 +844,9 @@ class NumpyBP:
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
 
             if self.deg_corr:
-
+                # Note don't need to separately consider
+                # directed / undirected as already accounted
+                # for in dc_lkl
                 field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
                     self._psi_e[j_idxs, i_idxs].A.reshape(-1, self.Q)[..., np.newaxis]
                     * dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1], ...],
@@ -838,18 +864,20 @@ class NumpyBP:
                     # NB _edge_vals contains all edges j->i in order,
                     # so can use inv_idxs constructed to get edges i->j
                     # in same order
-                    jtoi_edges = self._edge_vals
-                    itoj_edges = self._edge_vals[self.all_inv_idxs[t]]
-                    edgewise_block_terms = np.power(
-                        beta[np.newaxis, ...], jtoi_edges[:, np.newaxis, np.newaxis]
-                    ) * np.power(
-                        beta.T[np.newaxis, ...], itoj_edges[:, np.newaxis, np.newaxis]
-                    )
                     field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
                         self._psi_e[j_idxs, i_idxs].A.reshape(-1, self.Q)[
                             ..., np.newaxis
                         ]
-                        * edgewise_block_terms,
+                        * np.power(
+                            beta[np.newaxis, ...],
+                            self._edge_vals[:, np.newaxis, np.newaxis],
+                        )
+                        * np.power(
+                            beta.T[np.newaxis, ...],
+                            self._edge_vals[
+                                self.all_inv_idxs[t], np.newaxis, np.newaxis
+                            ],
+                        ),
                         axis=-2,
                     )
 
@@ -1010,15 +1038,27 @@ class NumpyBP:
                 #     self.block_edge_prob,
                 #     self.degs[:, :, 1],
                 # )
-                self._h = np.nansum(
-                    self.node_marg[..., np.newaxis]
-                    * (
-                        self.block_edge_prob.transpose(2, 0, 1)[np.newaxis, ...]
-                        + self.block_edge_prob.transpose(2, 1, 0)[np.newaxis, ...]
-                    )
-                    * self.model.degs[:, :, 1][..., np.newaxis, np.newaxis],
-                    axis=(0, -2),
-                ).T
+                # now an extra initial dimension, in same
+                # order to pair with degs, i.e. we have h is
+                # ((in,out),q,t) in that external field term
+                # h_q^{i,t} = exp(_h[q,t,0]*degs[i,t,0]+_h[q,t,1]*degs[i,t,1])
+                self._h = np.stack(
+                    [
+                        np.nansum(
+                            self.node_marg[..., np.newaxis]
+                            * (self.block_edge_prob.transpose(2, 0, 1)[np.newaxis, ...])
+                            * self.model.degs[:, :, 1][..., np.newaxis, np.newaxis],
+                            axis=(0, -2),
+                        ).T,
+                        np.nansum(
+                            self.node_marg[..., np.newaxis]
+                            * (self.block_edge_prob.transpose(2, 1, 0)[np.newaxis, ...])
+                            * self.model.degs[:, :, 0][..., np.newaxis, np.newaxis],
+                            axis=(0, -2),
+                        ).T,
+                    ],
+                    axis=-1,
+                )
             else:
                 # self._h = np.einsum("itr,rqt->qt", self.node_marg, self.block_edge_prob)
                 self._h = np.nansum(
@@ -1125,10 +1165,15 @@ class NumpyBP:
             axis=1,
         )
         if self.deg_corr:
-            log_spatial_msg -= np.einsum(
-                "qt,it->itq", self._h, self.model.degs[:, :, 1]
-            )
+            if not self.directed:
+                log_spatial_msg -= np.einsum(
+                    "qt,it->itq", self._h, self.model.degs[:, :, 1]
+                )
+            else:
+                log_spatial_msg -= np.einsum("qtd,itd->itq", self._h, self.model.degs)
         else:
+            # once again don't need to separately consider
+            # directed/undirected as already handled by h
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
