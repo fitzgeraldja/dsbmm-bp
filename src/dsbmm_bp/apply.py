@@ -491,13 +491,19 @@ if __name__ == "__main__":
         meta_types = [meta_info[mn][0] for mn in meta_names]
         data["meta_types"] = meta_types
         meta_dims = [int(meta_info[mn][1]) for mn in meta_names]
+        all_net_meta_names = set(
+            next(iter(nets[0].nodes.data(default=np.nan)))[1].keys()
+        )
         try:
-            assert set(next(iter(nets[0].nodes.data(default=np.nan)))[1].keys()) == set(
-                meta_names
-            )
+            assert all_net_meta_names == set(meta_names)
         except AssertionError:
             warnings.warn(
-                "Metadata names in meta_dists.pkl do not match those in the networkx graph. Will only use metadata names in meta_dists.pkl."
+                f"""
+                Metadata names in meta_dists.pkl do not match those in the networkx graph.
+                \nWill only use metadata names in meta_dists.pkl:
+                \n{meta_names}
+                \n-- {all_net_meta_names - set(meta_names)} not used.
+                """
             )
         edge_attrs = list(next(iter(nets[0].edges(data=True)))[-1].keys())
         node_order = list(
