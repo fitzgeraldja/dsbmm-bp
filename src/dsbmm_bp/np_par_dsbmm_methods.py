@@ -72,7 +72,6 @@ class NumpyDSBMM:
         self.directed = directed
         self.verbose = verbose
         self.N = A[0].shape[0]
-        self.E = np.array([A_t.nnz for A_t in self.A])
         self.T = len(A)
         # can't use below for edge vals as esp in directed
         # case the edges won't be in same order (and there
@@ -82,6 +81,7 @@ class NumpyDSBMM:
         # case to only operate over existing edges, as
         # otherwise perform potentially a large number of
         # unnecessary calculations
+        # self.E = np.array([A_t.nnz for A_t in self.A])
         # self._edge_vals = {t: A_t.data for t, A_t in enumerate(self.A)}
         self._pres_nodes = np.array(
             np.vstack(
@@ -1094,3 +1094,4 @@ class NumpyDSBMM:
 
     def set_bp(self, bp):
         self.bp = bp
+        self.E = self.bp.bin_degs.sum(axis=0)
