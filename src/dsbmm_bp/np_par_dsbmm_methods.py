@@ -1094,4 +1094,7 @@ class NumpyDSBMM:
 
     def set_bp(self, bp):
         self.bp = bp
+        # NB need to use this rather than A[t].nnz even though only want to
+        # operate over nonzero edges bc of previous method for calc
+        # in undirected case -- should fix in future as stated above
         self.E = self.bp.bin_degs.sum(axis=0)

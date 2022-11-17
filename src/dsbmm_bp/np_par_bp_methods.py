@@ -40,7 +40,6 @@ class NumpyBP:
         self.frozen = self.model.frozen
         self.auto_tune = self.model.auto_tune
         self.A = self.model.A
-        self.n_msgs = self.model.E.sum() + self.N * (self.T - 1) * 2
         self.X = self.model.X
         self.Z = self.model.Z
         self._pres_nodes = self.model._pres_nodes
@@ -52,6 +51,7 @@ class NumpyBP:
         # self._zero_twopoint_e_marg()
         self.node_marg = np.zeros((self.N, self.T, self.Q))
         self.construct_edge_idxs_and_inv()
+        self.n_msgs = self.E_idxs[-1] + self.N * (self.T - 1) * 2
         if not self.frozen:
             self.twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
             self.twopoint_t_marg = np.zeros((self.N, self.T - 1, self.Q, self.Q))
