@@ -502,7 +502,7 @@ if __name__ == "__main__":
                 Metadata names in meta_dists.pkl do not match those in the networkx graph.
                 \nWill only use metadata names in meta_dists.pkl:
                 \n{meta_names}
-                \n-- {all_net_meta_names - set(meta_names)} not used.
+                \n-- {all_net_meta_names - set(meta_names)} present but not used.
                 """
             )
         edge_attrs = list(next(iter(nets[0].edges(data=True)))[-1].keys())
