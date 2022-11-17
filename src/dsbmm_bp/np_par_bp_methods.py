@@ -1479,9 +1479,12 @@ class NumpyBP:
         )
 
         if self.deg_corr:
-            log_spatial_msg -= np.einsum(
-                "qt,it->itq", self._h, self.model.degs[:, :, 1]
-            )
+            if not self.directed:
+                log_spatial_msg -= np.einsum(
+                    "qt,it->itq", self._h, self.model.degs[:, :, 1]
+                )
+            else:
+                log_spatial_msg -= np.einsum("qtd,itd->itq", self._h, self.model.degs)
         else:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
