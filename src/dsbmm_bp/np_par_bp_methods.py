@@ -1204,7 +1204,9 @@ class NumpyBP:
                 tuning_fac = np.divide(
                     log_spatial_msg,
                     self.log_meta_prob,
-                    where=self.log_meta_prob != 0,
+                    where=(~np.isnan(self.log_meta_prob))
+                    & (self.log_meta_prob != np.log(TOL))
+                    & (self.log_meta_prob != 0),
                     out=10 * np.ones_like(log_spatial_msg),
                 ).mean()
 
