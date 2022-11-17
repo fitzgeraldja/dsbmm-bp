@@ -95,8 +95,6 @@ class EM:
                 # NB numpy version takes sparse by default
                 assert np.allclose(self.A, self.A.transpose(1, 0, 2))
             else:
-                # TODO: fix properly - currently just force
-                # symmetrising and binarising
                 if not self.directed:
                     try:
                         if not self.deg_corr:
@@ -371,7 +369,7 @@ class EM:
                 Z=self.init_Z.copy() if set_Z is None else set_Z,
                 Q=self.Q,
                 deg_corr=self.deg_corr,
-                # directed=self.directed,
+                directed=self.directed,
                 meta_types=self.meta_types,
                 tuning_param=tuning_param,
                 verbose=self.verbose,

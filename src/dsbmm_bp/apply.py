@@ -72,6 +72,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--directed",
+    action="store_true",
+    help="Use directed version of chosen model, otherwise will force symmetrise network",
+)
+
+parser.add_argument(
     "--max_trials",
     type=int,
     default=None,
@@ -996,6 +1002,7 @@ if __name__ == "__main__":
                     n_runs=args.n_runs,
                     patience=args.patience,
                     deg_corr=args.deg_corr,
+                    leave_directed=args.directed,
                     verbose=verbose,
                     max_iter=args.max_iter,
                     max_msg_iter=args.max_msg_iter,
@@ -1100,6 +1107,7 @@ if __name__ == "__main__":
                             n_runs=args.n_runs,
                             patience=args.patience,
                             deg_corr=args.deg_corr,
+                            leave_directed=args.directed,
                             verbose=verbose,
                             max_iter=args.max_iter,
                             max_msg_iter=args.max_msg_iter,
