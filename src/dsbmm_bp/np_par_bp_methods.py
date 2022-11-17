@@ -640,7 +640,7 @@ class NumpyBP:
                 [nz_is, [self.N]], dtype=int
             )  # extend to make same length - now tmp_nz_is == i gives posn of i in nz_idxs[t] that itself gives e_idx start posn of i at t
             self.nz_is[t] = {
-                i: np.flatnonzero(tmp_nz_is == i)
+                i: np.flatnonzero(tmp_nz_is == i)[0]
                 for i in range(self.N)
                 if self._pres_nodes[i, t]
             }
