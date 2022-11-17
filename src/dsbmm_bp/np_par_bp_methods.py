@@ -705,11 +705,11 @@ class NumpyBP:
             try:
                 self.all_inv_idxs[t] = np.array(
                     [
-                        self.nz_idxs[t][self.nz_is[t][j]][0]
+                        self.nz_idxs[t][self.nz_is[t][j]]
                         # only using these to index within each timestep, so don't need to place within full _psi_e
                         + np.flatnonzero(
                             just_js[
-                                self.nz_idxs[t][self.nz_is[t][j]][0] : self.nz_idxs[t][
+                                self.nz_idxs[t][self.nz_is[t][j]] : self.nz_idxs[t][
                                     self.nz_is[t][j] + 1
                                 ]
                             ]
@@ -722,8 +722,8 @@ class NumpyBP:
             except IndexError:
                 for i, j in zip(just_is, just_js):
                     try:
-                        start = self.nz_idxs[t][self.nz_is[t][j]][0]
-                        stop = self.nz_idxs[t][np.flatnonzero(self.nz_is[t][j])[0] + 1]
+                        start = self.nz_idxs[t][self.nz_is[t][j]]
+                        stop = self.nz_idxs[t][self.nz_is[t][j] + 1]
                         test_i = self.flat_i_idxs[0][start:stop]
                         test_j = just_js[start:stop]
                         test_ij = np.flatnonzero(test_j == i)
@@ -1156,10 +1156,8 @@ class NumpyBP:
                         np.sum(
                             log_spatial_field_terms[
                                 self.E_idxs[t]
-                                + self.nz_idxs[t][self.nz_is[t][i]][0] : self.E_idxs[t]
-                                + self.nz_idxs[t][
-                                    np.flatnonzero(self.nz_is[t][i])[0] + 1
-                                ],
+                                + self.nz_idxs[t][self.nz_is[t][i]] : self.E_idxs[t]
+                                + self.nz_idxs[t][self.nz_is[t][i] + 1],
                                 :,
                             ],
                             axis=0,
@@ -1460,10 +1458,8 @@ class NumpyBP:
                         np.sum(
                             log_spatial_field_terms[
                                 self.E_idxs[t]
-                                + self.nz_idxs[t][self.nz_is[t][i]][0] : self.E_idxs[t]
-                                + self.nz_idxs[t][
-                                    np.flatnonzero(self.nz_is[t][i])[0] + 1
-                                ],
+                                + self.nz_idxs[t][self.nz_is[t][i]] : self.E_idxs[t]
+                                + self.nz_idxs[t][self.nz_is[t][i] + 1],
                                 :,
                             ],
                             axis=0,
