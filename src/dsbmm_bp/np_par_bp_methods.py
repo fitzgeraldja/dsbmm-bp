@@ -741,16 +741,20 @@ class NumpyBP:
                         raise RuntimeError(
                             "Problem w idxs, likely integer overflow error that should have been caught..."
                         )
+        self._edge_vals = {}
+        for t in range(self.T):
+            just_is = self.flat_i_idxs[t]
+            just_js = self.flat_j_idxs[t]
+            self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
+
         if self.deg_corr:
             self.deg_prod = np.zeros((self.E_idxs[-1],))
-            self._edge_vals = {}
             for t in range(self.T):
                 just_is = self.flat_i_idxs[t]
                 just_js = self.flat_j_idxs[t]
                 self.deg_prod[self.E_idxs[t] : self.E_idxs[t + 1]] = (
                     self.model.degs[just_js, t, 1] * self.model.degs[just_is, t, 0]
                 )
-                self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
 
     def spatial_field_terms(
         self,
