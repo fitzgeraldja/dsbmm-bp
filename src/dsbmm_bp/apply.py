@@ -1105,6 +1105,12 @@ if __name__ == "__main__":
                             else max(N // args.h_min_N, 2),
                             "meta_types": data["meta_types"],
                         }
+                        if np.all([A_t.sum() == 0 for A_t in sub_data["A"]]):
+                            logging.info("No edges in subgraph, skipping...")
+                            tqdm.write("No edges in subgraph, skipping...")
+                            tmp_Z = -1 * np.ones(N, T)
+                            pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
+                            continue
                         model = em.EM(
                             sub_data,
                             sparse_adj=True,

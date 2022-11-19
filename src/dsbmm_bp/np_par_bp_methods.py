@@ -717,8 +717,12 @@ class NumpyBP:
                         )[0]
                         # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
                         for i, j in zip(just_is, just_js)
-                    ]
+                    ],
+                    dtype=int,
                 ).squeeze()
+                if len(self.all_inv_idxs[t].shape) == 0:
+                    # need to handle case of single edge separately
+                    self.all_inv_idxs[t] = np.expand_dims(self.all_inv_idxs[t], 0)
             except IndexError:
                 for i, j in zip(just_is, just_js):
                     try:
@@ -752,6 +756,9 @@ class NumpyBP:
                 self._edge_vals[t] = self.A[t][just_js, just_is].A.squeeze()
             else:
                 self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
+            if len(self._edge_vals[t].shape) == 0:
+                # again issue otherwise if single edge
+                self._edge_vals[t] = np.expand_dims(self._edge_vals[t], 0)
 
         if self.deg_corr:
             self.deg_prod = np.zeros((self.E_idxs[-1],))
@@ -893,11 +900,11 @@ class NumpyBP:
                         ]
                         * np.power(
                             beta[np.newaxis, ...],
-                            self._edge_vals[:, np.newaxis, np.newaxis],
+                            self._edge_vals[t][:, np.newaxis, np.newaxis],
                         )
                         * np.power(
                             beta.T[np.newaxis, ...],
-                            self._edge_vals[
+                            self._edge_vals[t][
                                 self.all_inv_idxs[t], np.newaxis, np.newaxis
                             ],
                         ),
