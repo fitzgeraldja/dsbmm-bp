@@ -745,7 +745,13 @@ class NumpyBP:
         for t in range(self.T):
             just_is = self.flat_i_idxs[t]
             just_js = self.flat_j_idxs[t]
-            self._edge_vals[t] = self.A[t][just_js, just_is].A.squeeze()
+            if hasattr(self.A[t][just_js, just_is], "A"):
+                # for v large nets seems that networkx doesn't use scipy
+                # sparse matrices, which makes sense as idxs too long for int32
+                # default
+                self._edge_vals[t] = self.A[t][just_js, just_is].A.squeeze()
+            else:
+                self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
 
         if self.deg_corr:
             self.deg_prod = np.zeros((self.E_idxs[-1],))
