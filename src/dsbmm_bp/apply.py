@@ -1189,8 +1189,10 @@ if __name__ == "__main__":
                 ) as f:
                     pickle.dump(pred_Z, f)
             else:
+                datetime_str = time.strftime("%d-%m_%H-%M", time.gmtime(time.time()))
                 with open(
-                    RESULTS_DIR / f"{testset_name}_Z{'_h' if args.h_l else ''}.pkl",
+                    RESULTS_DIR
+                    / f"{testset_name}_Z{'_h' if args.h_l else ''}_{datetime_str}.pkl",
                     "wb",
                 ) as f:
                     pickle.dump(pred_Z, f)
