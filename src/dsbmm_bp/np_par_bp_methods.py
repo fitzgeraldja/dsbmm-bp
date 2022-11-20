@@ -256,6 +256,22 @@ class NumpyBP:
             ## INIT MARGINALS ##
             one_hot_Z = self.onehot_initialization(self.Z)  # in shape N x T x Q
             one_hot_Z[~self._pres_nodes] = 0.0
+            if one_hot_Z.shape[-1] != self.Q:
+                try:
+                    assert self.Q > one_hot_Z.shape[-1]
+                except AssertionError:
+                    raise ValueError(
+                        "If specifying Q and passing init Z, no. groups in Z must be <= Q"
+                    )
+                # handle case where planted partition has fewer groups than Q
+                diff = int(self.Q - one_hot_Z.shape[-1])
+                one_hot_Z = np.pad(
+                    one_hot_Z,
+                    ((0, 0), (0, 0), (0, diff)),
+                    mode="constant",
+                    constant_values=0,
+                )
+
             marg_noise = np.random.rand(self.N, self.T, self.Q)
             marg_noise /= marg_noise.sum(axis=-1, keepdims=True)
             self.node_marg = p * one_hot_Z + (1 - p) * marg_noise
@@ -395,6 +411,12 @@ class NumpyBP:
             ## INIT MARGINALS ##
             one_hot_Z = self.X[0]  # in shape N x T x D_s
             if one_hot_Z.shape[-1] != self.Q:
+                try:
+                    assert self.Q > one_hot_Z.shape[-1]
+                except AssertionError:
+                    raise ValueError(
+                        "If specifying Q and passing meta Z, no. groups in Z must be <= Q"
+                    )
                 one_hot_Z = np.pad(
                     one_hot_Z,
                     pad_width=((0, 0), (0, 0), (0, self.Q - one_hot_Z.shape[-1])),
