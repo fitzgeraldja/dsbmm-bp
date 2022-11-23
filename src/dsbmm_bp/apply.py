@@ -317,7 +317,7 @@ if __name__ == "__main__":
                         for i, sample in enumerate(samples):
                             print(f"...converting sample {i+1} to sparse format")
                             sample["A"] = [
-                                sparse.csr_matrix(sample["A"][:, :, t])
+                                sparse.csr_array(sample["A"][:, :, t])
                                 for t in range(params["T"])
                             ]
                         print("...done")
@@ -332,7 +332,7 @@ if __name__ == "__main__":
                 for i, sample in enumerate(samples):
                     print(f"...converting sample {i+1} to sparse format")
                     sample["A"] = [
-                        sparse.csr_matrix(sample["A"][:, :, t])
+                        sparse.csr_array(sample["A"][:, :, t])
                         for t in range(params["T"])
                     ]
                 print("...done")
@@ -421,7 +421,7 @@ if __name__ == "__main__":
         link_choice = args.scopus_link_choice
         if link_choice == "au":
             with open(DATA_PATH / "col_A.pkl", "rb") as f:
-                data["A"] = [sparse.csr_matrix(A) for A in pickle.load(f)]
+                data["A"] = [sparse.csr_array(A) for A in pickle.load(f)]
             with open(DATA_PATH / "col_ages.pkl", "rb") as f:
                 # given as full time series so only take 4 most recent as done
                 # for A
@@ -432,7 +432,7 @@ if __name__ == "__main__":
                 data["X_subjs"] = pickle.load(f)[-4:].transpose(1, 0, 2)
         elif link_choice == "ref":
             with open(DATA_PATH / "col_ref_A.pkl", "rb") as f:
-                data["A"] = [sparse.csr_matrix(A) for A in pickle.load(f)]
+                data["A"] = [sparse.csr_array(A) for A in pickle.load(f)]
             with open(DATA_PATH / "col_ref_ages.pkl", "rb") as f:
                 # given as full time series so only take 4 most recent as done
                 # for A

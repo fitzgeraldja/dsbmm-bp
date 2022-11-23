@@ -141,9 +141,9 @@ class NumpyBP:
         # Assume passing A already as T length list of
         # sparse matrices
         sym_A = [((self.A[t] + self.A[t].T) != 0) * 1.0 for t in range(self.T)]
-        self._psi_e = sparse.vstack(
-            [sparse.csr_matrix(sym_A[t]) for t in range(self.T) for _ in range(self.Q)]
-        )
+        self._psi_e = sparse.csr_array(
+            sparse.vstack([sym_A[t] for t in range(self.T) for _ in range(self.Q)])
+        )  # need to wrap in csr_array else vstack will return csr_matrix
         if self.N > 1000:
             print(f"{len(self._psi_e.data)} messages in full system")
         if mode == "random":
@@ -179,7 +179,7 @@ class NumpyBP:
             )
             # sums = sparse.vstack(
             #     [
-            #         sparse.csr_matrix(
+            #         sparse.csr_array(
             #             self._psi_e[
             #                 np.arange(self.N * self.T * self.Q)
             #                 .reshape(self.T, self.Q, self.N)[t]
@@ -279,7 +279,7 @@ class NumpyBP:
             self.node_marg[~self._pres_nodes] = 0.0
 
             ## INIT MESSAGES ##
-            tmp = sparse.csr_matrix(
+            tmp = sparse.csr_array(
                 (self._psi_e.data, self._psi_e.indices, self._psi_e.indptr),
                 shape=self._psi_e.shape,
             )
@@ -336,7 +336,7 @@ class NumpyBP:
             # else:
             # sums = sparse.vstack(
             #     [
-            #         sparse.csr_matrix(
+            #         sparse.csr_array(
             #             self._psi_e[
             #                 np.arange(self.N * self.T * self.Q)
             #                 .reshape(self.T, self.Q, self.N)[t]
@@ -370,7 +370,7 @@ class NumpyBP:
             # else:
             #     sums = sparse.vstack(
             #         [
-            #             sparse.csr_matrix(
+            #             sparse.csr_array(
             #                 self._psi_e[
             #                     np.arange(self.N * self.T * self.Q)
             #                     .reshape(self.T, self.Q, self.N)[t]
@@ -431,7 +431,7 @@ class NumpyBP:
             self.node_marg[~self._pres_nodes] = 0.0
 
             ## INIT MESSAGES ##
-            tmp = sparse.csr_matrix(
+            tmp = sparse.csr_array(
                 (self._psi_e.data, self._psi_e.indices, self._psi_e.indptr),
                 shape=self._psi_e.shape,
             )
@@ -488,7 +488,7 @@ class NumpyBP:
             # else:
             # sums = sparse.vstack(
             #     [
-            #         sparse.csr_matrix(
+            #         sparse.csr_array(
             #             self._psi_e[
             #                 np.arange(self.N * self.T * self.Q)
             #                 .reshape(self.T, self.Q, self.N)[t]
@@ -522,7 +522,7 @@ class NumpyBP:
             # else:
             #     sums = sparse.vstack(
             #         [
-            #             sparse.csr_matrix(
+            #             sparse.csr_array(
             #                 self._psi_e[
             #                     np.arange(self.N * self.T * self.Q)
             #                     .reshape(self.T, self.Q, self.N)[t]
@@ -771,11 +771,11 @@ class NumpyBP:
         for t in range(self.T):
             just_is = self.flat_i_idxs[t]
             just_js = self.flat_j_idxs[t]
-            if hasattr(self.A[t][just_js, just_is], "A"):
+            if hasattr(self.A[t][just_js, just_is], "toarray"):
                 # for v large nets seems that networkx doesn't use scipy
                 # sparse matrices, which makes sense as idxs too long for int32
                 # default
-                self._edge_vals[t] = self.A[t][just_js, just_is].A.squeeze()
+                self._edge_vals[t] = self.A[t][just_js, just_is].toarray().squeeze()
             else:
                 self._edge_vals[t] = self.A[t][just_js, just_is].squeeze()
             if len(self._edge_vals[t].shape) == 0:
@@ -846,7 +846,7 @@ class NumpyBP:
             #     print(dc_lkl.max(axis=-1))
             #     raise RuntimeError("Problem w DC lkl term pre sym")
             if not self.directed:
-                for t in range(self.T):
+                for t in self.present_T:
                     tmp = (
                         dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1]]
                         .transpose(0, 2, 1)
@@ -884,7 +884,7 @@ class NumpyBP:
             #     print(max_dc_log_lkl[dc_lkl.sum(axis=-2, keepdims=True) == 0])
             #     print(dc_lkl.max(axis=-1))
             #     raise RuntimeError("Problem w DC lkl term post sym")
-        for t in range(self.T):
+        for t in self.present_T:
             beta = self.block_edge_prob[:, :, t]
             # msg_idxs[nz_idxs[i,t]:nz_idxs[i+1,t],:]+Q*N*t would give idxs of j in psi_e which connect to i at t, i.e. exactly what we want
             # so now just need to match multiplicities of msgs to in degree of i, multiplied by Q (as msgs for each q)
@@ -899,11 +899,14 @@ class NumpyBP:
                 # Note don't need to separately consider
                 # directed / undirected as already accounted
                 # for in dc_lkl
+                # now using csr_array this will return a dense array unless
+                # no elements, which shouldn't happent now only iterating over
+                # present T
                 field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
-                    self._psi_e[j_idxs, i_idxs].A.reshape(-1, self.Q)[..., np.newaxis]
+                    self._psi_e[j_idxs, i_idxs].reshape(-1, self.Q)[..., np.newaxis]
                     * dc_lkl[self.E_idxs[t] : self.E_idxs[t + 1], ...],
                     axis=-2,
-                )  # NB .A now necessary to convert from matrix to array, as first constructing 3D array before summing
+                )
                 # for q in range(Q):
                 #     for r in range(Q):
                 #         tmp[q] += dc_lkl[e_nbrs_inv[nbr_idx], r, q] * jtoi_msgs[r]
@@ -917,9 +920,7 @@ class NumpyBP:
                     # so can use inv_idxs constructed to get edges i->j
                     # in same order
                     field_terms[self.E_idxs[t] : self.E_idxs[t + 1], :] = np.nansum(
-                        self._psi_e[j_idxs, i_idxs].A.reshape(-1, self.Q)[
-                            ..., np.newaxis
-                        ]
+                        self._psi_e[j_idxs, i_idxs].reshape(-1, self.Q)[..., np.newaxis]
                         * np.power(
                             beta[np.newaxis, ...],
                             self._edge_vals[t][:, np.newaxis, np.newaxis],
@@ -1249,6 +1250,22 @@ class NumpyBP:
                     out=10 * np.ones_like(log_spatial_msg),
                 ).mean()
 
+                # make sure tuning factor isn't too big/small
+                # given init likely not amazing
+                # tuning_fac = min(tuning_fac,20)
+                # tuning_fac = max(5e-2,tuning_fac)
+                # TODO: consider when if ever we should stop tuning param autotuning, and/or threshold tuning param
+                # if (tuning_fac > 5e-2) and (tuning_fac < 20):
+                #     # if reasonable then fix to this
+                #     self.tun_par_heuristic = False
+                # else:
+                #     if self.auto_tune:
+                #         # only threshold if going to actually use, else still useful
+                #         # for some indication of lkl diffs between spatial and meta
+                #         if tuning_fac < 1e-3:
+                #             tuning_fac = 1e-3
+                #         elif tuning_fac > 1e3:
+                #             tuning_fac = 1e3
                 if self.auto_tune:
                     tqdm.write(
                         f"Automatically changing tuning parameter to {tuning_fac:.3g}."
@@ -1258,12 +1275,6 @@ class NumpyBP:
                     tqdm.write(
                         f"Tuning parameter might be better replaced by something around {tuning_fac:.3g}."
                     )
-                # make sure tuning factor isn't too big/small
-                # given init likely not amazing
-                # tuning_fac = min(tuning_fac,20)
-                # tuning_fac = max(5e-2,tuning_fac)
-                if (tuning_fac > 5e-2) and (tuning_fac < 20):
-                    self.tun_par_heuristic = False
 
         log_spatial_msg += self.log_meta_prob
         # if small_deg:
@@ -1573,7 +1584,7 @@ class NumpyBP:
 
         # calc twopoint marg terms
         unnorm_twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
-        for t in range(self.T):
+        for t in self.present_T:
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
             inv_idxs = self.all_inv_idxs[t]
             jtoi_msgs = self._psi_e[j_idxs, i_idxs].reshape(-1, self.Q)
@@ -1687,7 +1698,7 @@ class NumpyBP:
 
     def update_twopoint_spatial_marg(self):
         self.twopoint_e_marg = np.zeros((self.E_idxs[-1], self.Q, self.Q))
-        for t in range(self.T):
+        for t in self.present_T:
             i_idxs, j_idxs = self.all_idxs[t]["i_idxs"], self.all_idxs[t]["j_idxs"]
             inv_idxs = self.all_inv_idxs[t]
             jtoi_msgs = self._psi_e[j_idxs, i_idxs].reshape(-1, self.Q)

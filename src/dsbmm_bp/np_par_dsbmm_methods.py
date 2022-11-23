@@ -46,7 +46,7 @@ class NumpyDSBMM:
         """Initialise the class
 
         Args:
-            A (list[scipy.sparse.csr_matrix], optional): (Sparse) adjacency matrices at each timestep,
+            A (list[scipy.sparse.csr_array], optional): (Sparse) adjacency matrices at each timestep,
                                                          each shape N x N. Defaults to None.
             X (list[np.ndarray], optional): Metadata, each entry shape N x T x Ds. Defaults to None.
             Z (np.ndarray, optional): Initial clustering, shape N x T. Defaults to None.
