@@ -546,6 +546,131 @@ def save_node_probs(testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=Non
         pickle.dump(node_probs, f)
 
 
+def save_test_results(
+    testset_name,
+    test_aris,
+    test_times,
+    init_times,
+    test_Z,
+    test_no,
+    samp_no,
+    model,
+    tp_str,
+    use_numba=False,
+):
+    if testset_name == "align":
+        if use_numba:
+            test_Z[test_no, samp_no, :, :] = model.bp.model.jit_model.Z
+            with open(  # type: ignore
+                f"../../results/{testset_name}_test_Z{tp_str}.pkl",
+                "wb",
+            ) as f:
+                pickle.dump(test_Z, f)
+        else:
+            test_Z[test_no, samp_no, :, :] = model.bp.model.Z
+            with open(  # type: ignore
+                f"../../results/{testset_name}_test_Z{tp_str}.pkl",
+                "wb",
+            ) as f:
+                pickle.dump(test_Z, f)
+    with open(  # type: ignore
+        f"../../results/{testset_name}_test_aris{tp_str}.pkl",
+        "wb",
+    ) as f:
+        pickle.dump(test_aris, f)
+    with open(  # type: ignore
+        f"../../results/{testset_name}_test_times{tp_str}.pkl",
+        "wb",
+    ) as f:
+        pickle.dump(test_times, f)
+    with open(  # type: ignore
+        f"../../results/{testset_name}_init_times{tp_str}.pkl",
+        "wb",
+    ) as f:
+        pickle.dump(init_times, f)
+
+
+def show_true_vs_effective_params(
+    model,
+    params,
+    sample,
+    true_Z,
+    use_numba=False,
+):
+    ## Show transition matrix inferred
+    tqdm.write(f"Pi inferred: {model.bp.trans_prob}")
+    try:
+        tqdm.write(f"Versus true pi: {params['trans_mat']}")
+    except Exception:  # KeyError:
+        tqdm.write(
+            f"Versus true pi: {simulation.gen_trans_mat(sample['p_stay'], sample['Q'])}"
+        )
+    print(f"True effective pi: {utils.effective_pi(true_Z)}")
+    if use_numba:
+        print(
+            "Effective pi from partition inferred:",
+            utils.effective_pi(model.bp.model.jit_model.Z),
+        )
+        print(
+            "True effective beta:",
+            utils.effective_beta(model.bp.model.jit_model.A, true_Z).transpose(2, 0, 1),
+        )
+        print(
+            "Pred effective beta:",
+            utils.effective_beta(
+                model.bp.model.jit_model.A,
+                model.bp.model.jit_model.Z,
+            ).transpose(2, 0, 1),
+        )
+    else:
+        tqdm.write(
+            f"Effective pi from partition inferred: {utils.effective_pi(model.bp.model.Z)}"
+        )
+        tqdm.write(
+            f"True effective beta: {utils.effective_beta(model.bp.model.A, true_Z).transpose(2, 0, 1)}"
+        )
+        tqdm.write(
+            f"Pred effective beta: {utils.effective_beta(model.bp.model.A,model.bp.model.Z,).transpose(2, 0, 1)}"
+        )
+
+
+def update_test_scores(verbose, test_aris, test_no, samp_no, true_Z, model):
+    try:
+        test_aris[test_no, samp_no, :] = 0.0  # type: ignore
+        tqdm.write("BP Z ARI:")
+        test_aris[test_no, samp_no, :] = model.ari_score(true_Z)  # type: ignore
+        if not verbose:
+            tqdm.write(f"{np.round_(test_aris[test_no, samp_no, :], 3)}")  # type: ignore
+        tqdm.write("BP max energy Z ARI:")
+        max_en_aris = model.ari_score(true_Z, pred_Z=model.max_energy_Z)  # type: ignore
+        if not verbose:
+            tqdm.write(f"{np.round_(max_en_aris, 3)}")  # type: ignore
+        tqdm.write("Init Z ARI:")
+        if verbose:
+            model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
+        else:
+            tqdm.write(
+                f"{np.round_(model.ari_score(true_Z, pred_Z=model.k_means_init_Z),3)}"
+            )
+    except Exception:  # IndexError:
+        tqdm.write("BP Z ARI:")
+        test_aris[test_no][samp_no, :] = model.ari_score(true_Z)
+        if not verbose:
+            tqdm.write(f"{np.round_(test_aris[test_no][samp_no, :], 3)}")
+        tqdm.write("BP max energy Z ARI:")
+        max_en_aris = model.ari_score(true_Z, pred_Z=model.max_energy_Z)  # type: ignore
+        if not verbose:
+            tqdm.write(f"{np.round_(max_en_aris, 3)}")
+        tqdm.write("Init Z ARI:")
+        if verbose:
+            model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
+        else:
+            tqdm.write(
+                f"{np.round_(model.ari_score(true_Z, pred_Z=model.k_means_init_Z),3)}"
+            )
+    return test_aris, max_en_aris
+
+
 if __name__ == "__main__":
     if not os.path.exists("../../results/mlruns"):
         os.mkdir("../../results/mlruns")
@@ -805,6 +930,19 @@ if __name__ == "__main__":
                     test_params["T"],
                 )
             )
+        test_model_settings = dict(
+            verbose=verbose,
+            n_runs=args.n_runs,
+            patience=args.patience,
+            max_iter=args.max_iter,
+            max_msg_iter=args.max_msg_iter,
+            use_numba=args.use_numba,
+            tuning_param=args.tuning_param if args.tuning_param is not None else 1.0,
+            alpha_use_all=not args.alpha_use_first,
+            non_informative_init=not args.partial_informative_dsbmm_init,
+            planted_p=args.planted_p,
+            auto_tune=args.auto_tune,
+        )
         for test_no, (samples, params) in enumerate(
             zip(tqdm(all_samples, desc="Test no."), params_set)
         ):
@@ -845,60 +983,16 @@ if __name__ == "__main__":
                     ## Initialise model
                     true_Z = sample.pop("Z")
                     ## Initialise
+
                     if testset_name not in ["scaling", "align"]:
-                        model = em.EM(
-                            sample,
-                            verbose=verbose,
-                            n_runs=args.n_runs,
-                            patience=args.patience,
-                            max_iter=args.max_iter,
-                            max_msg_iter=args.max_msg_iter,
-                            use_numba=args.use_numba,
-                            tuning_param=args.tuning_param
-                            if args.tuning_param is not None
-                            else 1.0,
-                            alpha_use_all=not args.alpha_use_first,
-                            non_informative_init=not args.partial_informative_dsbmm_init,
-                            planted_p=args.planted_p,
-                            auto_tune=args.auto_tune,
-                        )
+                        model = em.EM(sample, **test_model_settings)
                     elif testset_name == "align":
                         tqdm.write(f"alignment = {params['meta_aligned']}")
-                        model = em.EM(
-                            sample,
-                            verbose=verbose,
-                            n_runs=args.n_runs,
-                            patience=args.patience,
-                            max_iter=args.max_iter,
-                            max_msg_iter=args.max_msg_iter,
-                            use_numba=args.use_numba,
-                            tuning_param=args.tuning_param,
-                            alpha_use_all=not args.alpha_use_first,
-                            non_informative_init=not args.partial_informative_dsbmm_init,
-                            planted_p=args.planted_p,
-                            auto_tune=args.auto_tune,
-                        )
+                        model = em.EM(sample, **test_model_settings)
                     else:
                         # scaling tests
                         tqdm.write(f"N = {params['N']}")
-                        model = em.EM(
-                            sample,
-                            sparse_adj=True,
-                            try_parallel=try_parallel,
-                            verbose=verbose,
-                            n_runs=args.n_runs,
-                            patience=args.patience,
-                            max_iter=args.max_iter,
-                            max_msg_iter=args.max_msg_iter,
-                            use_numba=args.use_numba,
-                            tuning_param=args.tuning_param
-                            if args.tuning_param is not None
-                            else 1.0,
-                            alpha_use_all=not args.alpha_use_first,
-                            non_informative_init=not args.partial_informative_dsbmm_init,
-                            planted_p=args.planted_p,
-                            auto_tune=args.auto_tune,
-                        )
+                        model = em.EM(sample, **test_model_settings)
                     if samp_no > 0:
                         init_times[test_no, samp_no - 1] = time.time() - start_time
                     ## Score from K means
@@ -932,85 +1026,24 @@ if __name__ == "__main__":
                                 "pi": pi,
                                 "meta_params": meta_params,
                             }
-
                         model.dsbmm.set_params(true_params, freeze=True)
+
                     ## Fit to given data
                     model.fit(learning_rate=args.learning_rate)
                     ## Score after fit
-                    try:
-                        test_aris[test_no, samp_no, :] = 0.0  # type: ignore
-                        tqdm.write("BP Z ARI:")
-                        test_aris[test_no, samp_no, :] = model.ari_score(true_Z)  # type: ignore
-                        if not verbose:
-                            tqdm.write(f"{np.round_(test_aris[test_no, samp_no, :], 3)}")  # type: ignore
-                        tqdm.write("BP max energy Z ARI:")
-                        max_en_aris = model.ari_score(true_Z, pred_Z=model.max_energy_Z)  # type: ignore
-                        if not verbose:
-                            tqdm.write(f"{np.round_(max_en_aris, 3)}")  # type: ignore
-                        tqdm.write("Init Z ARI:")
-                        if verbose:
-                            model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
-                        else:
-                            tqdm.write(
-                                f"{np.round_(model.ari_score(true_Z, pred_Z=model.k_means_init_Z),3)}"
-                            )
-                    except Exception:  # IndexError:
-                        tqdm.write("BP Z ARI:")
-                        test_aris[test_no][samp_no, :] = model.ari_score(true_Z)
-                        if not verbose:
-                            tqdm.write(
-                                f"{np.round_(test_aris[test_no][samp_no, :], 3)}"
-                            )
-                        tqdm.write("BP max energy Z ARI:")
-                        max_en_aris = model.ari_score(true_Z, pred_Z=model.max_energy_Z)  # type: ignore
-                        if not verbose:
-                            tqdm.write(f"{np.round_(max_en_aris, 3)}")
-                        tqdm.write("Init Z ARI:")
-                        if verbose:
-                            model.ari_score(true_Z, pred_Z=model.k_means_init_Z)
-                        else:
-                            tqdm.write(
-                                f"{np.round_(model.ari_score(true_Z, pred_Z=model.k_means_init_Z),3)}"
-                            )
+                    test_aris, max_en_aris = update_test_scores(
+                        verbose, test_aris, test_no, samp_no, true_Z, model
+                    )
                     # print("Z inferred:", model.bp.model.jit_model.Z)
                     if verbose:
-                        ## Show transition matrix inferred
-                        tqdm.write(f"Pi inferred: {model.bp.trans_prob}")
-                        try:
-                            tqdm.write(f"Versus true pi: {params['trans_mat']}")
-                        except Exception:  # KeyError:
-                            tqdm.write(
-                                f"Versus true pi: {simulation.gen_trans_mat(sample['p_stay'], sample['Q'])}"
-                            )
-                        print(f"True effective pi: {utils.effective_pi(true_Z)}")
-                        if args.use_numba:
-                            print(
-                                "Effective pi from partition inferred:",
-                                utils.effective_pi(model.bp.model.jit_model.Z),
-                            )
-                            print(
-                                "True effective beta:",
-                                utils.effective_beta(
-                                    model.bp.model.jit_model.A, true_Z
-                                ).transpose(2, 0, 1),
-                            )
-                            print(
-                                "Pred effective beta:",
-                                utils.effective_beta(
-                                    model.bp.model.jit_model.A,
-                                    model.bp.model.jit_model.Z,
-                                ).transpose(2, 0, 1),
-                            )
-                        else:
-                            tqdm.write(
-                                f"Effective pi from partition inferred: {utils.effective_pi(model.bp.model.Z)}"
-                            )
-                            tqdm.write(
-                                f"True effective beta: {utils.effective_beta(model.bp.model.A, true_Z).transpose(2, 0, 1)}"
-                            )
-                            tqdm.write(
-                                f"Pred effective beta: {utils.effective_beta(model.bp.model.A,model.bp.model.Z,).transpose(2, 0, 1)}"
-                            )
+                        show_true_vs_effective_params(
+                            model,
+                            params,
+                            sample,
+                            true_Z,
+                            use_numba=args.use_numba,
+                        )
+
                     if samp_no > 0:
                         test_times[test_no, samp_no - 1] = time.time() - start_time
                     if args.use_numba:
@@ -1022,36 +1055,18 @@ if __name__ == "__main__":
                         if args.tuning_param is not None
                         else ""
                     )
-                    if testset_name == "align":
-                        if args.use_numba:
-                            test_Z[test_no, samp_no, :, :] = model.bp.model.jit_model.Z
-                            with open(  # type: ignore
-                                f"../../results/{testset_name}_test_Z{tp_str}.pkl",
-                                "wb",
-                            ) as f:
-                                pickle.dump(test_Z, f)
-                        else:
-                            test_Z[test_no, samp_no, :, :] = model.bp.model.Z
-                            with open(  # type: ignore
-                                f"../../results/{testset_name}_test_Z{tp_str}.pkl",
-                                "wb",
-                            ) as f:
-                                pickle.dump(test_Z, f)
-                    with open(  # type: ignore
-                        f"../../results/{testset_name}_test_aris{tp_str}.pkl",
-                        "wb",
-                    ) as f:
-                        pickle.dump(test_aris, f)
-                    with open(  # type: ignore
-                        f"../../results/{testset_name}_test_times{tp_str}.pkl",
-                        "wb",
-                    ) as f:
-                        pickle.dump(test_times, f)
-                    with open(  # type: ignore
-                        f"../../results/{testset_name}_init_times{tp_str}.pkl",
-                        "wb",
-                    ) as f:
-                        pickle.dump(init_times, f)
+                    save_test_results(
+                        testset_name,
+                        test_aris,
+                        test_times,
+                        init_times,
+                        test_Z,
+                        test_no,
+                        samp_no,
+                        model,
+                        tp_str,
+                        use_numba=args.use_numba,
+                    )
             # TODO: finish MLflow logging
             # Use mlflow.set_tag to mark runs that miss
             # reasonable accuracy
@@ -1078,6 +1093,7 @@ if __name__ == "__main__":
         print("Mean times for each test:")
         print(test_times.mean(axis=1))
     else:
+        # empirical data block
         T = len(data["A"])
         N = data["A"][0].shape[0]
         pred_Z = init_pred_Z(
