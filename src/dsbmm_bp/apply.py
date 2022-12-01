@@ -9,6 +9,7 @@ from functools import reduce
 from pathlib import Path
 
 import csr
+import data_processor
 import em
 import mlflow
 import networkx as nx
@@ -224,6 +225,327 @@ if args.n_threads is not None:
 
     set_num_threads(args.n_threads)
 
+
+def init_pred_Z(N, T, ret_best_only=False, h_l=None, max_trials=None, n_runs=1):
+    if ret_best_only:
+        if h_l is None:
+            pred_Z = np.zeros((N, T))
+        else:
+            pred_Z = np.zeros((h_l, N, T))
+    else:
+        if args.h_l is None:
+            pred_Z = np.zeros((max_trials, N, T))
+        else:
+            pred_Z = np.zeros((n_runs, h_l, N, T))
+    return pred_Z
+
+
+def init_trial_Qs(
+    min_Q=None,
+    max_Q=None,
+    max_trials=None,
+    h_l=None,
+    num_groups=None,
+    h_Q=None,
+    h_min_N=None,
+    n_runs=1,
+):
+    if min_Q is not None or max_Q is not None or max_trials is not None:
+        try:
+            assert h_l is None
+        except AssertionError:
+            raise NotImplementedError(
+                "Hierarchical search over range of Q at each level currently not supported"
+            )
+        try:
+            assert min_Q is not None
+            assert max_Q is not None
+            assert max_trials is not None
+        except AssertionError:
+            raise ValueError(
+                "If specifying search for Q, must specify all of --min_Q, --max_Q, and --max_trials"
+            )
+        trial_Qs = np.linspace(min_Q, max_Q, max_trials, dtype=int)
+    else:
+        if h_l is None:
+            trial_Qs = [num_groups]
+        else:
+            trial_Qs = [h_Q if h_Q < N / h_min_N else N // h_min_N] * n_runs
+            try:
+                assert trial_Qs[0] > 0
+            except AssertionError:
+                raise ValueError(
+                    "Minimum number of nodes to consider at each level of hierarchy must be less than total number of nodes."
+                )
+    return trial_Qs
+
+
+def prepare_for_run(
+    data,
+    DATA_DIR,
+    trial_Qs,
+    h_l=None,
+):
+    data["Q"] = trial_Qs[0]
+
+    tqdm.write("*" * 15, "Running empirical data", "*" * 15)
+    ## Initialise
+    file_handler = logging.FileHandler(filename="./empirical_dsbmm.log")
+    stdout_handler = logging.StreamHandler(stream=sys.stdout)
+    handlers = [file_handler, stdout_handler]
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(message)s", handlers=handlers  # type: ignore
+    )
+    if h_l is None:
+        hierarchy_layers = [0]
+    else:
+        hierarchy_layers = np.arange(h_l)
+
+    RESULTS_DIR = DATA_DIR / "results"
+    RESULTS_DIR.mkdir(exist_ok=True)
+    return hierarchy_layers, RESULTS_DIR
+
+
+def run_hier_model(
+    testset_name,
+    data,
+    N,
+    T,
+    pred_Z,
+    trial_Qs,
+    hierarchy_layers,
+    RESULTS_DIR,
+    verbose=False,
+    link_choice=None,
+    h_l=None,
+    h_Q=None,
+    h_min_N=None,
+    ret_best_only=False,
+    tuning_param=1.0,
+    learning_rate=0.2,
+    n_runs=1,
+    patience=3,
+    deg_corr=False,
+    directed=False,
+    max_iter=100,
+    max_msg_iter=30,
+    ignore_meta=False,
+    alpha_use_first=False,
+    partial_informative_dsbmm_init=False,
+    planted_p=0.7,
+    auto_tune=True,
+    use_numba=False,
+    try_parallel=False,
+    save_probs=False,
+):
+    model_settings = dict(
+        sparse_adj=True,
+        try_parallel=try_parallel,
+        tuning_param=tuning_param,
+        n_runs=n_runs,
+        patience=patience,
+        deg_corr=deg_corr,
+        leave_directed=directed,
+        verbose=verbose,
+        max_iter=max_iter,
+        max_msg_iter=max_msg_iter,
+        use_meta=not ignore_meta,
+        use_numba=use_numba,
+        trial_Qs=trial_Qs,
+        alpha_use_all=not alpha_use_first,
+        non_informative_init=not partial_informative_dsbmm_init,
+        planted_p=planted_p,
+        auto_tune=auto_tune,
+        ret_probs=save_probs,
+    )
+    if save_probs:
+        if h_l is not None:
+            if len(pred_Z.shape) == 3:
+                node_probs = np.zeros((N, T, np.power(h_Q, h_l, dtype=int)))
+            else:
+                node_probs = np.zeros(
+                    (pred_Z.shape[0], N, T, np.power(h_Q, h_l, dtype=int))
+                )
+        else:
+            # TODO: allow ret probs for non-hier model
+            node_probs = [np.zeros(N, T, q) for q in trial_Qs]
+    for layer in tqdm(hierarchy_layers, desc="Hier. lvl"):
+        if h_l is not None:
+            logging.info(f"{'%'*15} At hierarchy level {layer+1}/{h_l} {'%'*15}")
+        if layer == 0:
+            model = em.EM(data, **model_settings)
+            fit_model_allow_interrupt(learning_rate, model)
+            if ret_best_only:
+                if h_l is None:
+                    pred_Z = model.best_Z
+                else:
+                    pred_Z[layer, :, :] = model.best_Z
+                    if save_probs:
+                        node_probs[:, :, : model.Q] = model.run_probs[0, ...]
+            else:
+                if h_l is None:
+                    pred_Z = model.all_best_Zs
+                else:
+                    pred_Z[:, layer, :, :] = model.all_best_Zs
+                    if save_probs:
+                        node_probs[:, :, :, : model.Q] = model.run_probs
+            if ret_best_only:
+                tqdm.write(f"Best tuning param: {model.best_tun_param}")
+            else:
+                tqdm.write(f"Best tuning params for each Q:")
+                tqdm.write(
+                    "\n".join(
+                        [
+                            f"Q = {q}:  {tunpar}"
+                            for q, tunpar in zip(trial_Qs, model.best_tun_pars)
+                        ]
+                    )
+                )
+        else:
+            if len(pred_Z.shape) == 3:
+                # only one run
+                pred_Z = np.expand_dims(pred_Z, 0)
+            for run_idx in range(pred_Z.shape[0]):
+                old_Z = pred_Z[run_idx, layer - 1, :, :]
+                qs = np.unique(old_Z[old_Z != -1])
+                node_group_cnts = np.stack(
+                    [(old_Z == q).sum(axis=1) for q in qs], axis=0
+                )
+                old_node_labels = np.argmax(
+                    node_group_cnts, axis=0
+                )  # assigns each node its most common label
+                q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
+                suff_large_q_idxs = q_idxs[group_cnts > h_min_N]
+                for no_q, q in enumerate(tqdm(suff_large_q_idxs, desc="q_l")):
+                    logging.info(
+                        f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
+                    )
+                    N = group_cnts[q]
+                    logging.info(f"\t\t Considering {N} nodes...")
+
+                    sub_data = subset_data(data, N, T, h_Q, h_min_N, old_node_labels, q)
+
+                    if np.all([A_t.sum() == 0 for A_t in sub_data["A"]]):
+                        logging.info("No edges in subgraph, skipping...")
+                        tqdm.write("No edges in subgraph, skipping...")
+                        tmp_Z = -1 * np.ones(N, T)
+                        pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
+                        continue
+
+                    model = em.EM(sub_data, **model_settings)
+                    fit_model_allow_interrupt(learning_rate, model)
+
+                    tqdm.write(f"Best tuning param: {model.best_tun_param}")
+
+                    tmp_Z = model.best_Z
+                    missing_nodes = tmp_Z == -1
+                    q_shift = np.power(h_Q, layer, dtype=int) + h_Q * no_q
+                    tmp_Z += q_shift  # shift labels to avoid overlap
+                    tmp_Z[missing_nodes] = -1
+
+                    logging.info(f"Found {len(np.unique(tmp_Z[tmp_Z!=-1]))} groups")
+                    pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
+                    if save_probs:
+                        node_probs[
+                            run_idx, :, :, q_shift : q_shift + model.Q
+                        ] = model.run_probs[0, ...]
+                    logging.info(
+                        f"Transferred {len(np.unique(pred_Z[run_idx, layer, old_node_labels == q, :][pred_Z[run_idx, layer, old_node_labels == q, :]!=-1]))} groups"
+                    )
+
+                    # save after each iteration in case of errors
+                    try:
+                        datetime_str
+                    except NameError:
+                        datetime_str = time.strftime(
+                            "%d-%m_%H-%M", time.gmtime(time.time())
+                        )
+                    save_emp_Z(
+                        testset_name,
+                        link_choice,
+                        RESULTS_DIR,
+                        pred_Z,
+                        datetime_str,
+                        h_l=h_l,
+                    )
+                    if save_probs:
+                        save_node_probs(
+                            testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=h_l
+                        )
+        logging.info(f"Run complete for level {layer}, saving...")
+        save_emp_Z(
+            testset_name, link_choice, RESULTS_DIR, pred_Z, datetime_str, h_l=h_l
+        )
+        if save_probs:
+            save_node_probs(
+                testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=h_l
+            )
+
+
+def subset_data(data, N, T, h_Q, h_min_N, old_node_labels, q):
+    sub_data = {
+        "A": [
+            data["A"][t][np.ix_(old_node_labels == q, old_node_labels == q)]
+            for t in range(T)
+        ],
+        "X": [data["X"][s][old_node_labels == q, :, :] for s in range(len(data["X"]))],
+        "Q": h_Q if h_Q < N / h_min_N else max(N // h_min_N, 2),
+        "meta_types": data["meta_types"],
+    }
+
+    return sub_data
+
+
+def fit_model_allow_interrupt(learning_rate, model):
+    try:
+        ## Fit to given data
+        model.fit(learning_rate=learning_rate)
+    except KeyboardInterrupt:
+        logging.info("Keyboard interrupt, stopping early")
+        current_energy = model.bp.compute_free_energy()
+        if model.best_val_q == 0.0:
+            model.max_energy = current_energy
+            # first iter, first run
+            model.best_val_q = current_energy
+            model.best_val = current_energy
+            model.poor_iter_ctr = 0
+            model.bp.model.set_Z_by_MAP()
+            model.best_Z = model.bp.model.Z.copy()
+            model.best_tun_param = model.dsbmm.tuning_param
+            model.max_energy_Z = model.bp.model.Z.copy()
+        elif current_energy < model.best_val_q:
+            # new best for q
+            model.poor_iter_ctr = 0
+            model.best_val_q = current_energy
+            model.bp.model.set_Z_by_MAP()
+            model.all_best_Zs[model.q_idx, :, :] = model.bp.model.Z.copy()
+            model.best_tun_pars[model.q_idx] = model.dsbmm.tuning_param
+            if model.best_val_q < model.best_val:
+                model.best_val = model.best_val_q
+                model.best_Z = model.bp.model.Z.copy()
+                model.best_tun_param = model.dsbmm.tuning_param
+
+
+def save_emp_Z(testset_name, link_choice, RESULTS_DIR, pred_Z, datetime_str, h_l=None):
+    if testset_name == "scopus":
+        with open(RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl", "wb") as f:
+            pickle.dump(pred_Z, f)
+    else:
+        with open(
+            RESULTS_DIR / f"{testset_name}_Z{'_h' if h_l else ''}_{datetime_str}.pkl",
+            "wb",
+        ) as f:
+            pickle.dump(pred_Z, f)
+
+
+def save_node_probs(testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=None):
+    with open(
+        RESULTS_DIR / f"{testset_name}_probs{'_h' if h_l else ''}_{datetime_str}.pkl",
+        "wb",
+    ) as f:
+        pickle.dump(node_probs, f)
+
+
 if __name__ == "__main__":
     if not os.path.exists("../../results/mlruns"):
         os.mkdir("../../results/mlruns")
@@ -321,7 +643,7 @@ if __name__ == "__main__":
                                 for t in range(params["T"])
                             ]
                         print("...done")
-                    with open(
+                    with open(  # type: ignore
                         f"../../results/{testset_name}_{testno}_samples.pkl",
                         "wb",
                     ) as f:
@@ -454,175 +776,9 @@ if __name__ == "__main__":
 
     elif testset_name == "empirical":
         DATA_DIR = Path(args.data)
-        data = {}
+
+        data = data_processor.load_data(DATA_DIR, edge_weight_choice=args.edge_weight)
         data["Q"] = args.num_groups
-        print(f"Loading data from {DATA_DIR}:")
-        print(
-            "\tNB data must be pickled networkx graph in form 'net_[timestamp: int].pkl', with all metadata as node attributes."
-        )
-        print(
-            "\tFurther, there must be an additional 'meta_dists.pkl' file containing a dict of the form {meta_name : (dist_name, dim)},"
-        )
-        print(
-            "\twhere dist_name is one of the accepted metadata distribution types, and dim is the corresponding dimension."
-        )
-        net_files = list(DATA_DIR.glob("net_*.pkl"))
-        try:
-            assert len(net_files) > 0
-        except AssertionError:
-            raise FileNotFoundError(
-                "No network files of required form found in specified data directory."
-            )
-        print(
-            f"Found {len(net_files)} network files, for timestamps {sorted(list(map(lambda x: int(x.stem.split('_')[1]), net_files)))}"
-        )
-        net_files = sorted(
-            net_files, key=lambda x: int(x.stem.split("_")[-1])
-        )  # sort by timestamp
-        meta_file = DATA_DIR / "meta_dists.pkl"
-        nets = []
-        for nf in net_files:
-            with open(nf, "rb") as f:
-                net = pickle.load(f)
-            nets.append(net)
-        with open(meta_file, "rb") as f:
-            meta_info = pickle.load(f)
-        meta_names = list(meta_info.keys())
-        meta_types = [meta_info[mn][0] for mn in meta_names]
-        data["meta_types"] = meta_types
-        meta_dims = [int(meta_info[mn][1]) for mn in meta_names]
-        all_net_meta_names = set(
-            next(iter(nets[0].nodes.data(default=np.nan)))[1].keys()
-        )
-        try:
-            assert all_net_meta_names == set(meta_names)
-        except AssertionError:
-            warnings.warn(
-                f"""
-                Metadata names in meta_dists.pkl do not match those in the networkx graph.
-                \nWill only use metadata names in meta_dists.pkl:
-                \n{meta_names}
-                \n-- {all_net_meta_names - set(meta_names)} present but not used.
-                """
-            )
-        edge_attrs = list(next(iter(nets[0].edges(data=True)))[-1].keys())
-        node_order = list(
-            reduce(lambda res, x: set(res) | set(x), [list(net.nodes) for net in nets])  # type: ignore
-        )
-        # add in missing nodes at each timestep so matrices not changing size - won't drastically increase memory reqs as using sparse
-        # mats
-        for net in nets:
-            missing_nodes = set(node_order) - set(net.nodes)
-            net.add_nodes_from(
-                missing_nodes,
-                **{
-                    mn: np.nan * np.ones(meta_dims[meta_idx])
-                    if meta_dims[meta_idx] > 1
-                    else np.nan
-                    for meta_idx, mn in enumerate(meta_names)
-                },
-            )
-        # get metadata
-        metas = [[nx.get_node_attributes(net, mn) for net in nets] for mn in meta_names]
-        X = [
-            np.stack(
-                [
-                    np.stack(
-                        [
-                            metas[meta_idx][net_idx].get(
-                                node, np.nan * np.ones(meta_dims[meta_idx])
-                            )
-                            if meta_dims[meta_idx] > 1
-                            else np.array([metas[meta_idx][net_idx].get(node, np.nan)])
-                            for net_idx in range(len(nets))
-                        ],
-                        axis=0,
-                    )
-                    for node in node_order
-                ],
-                axis=0,
-            )
-            for meta_idx, mn in enumerate(meta_names)
-        ]
-        for s, meta_type in enumerate(meta_types):
-            # remove null dimensions
-            null_dims = np.nansum(X[s], axis=(0, 1)) == 0
-            if np.count_nonzero(null_dims) > 0:
-                warnings.warn(
-                    f"The following empty dimensions were found for metadata {meta_names[s]}: {np.flatnonzero(null_dims)}. Removing these dimensions."
-                )
-                X[s] = X[s][:, :, ~null_dims]
-                meta_dims[s] -= np.count_nonzero(null_dims)
-            # now convert suitably according to specified distribution
-            L = X[s].shape[-1]
-            missing_meta = np.isnan(X[s])
-            if meta_type == "indep bernoulli":
-                # restrict to a maximum of 10 dims 'present' for each node, else in high cardinality case likely equally weighting important and noisy meta
-                if L > 10:
-                    tmpx = np.zeros_like(X[s])
-                    k = 10
-                    topkidxs = np.argsort(
-                        X[s], axis=-1
-                    )  # will place nans at end, but should be OK as should only have either whole row nan or nothing
-                    np.put_along_axis(tmpx, topkidxs[..., -k:], 1, axis=-1)
-                    tmpx[X[s] == 0] = 0
-                    tmpx[missing_meta] = np.nan
-                    X[s] = tmpx
-                else:
-                    X[s] = (X[s] > 0) * 1.0
-                    X[s][missing_meta] = np.nan
-            elif meta_type == "categorical":
-                tmpx = np.zeros_like(X[s])
-                k = 1
-                topkidxs = np.argsort(X[s], axis=-1)
-                np.put_along_axis(tmpx, topkidxs[..., -k:], 1, axis=-1)
-                tmpx[X[s] == 0] = 0
-                tmpx[missing_meta] = np.nan
-                X[s] = tmpx
-            elif meta_type == "multinomial":
-                # first convert to a form of count dist
-                int_prop_thr = 0.7  # if proportion of integer values is above this, assume integer count dist
-                if np.nanmean(np.mod(X[s][X[s] > 0], 1) == 0) > int_prop_thr:
-                    X[s] = np.round(
-                        X[s]
-                    )  # NB can't just cast to int else nans cause problems
-                else:
-                    # assume need to convert to something similar - as can be floats, will just enforce some precision
-                    n_tot = 1000
-                    tmpx = np.round(
-                        (
-                            X[s]
-                            - np.nanmin(X[s], axis=-1, keepdims=True, where=X[s] != 0.0)
-                        )
-                        / (
-                            np.nanmax(X[s], axis=-1, keepdims=True)
-                            - np.nanmin(X[s], axis=-1, keepdims=True, where=X[s] != 0.0)
-                        )
-                        + 1 * n_tot
-                    )
-                    tmpx[X[s] == 0.0] = 0.0
-                    tmpx[missing_meta] = np.nan
-                    X[s] = tmpx
-
-            elif meta_type == "poisson":
-                int_prop_thr = 0.7  # if proportion of integer values is above this, assume integer count dist
-                if np.nanmean(np.mod(X[s][X[s] != 0], 1) == 0) > int_prop_thr:
-                    X[s] = np.round(X[s] - np.nanmin(X[s], keepdims=True))
-                else:
-                    warnings.warn(
-                        "Poisson dist being used for non-integer values - no error thrown, but possible problem in dataset."
-                    )
-                    X[s] = np.round(X[s] - np.nanmin(X[s], keepdims=True))
-
-        # print([x.shape for x in X])
-        data["X"] = X
-        # get sparse adj mats
-        A = [
-            nx.to_scipy_sparse_array(net, nodelist=node_order, weight=args.edge_weight)
-            for net in nets
-        ]
-        data["A"] = A
-
     try_parallel = args.nb_parallel
 
     use_X_init = False
@@ -638,7 +794,7 @@ if __name__ == "__main__":
         init_times = np.zeros_like(test_times)
         if testset_name == "scaling":
             test_Ns = [param["N"] for param in params_set]
-            with open(f"../../results/{testset_name}_N.pkl", "wb") as f:
+            with open(f"../../results/{testset_name}_N.pkl", "wb") as f:  # type: ignore
                 pickle.dump(test_Ns, f)
         elif testset_name == "align":
             test_Z = np.zeros(
@@ -869,29 +1025,29 @@ if __name__ == "__main__":
                     if testset_name == "align":
                         if args.use_numba:
                             test_Z[test_no, samp_no, :, :] = model.bp.model.jit_model.Z
-                            with open(
+                            with open(  # type: ignore
                                 f"../../results/{testset_name}_test_Z{tp_str}.pkl",
                                 "wb",
                             ) as f:
                                 pickle.dump(test_Z, f)
                         else:
                             test_Z[test_no, samp_no, :, :] = model.bp.model.Z
-                            with open(
+                            with open(  # type: ignore
                                 f"../../results/{testset_name}_test_Z{tp_str}.pkl",
                                 "wb",
                             ) as f:
                                 pickle.dump(test_Z, f)
-                    with open(
+                    with open(  # type: ignore
                         f"../../results/{testset_name}_test_aris{tp_str}.pkl",
                         "wb",
                     ) as f:
                         pickle.dump(test_aris, f)
-                    with open(
+                    with open(  # type: ignore
                         f"../../results/{testset_name}_test_times{tp_str}.pkl",
                         "wb",
                     ) as f:
                         pickle.dump(test_times, f)
-                    with open(
+                    with open(  # type: ignore
                         f"../../results/{testset_name}_init_times{tp_str}.pkl",
                         "wb",
                     ) as f:
@@ -924,284 +1080,75 @@ if __name__ == "__main__":
     else:
         T = len(data["A"])
         N = data["A"][0].shape[0]
-        if args.ret_best_only:
-            if args.h_l is None:
-                pred_Z = np.zeros((N, T))
-            else:
-                pred_Z = np.zeros((args.h_l, N, T))
-        else:
-            if args.h_l is None:
-                pred_Z = np.zeros((args.max_trials, N, T))
-            else:
-                pred_Z = np.zeros((args.n_runs, args.h_l, N, T))
+        pred_Z = init_pred_Z(
+            N,
+            T,
+            ret_best_only=args.ret_best_only,
+            h_l=args.h_l,
+            max_trials=args.max_trials,
+            n_runs=args.n_runs,
+        )
         # args.h_l, default=None, max. no. layers in hier
         # args.h_Q, default=8, max. no. groups at hier layer,
         # = 4 if h_Q > N_l / 4
         # args.h_min_N, default=20, min. nodes for split
-
-        if (
-            args.min_Q is not None
-            or args.max_Q is not None
-            or args.max_trials is not None
-        ):
-            try:
-                assert args.h_l is None
-            except AssertionError:
-                raise NotImplementedError(
-                    "Hierarchical search over range of Q at each level currently not supported"
-                )
-            try:
-                assert args.min_Q is not None
-                assert args.max_Q is not None
-                assert args.max_trials is not None
-            except AssertionError:
-                raise ValueError(
-                    "If specifying search for Q, must specify all of --min_Q, --max_Q, and --max_trials"
-                )
-            trial_Qs = np.linspace(args.min_Q, args.max_Q, args.max_trials, dtype=int)
-        else:
-            if args.h_l is None:
-                trial_Qs = [args.num_groups]
-            else:
-                trial_Qs = [
-                    args.h_Q if args.h_Q < N / args.h_min_N else N // args.h_min_N
-                ] * args.n_runs
-                try:
-                    assert trial_Qs[0] > 0
-                except AssertionError:
-                    raise ValueError(
-                        "Minimum number of nodes to consider at each level of hierarchy must be less than total number of nodes."
-                    )
-                args.ret_best_only = args.n_runs == 1
-                args.n_runs = 1
-                # args.h_min_N
-        data["Q"] = trial_Qs[0]
-
-        print("*" * 15, "Running empirical data", "*" * 15)
-        ## Initialise
-        file_handler = logging.FileHandler(filename="./empirical.log")
-        stdout_handler = logging.StreamHandler(stream=sys.stdout)
-        handlers = [file_handler, stdout_handler]
-        logging.basicConfig(
-            level=logging.INFO, format="[%(asctime)s] %(message)s", handlers=handlers  # type: ignore
+        trial_Qs = init_trial_Qs(
+            min_Q=args.min_Q,
+            max_Q=args.max_Q,
+            max_trials=args.max_trials,
+            h_l=args.h_l,
+            num_groups=args.num_groups,
+            h_Q=args.h_Q,
+            h_min_N=args.h_min_N,
+            n_runs=args.n_runs,
         )
-        if args.h_l is None:
-            hierarchy_layers = [0]
-        else:
-            hierarchy_layers = np.arange(args.h_l)
+        if (
+            not (
+                args.min_Q is not None
+                or args.max_Q is not None
+                or args.max_trials is not None
+            )
+            and args.h_l is not None
+        ):
+            args.ret_best_only = args.n_runs == 1
+            args.n_runs = 1
+            # args.h_min_N
 
-        RESULTS_DIR = DATA_DIR / "results"
-        RESULTS_DIR.mkdir(exist_ok=True)
+        hierarchy_layers, RESULTS_DIR = prepare_for_run(
+            data, DATA_DIR, trial_Qs, h_l=args.h_l
+        )
 
-        for layer in tqdm(hierarchy_layers, desc="Hier. lvl"):
-            if args.h_l is not None:
-                logging.info(
-                    f"{'%'*15} At hierarchy level {layer+1}/{args.h_l} {'%'*15}"
-                )
-
-            if layer == 0:
-                model = em.EM(
-                    data,
-                    sparse_adj=True,
-                    try_parallel=try_parallel,
-                    tuning_param=args.tuning_param,
-                    n_runs=args.n_runs,
-                    patience=args.patience,
-                    deg_corr=args.deg_corr,
-                    leave_directed=args.directed,
-                    verbose=verbose,
-                    max_iter=args.max_iter,
-                    max_msg_iter=args.max_msg_iter,
-                    use_meta=not args.ignore_meta,
-                    use_numba=args.use_numba,
-                    trial_Qs=trial_Qs,
-                    alpha_use_all=not args.alpha_use_first,
-                    non_informative_init=not args.partial_informative_dsbmm_init,
-                    planted_p=args.planted_p,
-                    auto_tune=args.auto_tune,
-                )
-                try:
-                    ## Fit to given data
-                    model.fit(learning_rate=args.learning_rate)
-                except KeyboardInterrupt:
-                    logging.info("Keyboard interrupt, stopping early")
-                    current_energy = model.bp.compute_free_energy()
-                    if model.best_val_q == 0.0:
-                        model.max_energy = current_energy
-                        # first iter, first run
-                        model.best_val_q = current_energy
-                        model.best_val = current_energy
-                        model.poor_iter_ctr = 0
-                        model.bp.model.set_Z_by_MAP()
-                        model.best_Z = model.bp.model.Z.copy()
-                        model.best_tun_param = model.dsbmm.tuning_param
-                        model.max_energy_Z = model.bp.model.Z.copy()
-                    elif current_energy < model.best_val_q:
-                        # new best for q
-                        model.poor_iter_ctr = 0
-                        model.best_val_q = current_energy
-                        model.bp.model.set_Z_by_MAP()
-                        model.all_best_Zs[model.q_idx, :, :] = model.bp.model.Z.copy()
-                        model.best_tun_pars[model.q_idx] = model.dsbmm.tuning_param
-                        if model.best_val_q < model.best_val:
-                            model.best_val = model.best_val_q
-                            model.best_Z = model.bp.model.Z.copy()
-                            model.best_tun_param = model.dsbmm.tuning_param
-                if args.ret_best_only:
-                    if args.h_l is None:
-                        pred_Z = model.best_Z
-                    else:
-                        pred_Z[layer, :, :] = model.best_Z
-                else:
-                    if args.h_l is None:
-                        pred_Z = model.all_best_Zs
-                    else:
-                        pred_Z[:, layer, :, :] = model.all_best_Zs
-                if args.ret_best_only:
-                    print(f"Best tuning param: {model.best_tun_param}")
-                else:
-                    print(f"Best tuning params for each Q:")
-                    print(
-                        *[
-                            f"Q = {q}:  {tunpar}"
-                            for q, tunpar in zip(trial_Qs, model.best_tun_pars)
-                        ],
-                        sep="\n",
-                    )
-            else:
-                if len(pred_Z.shape) == 3:
-                    # only one run
-                    pred_Z = [pred_Z]
-                for run_idx in range(pred_Z.shape[0]):
-                    old_Z = pred_Z[run_idx, layer - 1, :, :]
-                    qs = np.unique(old_Z[old_Z != -1])
-                    node_group_cnts = np.stack(
-                        [(old_Z == q).sum(axis=1) for q in qs], axis=0
-                    )
-                    old_node_labels = np.argmax(
-                        node_group_cnts, axis=0
-                    )  # assigns each node its most common label
-                    q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
-                    suff_large_q_idxs = q_idxs[group_cnts > args.h_min_N]
-                    for no_q, q in enumerate(tqdm(suff_large_q_idxs, desc="q_l")):
-                        logging.info(
-                            f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
-                        )
-                        N = group_cnts[q]
-                        logging.info(f"\t\t Considering {N} nodes...")
-                        sub_data = {
-                            "A": [
-                                data["A"][t][
-                                    np.ix_(old_node_labels == q, old_node_labels == q)
-                                ]
-                                for t in range(T)
-                            ],
-                            "X": [
-                                data["X"][s][old_node_labels == q, :, :]
-                                for s in range(len(data["X"]))
-                            ],
-                            "Q": args.h_Q
-                            if args.h_Q < N / args.h_min_N
-                            else max(N // args.h_min_N, 2),
-                            "meta_types": data["meta_types"],
-                        }
-                        if np.all([A_t.sum() == 0 for A_t in sub_data["A"]]):
-                            logging.info("No edges in subgraph, skipping...")
-                            tqdm.write("No edges in subgraph, skipping...")
-                            tmp_Z = -1 * np.ones(N, T)
-                            pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
-                            continue
-                        model = em.EM(
-                            sub_data,
-                            sparse_adj=True,
-                            try_parallel=try_parallel,
-                            tuning_param=args.tuning_param,
-                            n_runs=args.n_runs,
-                            patience=args.patience,
-                            deg_corr=args.deg_corr,
-                            leave_directed=args.directed,
-                            verbose=verbose,
-                            max_iter=args.max_iter,
-                            max_msg_iter=args.max_msg_iter,
-                            use_meta=not args.ignore_meta,
-                            use_numba=args.use_numba,
-                            alpha_use_all=not args.alpha_use_first,
-                            non_informative_init=not args.partial_informative_dsbmm_init,
-                            planted_p=args.planted_p,
-                            auto_tune=args.auto_tune,
-                        )
-                        try:
-                            ## Fit to given data
-                            model.fit(learning_rate=args.learning_rate)
-                        except KeyboardInterrupt:
-                            logging.info("Keyboard interrupt, stopping early")
-                            current_energy = model.bp.compute_free_energy()
-                            if model.best_val_q == 0.0:
-                                model.max_energy = current_energy
-                                # first iter, first run
-                                model.best_val_q = current_energy
-                                model.best_val = current_energy
-                                model.poor_iter_ctr = 0
-                                model.bp.model.set_Z_by_MAP()
-                                model.best_Z = model.bp.model.Z.copy()
-                                model.best_tun_param = model.dsbmm.tuning_param
-                                model.max_energy_Z = model.bp.model.Z.copy()
-                            elif current_energy < model.best_val_q:
-                                # new best for q
-                                model.poor_iter_ctr = 0
-                                model.best_val_q = current_energy
-                                model.bp.model.set_Z_by_MAP()
-                                model.all_best_Zs[
-                                    model.q_idx, :, :
-                                ] = model.bp.model.Z.copy()
-                                model.best_tun_pars[
-                                    model.q_idx
-                                ] = model.dsbmm.tuning_param
-                                if model.best_val_q < model.best_val:
-                                    model.best_val = model.best_val_q
-                                    model.best_Z = model.bp.model.Z.copy()
-                                    model.best_tun_param = model.dsbmm.tuning_param
-
-                        print(f"Best tuning param: {model.best_tun_param}")
-                        tmp_Z = model.best_Z
-                        missing_nodes = tmp_Z == -1
-                        tmp_Z += (
-                            args.h_Q * layer * len(suff_large_q_idxs) + args.h_Q * no_q
-                        )  # shift labels to avoid overlap
-                        tmp_Z[missing_nodes] = -1
-                        logging.info(f"Found {len(np.unique(tmp_Z[tmp_Z!=-1]))} groups")
-                        pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
-                        logging.info(
-                            f"Transferred {len(np.unique(pred_Z[run_idx, layer, old_node_labels == q, :][pred_Z[run_idx, layer, old_node_labels == q, :]!=-1]))} groups"
-                        )
-                        # save after each iteration in case of errors
-                        if testset_name == "scopus":
-                            with open(
-                                RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl",
-                                "wb",
-                            ) as f:
-                                pickle.dump(pred_Z, f)
-                        else:
-                            with open(
-                                RESULTS_DIR
-                                / f"{testset_name}_Z{'_h' if args.h_l else ''}.pkl",
-                                "wb",
-                            ) as f:
-                                pickle.dump(pred_Z, f)
-            logging.info(f"Run complete for level {layer}, saving...")
-            if testset_name == "scopus":
-                with open(
-                    RESULTS_DIR / f"{testset_name}_{link_choice}_Z.pkl", "wb"
-                ) as f:
-                    pickle.dump(pred_Z, f)
-            else:
-                datetime_str = time.strftime("%d-%m_%H-%M", time.gmtime(time.time()))
-                with open(
-                    RESULTS_DIR
-                    / f"{testset_name}_Z{'_h' if args.h_l else ''}_{datetime_str}.pkl",
-                    "wb",
-                ) as f:
-                    pickle.dump(pred_Z, f)
+        run_hier_model(
+            testset_name,
+            data,
+            N,
+            T,
+            pred_Z,
+            trial_Qs,
+            hierarchy_layers,
+            RESULTS_DIR,
+            verbose=False,
+            link_choice=None,
+            h_l=args.h_l,
+            h_Q=args.h_Q,
+            h_min_N=args.h_min_N,
+            ret_best_only=args.ret_best_only,
+            tuning_param=args.tuning_param,
+            learning_rate=args.learning_rate,
+            n_runs=args.n_runs,
+            patience=args.patience,
+            deg_corr=args.deg_corr,
+            directed=args.directed,
+            max_iter=args.max_iter,
+            max_msg_iter=args.max_msg_iter,
+            ignore_meta=args.ignore_meta,
+            alpha_use_first=args.alpha_use_first,
+            partial_informative_dsbmm_init=args.partial_informative_dsbmm_init,
+            planted_p=args.planted_p,
+            auto_tune=args.auto_tune,
+            use_numba=args.use_numba,
+            try_parallel=try_parallel,
+        )
 
     # TODO: clean up code and improve documentation, then
     # run poetry publish

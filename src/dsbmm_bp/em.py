@@ -58,6 +58,7 @@ class EM:
         non_informative_init=True,
         planted_p=0.6,
         auto_tune=False,
+        ret_probs=False,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
@@ -70,6 +71,7 @@ class EM:
         self.init_Z_mode = init_Z_mode
         self.alpha_use_all = alpha_use_all
         self.auto_tune = auto_tune
+        self.ret_probs = ret_probs
         self.A = data["A"]
         self.frozen = False
         self.params_to_set = None
@@ -435,6 +437,14 @@ class EM:
 
         self.all_best_Zs = np.empty((len(self.trial_Qs), self.N, self.T))
         self.best_tun_pars = np.ones_like(self.trial_Qs)
+        if self.ret_probs:
+            try:
+                assert np.all(self.trial_Qs == self.trial_Qs[0])
+            except AssertionError:
+                raise ValueError("If returning probs, must have same Q for all trials")
+            self.run_probs = np.empty(
+                (len(self.trial_Qs), self.N, self.T, self.trial_Qs[0])
+            )
         for q_idx, current_Q in enumerate(self.trial_Qs):
             self.q_idx = q_idx
             self.best_val_q = 0.0
@@ -580,6 +590,8 @@ class EM:
                     self.bp.model.set_Z_by_MAP()
                     self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
                     self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
+                    if self.ret_probs:
+                        self.run_probs[self.q_idx, ...] = self.bp.model.node_marg.cop()
                     if self.best_val_q < self.best_val:
                         self.best_val = self.best_val_q
                         self.best_Z = self.bp.model.Z.copy()

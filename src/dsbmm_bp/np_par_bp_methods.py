@@ -1,4 +1,3 @@
-# numpy reimplementation of all methods for BP class that reasonably stand to gain from doing so
 import warnings
 
 import numpy as np

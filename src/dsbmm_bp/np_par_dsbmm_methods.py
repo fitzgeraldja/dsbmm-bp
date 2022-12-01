@@ -108,6 +108,11 @@ class NumpyDSBMM:
         if self.use_meta:
             self.meta_types = meta_types
             if X is not None:
+                # TODO: change in this script and following to
+                # use list of sparse arrays for X rather than dense
+                # -- given quite large number of categories, this
+                # is causing a lot of unnecessary computations + memory
+                # usage
                 self.S = len(X)
                 assert len(self.meta_types) == self.S
                 self.meta_dims = np.array([X_s.shape[-1] for X_s in X], dtype=np.int32)

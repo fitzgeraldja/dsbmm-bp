@@ -285,3 +285,12 @@ def multi_contrib(
         - xlogx(X_t[new_r] + x_it.sum())
     )
     return res
+
+
+@njit
+def move_node(
+    i,
+    t,
+    old_q,
+):
+    pass
