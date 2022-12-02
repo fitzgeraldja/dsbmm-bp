@@ -336,7 +336,9 @@ def run_hier_model(
     auto_tune=True,
     use_numba=False,
     try_parallel=False,
-    save_probs=False,
+    ret_Z=False,
+    ret_probs=False,
+    save_to_file=True,
 ):
     model_settings = dict(
         sparse_adj=True,
@@ -356,9 +358,10 @@ def run_hier_model(
         non_informative_init=not partial_informative_dsbmm_init,
         planted_p=planted_p,
         auto_tune=auto_tune,
-        ret_probs=save_probs,
+        ret_Z=ret_Z,
+        ret_probs=ret_probs,
     )
-    if save_probs:
+    if ret_probs:
         if h_l is not None:
             if len(pred_Z.shape) == 3:
                 node_probs = np.zeros((N, T, np.power(h_Q, h_l, dtype=int)))
@@ -380,14 +383,14 @@ def run_hier_model(
                     pred_Z = model.best_Z
                 else:
                     pred_Z[layer, :, :] = model.best_Z
-                    if save_probs:
+                    if ret_probs:
                         node_probs[:, :, : model.Q] = model.run_probs[0, ...]
             else:
                 if h_l is None:
                     pred_Z = model.all_best_Zs
                 else:
                     pred_Z[:, layer, :, :] = model.all_best_Zs
-                    if save_probs:
+                    if ret_probs:
                         node_probs[:, :, :, : model.Q] = model.run_probs
             if ret_best_only:
                 tqdm.write(f"Best tuning param: {model.best_tun_param}")
@@ -445,7 +448,7 @@ def run_hier_model(
 
                     logging.info(f"Found {len(np.unique(tmp_Z[tmp_Z!=-1]))} groups")
                     pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
-                    if save_probs:
+                    if ret_probs:
                         node_probs[
                             run_idx, :, :, q_shift : q_shift + model.Q
                         ] = model.run_probs[0, ...]
@@ -460,26 +463,40 @@ def run_hier_model(
                         datetime_str = time.strftime(
                             "%d-%m_%H-%M", time.gmtime(time.time())
                         )
-                    save_emp_Z(
-                        testset_name,
-                        link_choice,
-                        RESULTS_DIR,
-                        pred_Z,
-                        datetime_str,
-                        h_l=h_l,
-                    )
-                    if save_probs:
-                        save_node_probs(
-                            testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=h_l
+                    if save_to_file:
+                        save_emp_Z(
+                            testset_name,
+                            link_choice,
+                            RESULTS_DIR,
+                            pred_Z,
+                            datetime_str,
+                            h_l=h_l,
                         )
+                        if ret_probs:
+                            save_node_probs(
+                                testset_name,
+                                RESULTS_DIR,
+                                node_probs,
+                                datetime_str,
+                                h_l=h_l,
+                            )
         logging.info(f"Run complete for level {layer}, saving...")
-        save_emp_Z(
-            testset_name, link_choice, RESULTS_DIR, pred_Z, datetime_str, h_l=h_l
-        )
-        if save_probs:
-            save_node_probs(
-                testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=h_l
+        if save_to_file:
+            save_emp_Z(
+                testset_name, link_choice, RESULTS_DIR, pred_Z, datetime_str, h_l=h_l
             )
+            if ret_probs:
+                save_node_probs(
+                    testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=h_l
+                )
+    if ret_Z:
+        if ret_probs:
+            return pred_Z, node_probs
+        else:
+            return pred_Z
+    else:
+        if ret_probs:
+            return node_probs
 
 
 def subset_data(data, N, T, h_Q, h_min_N, old_node_labels, q):

@@ -347,7 +347,7 @@ class NumpyDSBMM:
         # k_it,lam_qt -> e^-lam_qt * lam_qt^k_it / k_it!
         # in log -> -lam_qt + k_it*log(lam_qt) - log(k_it!)
         # log(n!) = gammaln(n+1)
-        return (
+        tmp = (
             -lam.T
             + k[:, :, np.newaxis]
             * np.log(
@@ -358,6 +358,8 @@ class NumpyDSBMM:
             ).T[np.newaxis, ...]
             - gammaln(k + 1)[:, :, np.newaxis]
         )
+        tmp[np.isnan(k)] = 0.0  # ensure missing data contributes nothing
+        return tmp
 
     def calc_log_meta_lkl(self):
         self.log_meta_lkl = np.zeros((self.N, self.T, self.Q))
@@ -402,6 +404,8 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 ).transpose(0, 2, 1)
+                # ensure missing meta contributes nothing
+                ib_contrib[np.any(np.isnan(self.X[s]), axis=-1)] = 0.0
                 # assert np.all(ib_contrib <= 0)
                 self.log_meta_lkl += ib_contrib
                 if self.verbose:
@@ -417,7 +421,7 @@ class NumpyDSBMM:
                     # out=np.zeros_like(cat_params),
                 )[np.newaxis, ...]
                 # assert np.all(self.X[s].sum(axis=-1) == 1)  # REMOVE
-                self.log_meta_lkl += np.nansum(
+                cat_contrib = np.nansum(
                     np.multiply(
                         log_cat_params,
                         self.X[s][:, np.newaxis, :, :],
@@ -429,6 +433,8 @@ class NumpyDSBMM:
                 ).transpose(
                     0, 2, 1
                 )  # should only have single nonzero X, one-hot encoding for category, so this should be sufficient
+                cat_contrib[np.any(np.isnan(self.X[s]), axis=-1)] = 0.0
+                self.log_meta_lkl += cat_contrib
                 if self.verbose:
                     print("\tUpdated categorical lkl contribution")
             elif mt == "multinomial":
@@ -449,6 +455,7 @@ class NumpyDSBMM:
                         axis=-1,
                     )
                 )
+                multi_contrib[np.any(np.isnan(self.X[s]), axis=-1)] = 0.0
                 # assert np.all(multi_contrib <= 0)
                 self.log_meta_lkl += multi_contrib
                 if self.verbose:
