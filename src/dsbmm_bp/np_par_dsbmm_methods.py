@@ -291,12 +291,13 @@ class NumpyDSBMM:
                 #     assert np.all(
                 #         np.abs(self._beta.transpose(1, 0, 2) - self._beta) < 1e-10
                 #     )
-        if self.unfrozen_meta:
-            self.update_meta_params(init=init, learning_rate=learning_rate)
-            if self.verbose:
-                # print(self.jit_model._meta_params)
-                print("\tUpdated meta")
-        self.calc_log_meta_lkl()
+        if self.use_meta:
+            if self.unfrozen_meta:
+                self.update_meta_params(init=init, learning_rate=learning_rate)
+                if self.verbose:
+                    # print(self.jit_model._meta_params)
+                    print("\tUpdated meta")
+            self.calc_log_meta_lkl()
 
     def set_node_marg(self, values):
         self.node_marg = values

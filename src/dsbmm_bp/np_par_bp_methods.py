@@ -1225,7 +1225,7 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        if self.tun_par_heuristic:
+        if self.tun_par_heuristic and self.use_meta:
             if (
                 self.log_meta_prob[
                     (~np.isnan(self.log_meta_prob))
@@ -1274,8 +1274,8 @@ class NumpyBP:
                     tqdm.write(
                         f"Tuning parameter might be better replaced by something around {tuning_fac:.3g}."
                     )
-
-        log_spatial_msg += self.log_meta_prob
+        if self.use_meta:
+            log_spatial_msg += self.log_meta_prob
         # if small_deg:
         #     # now as must do prods in chunks of in_degs[i,t], finally do need list comprehension over N
         #     msg[:, t, :] = np.array(
@@ -1538,7 +1538,8 @@ class NumpyBP:
             log_spatial_msg -= self._h.T[
                 np.newaxis, :, :
             ]  # NB don't need / N as using p_ab to calc, not c_ab
-        log_spatial_msg += self.log_meta_prob
+        if self.use_meta:
+            log_spatial_msg += self.log_meta_prob
 
         tmp = log_spatial_msg
 
