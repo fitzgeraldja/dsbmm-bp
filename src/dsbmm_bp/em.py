@@ -373,6 +373,7 @@ class EM:
                 deg_corr=self.deg_corr,
                 directed=self.directed,
                 meta_types=self.meta_types,
+                use_meta=self.use_meta,
                 tuning_param=tuning_param,
                 verbose=self.verbose,
                 alpha_use_all=self.alpha_use_all,

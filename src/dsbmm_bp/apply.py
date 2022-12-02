@@ -21,210 +21,6 @@ from numba.typed import List
 from scipy import sparse
 from tqdm import tqdm
 
-parser = argparse.ArgumentParser(description="Apply model to data.")
-
-
-testset_names = ["og", "default", "scaling", "align", "scopus", "empirical"]
-parser.add_argument(
-    "--test",
-    type=str,
-    default="default",
-    help=f"Run chosen set of provided tests, options are {testset_names}, default is default.",
-    choices=testset_names,
-)
-parser.add_argument(
-    "--scopus_link_choice",
-    type=str,
-    default="ref",
-    help=f"Choice of type of link for Scopus data, options are 'ref' or 'au', default is ref.",
-    choices=["ref", "au"],
-)
-parser.add_argument(
-    "--data",
-    type=str,
-    default="./data",
-    help="Specify path to data directory. Default is ./data",
-)
-
-parser.add_argument(
-    "--num_groups",
-    type=int,
-    default=4,
-    help="Number of groups to use in the model. Default is 4, or whatever suitable for specified testset. Irrelevant if specify search over range of Q using min_Q etc.",
-    # NB for scopus, MFVI used 22 if link_choice == "au"
-    # else 19 if link_choice == "ref"
-)
-
-parser.add_argument(
-    "--min_Q",
-    type=int,
-    default=None,
-    help="Minimum number of groups to use, will search from here",
-)
-parser.add_argument(
-    "--max_Q",
-    type=int,
-    default=None,
-    help="Maximum number of groups to use, will search up to here",
-)
-
-parser.add_argument(
-    "--deg-corr", action="store_true", help="Use degree corrected version of model."
-)
-
-parser.add_argument(
-    "--directed",
-    action="store_true",
-    help="Use directed version of chosen model, otherwise will force symmetrise network",
-)
-
-parser.add_argument(
-    "--max_trials",
-    type=int,
-    default=None,
-    help="Maximum number of full trials to run, only used if min_Q, max_Q specified, in which case will search np.linspace(min_Q,max_Q,max_trials,dtype=int).",
-)
-
-parser.add_argument(
-    "--ret_best_only",
-    action="store_true",
-    help="Only return single best overall inferred partition, else return best partition for each Q trialled.",
-)
-
-parser.add_argument(
-    "--max_iter",
-    type=int,
-    default=150,
-    help="Maximum number of EM iterations to run. Default is 150.",
-)
-
-parser.add_argument(
-    "--patience",
-    type=int,
-    default=None,
-    help="Number of EM iterations to tolerate without reduction in energy before giving up. Default is None, i.e. complete all max iterations.",
-)
-
-parser.add_argument(
-    "--max_msg_iter",
-    type=int,
-    default=100,
-    help="Maximum number of message updates to run each EM iteration. Default is 100. Early iterations will use //3 of this value.",
-)
-
-parser.add_argument(
-    "--learning_rate",
-    "-lr",
-    type=float,
-    default=0.2,
-    help="Learning rate for updating params at each EM iter. Default is 0.2.",
-)
-
-parser.add_argument("--verbose", "-v", action="store_true", help="Print verbose output")
-
-parser.add_argument(
-    "--use-numba",
-    "-nb",
-    action="store_true",
-    help="Try with numba rather than numpy - currently seems slower for all, maybe other than v large nets",
-)
-
-parser.add_argument(
-    "--nb_parallel",
-    "-nbp",
-    action="store_true",
-    help="Try with numba parallelism",
-)
-
-parser.add_argument(
-    "--n_threads", type=int, help="Set number of threads used for parallelism"
-)
-
-parser.add_argument(
-    "--n_runs",
-    type=int,
-    default=5,
-    help="Set number of runs for each value of Q, default = 5",
-)
-
-parser.add_argument(
-    "--tuning_param",
-    "-tunp",
-    type=float,
-    default=1.0,
-    help="Set metadata tuning parameter value",
-)
-
-parser.add_argument(
-    "--auto_tune",
-    action="store_true",
-    help="Choose tuning parameter automatically according to heuristic suggested",
-)
-
-parser.add_argument(
-    "--ignore_meta",
-    action="store_true",
-    help="Ignore metadata, use only network edges for fitting model",
-)
-
-parser.add_argument(
-    "--freeze",
-    action="store_true",
-    help="Supply model true DSBMM parameters with exception of group labels, and do not update these",
-)
-
-parser.add_argument(
-    "--edge-weight",
-    type=str,
-    default=None,
-    help="Name of edge attribute to use as weight when constructing adjacency matrices, defaults to None (binary edges). Only important in DC model.",
-)
-
-parser.add_argument(
-    "--alpha_use_first",
-    action="store_true",
-    help="Use only first and previously missing node marginals to update alpha, rather than all marginals.",
-)
-
-parser.add_argument(
-    "--partial_informative_dsbmm_init",
-    "-pidsbmm",
-    action="store_true",
-    help="Use initial partition to partially plant DSBMM params, otherwise use minimally informative initialisation.",
-)
-
-parser.add_argument(
-    "--planted_p",
-    type=float,
-    default=0.6,
-    help="Weighting of parameter initialisation from initial partition vs non-informative initialisation, default is 0.6.",
-)
-
-parser.add_argument(
-    "--h_l", type=int, default=None, help="Max number of layers in hierarchy"
-)
-
-parser.add_argument(
-    "--h_Q",
-    type=int,
-    default=8,
-    help="Max number of groups to look for at each layer in the hierarchy, NB if h_Q>N/h_min_N then take h_Q = N//h_min_N instead",
-)
-
-parser.add_argument(
-    "--h_min_N",
-    type=int,
-    default=20,
-    help="Minimum number of nodes in group to be considered for recursion.",
-)
-
-args = parser.parse_args()
-
-if args.n_threads is not None:
-    from numba import set_num_threads
-
-    set_num_threads(args.n_threads)
-
 
 def init_pred_Z(N, T, ret_best_only=False, h_l=None, max_trials=None, n_runs=1):
     if ret_best_only:
@@ -689,6 +485,211 @@ def update_test_scores(verbose, test_aris, test_no, samp_no, true_Z, model):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Apply model to data.")
+
+    testset_names = ["og", "default", "scaling", "align", "scopus", "empirical"]
+    parser.add_argument(
+        "--test",
+        type=str,
+        default="default",
+        help=f"Run chosen set of provided tests, options are {testset_names}, default is default.",
+        choices=testset_names,
+    )
+    parser.add_argument(
+        "--scopus_link_choice",
+        type=str,
+        default="ref",
+        help=f"Choice of type of link for Scopus data, options are 'ref' or 'au', default is ref.",
+        choices=["ref", "au"],
+    )
+    parser.add_argument(
+        "--data",
+        type=str,
+        default="./data",
+        help="Specify path to data directory. Default is ./data",
+    )
+
+    parser.add_argument(
+        "--num_groups",
+        type=int,
+        default=4,
+        help="Number of groups to use in the model. Default is 4, or whatever suitable for specified testset. Irrelevant if specify search over range of Q using min_Q etc.",
+        # NB for scopus, MFVI used 22 if link_choice == "au"
+        # else 19 if link_choice == "ref"
+    )
+
+    parser.add_argument(
+        "--min_Q",
+        type=int,
+        default=None,
+        help="Minimum number of groups to use, will search from here",
+    )
+    parser.add_argument(
+        "--max_Q",
+        type=int,
+        default=None,
+        help="Maximum number of groups to use, will search up to here",
+    )
+
+    parser.add_argument(
+        "--deg-corr", action="store_true", help="Use degree corrected version of model."
+    )
+
+    parser.add_argument(
+        "--directed",
+        action="store_true",
+        help="Use directed version of chosen model, otherwise will force symmetrise network",
+    )
+
+    parser.add_argument(
+        "--max_trials",
+        type=int,
+        default=None,
+        help="Maximum number of full trials to run, only used if min_Q, max_Q specified, in which case will search np.linspace(min_Q,max_Q,max_trials,dtype=int).",
+    )
+
+    parser.add_argument(
+        "--ret_best_only",
+        action="store_true",
+        help="Only return single best overall inferred partition, else return best partition for each Q trialled.",
+    )
+
+    parser.add_argument(
+        "--max_iter",
+        type=int,
+        default=150,
+        help="Maximum number of EM iterations to run. Default is 150.",
+    )
+
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=None,
+        help="Number of EM iterations to tolerate without reduction in energy before giving up. Default is None, i.e. complete all max iterations.",
+    )
+
+    parser.add_argument(
+        "--max_msg_iter",
+        type=int,
+        default=100,
+        help="Maximum number of message updates to run each EM iteration. Default is 100. Early iterations will use //3 of this value.",
+    )
+
+    parser.add_argument(
+        "--learning_rate",
+        "-lr",
+        type=float,
+        default=0.2,
+        help="Learning rate for updating params at each EM iter. Default is 0.2.",
+    )
+
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Print verbose output"
+    )
+
+    parser.add_argument(
+        "--use-numba",
+        "-nb",
+        action="store_true",
+        help="Try with numba rather than numpy - currently seems slower for all, maybe other than v large nets",
+    )
+
+    parser.add_argument(
+        "--nb_parallel",
+        "-nbp",
+        action="store_true",
+        help="Try with numba parallelism",
+    )
+
+    parser.add_argument(
+        "--n_threads", type=int, help="Set number of threads used for parallelism"
+    )
+
+    parser.add_argument(
+        "--n_runs",
+        type=int,
+        default=5,
+        help="Set number of runs for each value of Q, default = 5",
+    )
+
+    parser.add_argument(
+        "--tuning_param",
+        "-tunp",
+        type=float,
+        default=1.0,
+        help="Set metadata tuning parameter value",
+    )
+
+    parser.add_argument(
+        "--auto_tune",
+        action="store_true",
+        help="Choose tuning parameter automatically according to heuristic suggested",
+    )
+
+    parser.add_argument(
+        "--ignore_meta",
+        action="store_true",
+        help="Ignore metadata, use only network edges for fitting model",
+    )
+
+    parser.add_argument(
+        "--freeze",
+        action="store_true",
+        help="Supply model true DSBMM parameters with exception of group labels, and do not update these",
+    )
+
+    parser.add_argument(
+        "--edge-weight",
+        type=str,
+        default=None,
+        help="Name of edge attribute to use as weight when constructing adjacency matrices, defaults to None (binary edges). Only important in DC model.",
+    )
+
+    parser.add_argument(
+        "--alpha_use_first",
+        action="store_true",
+        help="Use only first and previously missing node marginals to update alpha, rather than all marginals.",
+    )
+
+    parser.add_argument(
+        "--partial_informative_dsbmm_init",
+        "-pidsbmm",
+        action="store_true",
+        help="Use initial partition to partially plant DSBMM params, otherwise use minimally informative initialisation.",
+    )
+
+    parser.add_argument(
+        "--planted_p",
+        type=float,
+        default=0.6,
+        help="Weighting of parameter initialisation from initial partition vs non-informative initialisation, default is 0.6.",
+    )
+
+    parser.add_argument(
+        "--h_l", type=int, default=None, help="Max number of layers in hierarchy"
+    )
+
+    parser.add_argument(
+        "--h_Q",
+        type=int,
+        default=8,
+        help="Max number of groups to look for at each layer in the hierarchy, NB if h_Q>N/h_min_N then take h_Q = N//h_min_N instead",
+    )
+
+    parser.add_argument(
+        "--h_min_N",
+        type=int,
+        default=20,
+        help="Minimum number of nodes in group to be considered for recursion.",
+    )
+
+    args = parser.parse_args()
+
+    if args.n_threads is not None:
+        from numba import set_num_threads
+
+        set_num_threads(args.n_threads)
+
     if not os.path.exists("../../results/mlruns"):
         os.mkdir("../../results/mlruns")
     dir_path = os.path.abspath("../../results/mlruns")
