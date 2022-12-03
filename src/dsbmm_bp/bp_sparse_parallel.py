@@ -1,3 +1,4 @@
+# type: ignore
 # Immediate way of making sparse is to create an E x 4 matrix much as before, i.e. i,j,t, val rows
 # edge list, as don't actually need any matrix operations (can implement directly - faster
 # in numba and more clear anyway)
@@ -44,17 +45,11 @@ import csr
 import numba_bp_methods as parmeth
 import numpy as np
 import yaml
-from dsbmm_sparse_parallel import DSBMMSparseParallel
-from dsbmm_sparse_parallel import DSBMMSparseParallelBase
-from numba import bool_
-from numba import float64
-from numba import int32
-from numba import int64
-from numba import typeof
+from dsbmm_sparse_parallel import DSBMMSparseParallel, DSBMMSparseParallelBase
+from numba import bool_, float64, int32, int64, typeof
 from numba.experimental import jitclass
 from numba.typed import List
-from numba.types import Array
-from numba.types import ListType
+from numba.types import Array, ListType
 
 # from numba import float32
 

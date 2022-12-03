@@ -1,19 +1,22 @@
 import faulthandler
 import time
 
-import bp
-import bp_sparse
-import bp_sparse_parallel
-import dsbmm
-import dsbmm_sparse
-import dsbmm_sparse_parallel
 import numpy as np
-from np_par_bp_methods import NumpyBP
-from np_par_dsbmm_methods import NumpyDSBMM
 from numba.typed import List
 from scipy import sparse
 from sklearn.cluster import KMeans, MiniBatchKMeans
 from sklearn.metrics import adjusted_rand_score as ari
+
+from . import (
+    bp,
+    bp_sparse,
+    bp_sparse_parallel,
+    dsbmm,
+    dsbmm_sparse,
+    dsbmm_sparse_parallel,
+)
+from .np_par_bp_methods import NumpyBP
+from .np_par_dsbmm_methods import NumpyDSBMM
 
 # from utils import nb_ari_local  # , nb_nmi_local
 
