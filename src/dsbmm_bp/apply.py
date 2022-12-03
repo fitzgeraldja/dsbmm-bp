@@ -9,17 +9,16 @@ from functools import reduce
 from pathlib import Path
 
 import csr
-import data_processor
-import em
 import mlflow
 import networkx as nx
 import numpy as np
-import simulation
-import utils
 from mlflow import log_artifacts, log_metric, log_param
 from numba.typed import List
 from scipy import sparse
 from tqdm import tqdm
+
+# local package imports
+from . import data_processor, em, simulation, utils
 
 
 def init_pred_Z(N, T, ret_best_only=False, h_l=None, max_trials=None, n_runs=1):
@@ -29,7 +28,7 @@ def init_pred_Z(N, T, ret_best_only=False, h_l=None, max_trials=None, n_runs=1):
         else:
             pred_Z = np.zeros((h_l, N, T))
     else:
-        if args.h_l is None:
+        if h_l is None:
             pred_Z = np.zeros((max_trials, N, T))
         else:
             pred_Z = np.zeros((n_runs, h_l, N, T))
@@ -134,7 +133,9 @@ def run_hier_model(
     try_parallel=False,
     ret_Z=False,
     ret_probs=False,
+    ret_trans=False,
     save_to_file=True,
+    datetime_str=None,
 ):
     model_settings = dict(
         sparse_adj=True,
@@ -175,19 +176,30 @@ def run_hier_model(
             model = em.EM(data, **model_settings)
             fit_model_allow_interrupt(learning_rate, model)
             if ret_best_only:
+                tot_Q = model.Q
                 if h_l is None:
                     pred_Z = model.best_Z
+                    pi = model.pi
                 else:
                     pred_Z[layer, :, :] = model.best_Z
                     if ret_probs:
                         node_probs[:, :, : model.Q] = model.run_probs[0, ...]
+                    if ret_trans:
+                        pi = model.pi
             else:
+                tot_Q = np.repeat([model.Q], n_runs)
                 if h_l is None:
                     pred_Z = model.all_best_Zs
+                    if ret_trans:
+                        pi = model.all_pi
                 else:
                     pred_Z[:, layer, :, :] = model.all_best_Zs
                     if ret_probs:
                         node_probs[:, :, :, : model.Q] = model.run_probs
+                    if ret_trans:
+                        pi_1 = model.all_pi
+                        pis = [*pi_1]
+                        hier_pis = [[pi] for pi in pis]
             if ret_best_only:
                 tqdm.write(f"Best tuning param: {model.best_tun_param}")
             else:
@@ -204,6 +216,7 @@ def run_hier_model(
             if len(pred_Z.shape) == 3:
                 # only one run
                 pred_Z = np.expand_dims(pred_Z, 0)
+            new_Q = tot_Q.copy()
             for run_idx in range(pred_Z.shape[0]):
                 old_Z = pred_Z[run_idx, layer - 1, :, :]
                 qs = np.unique(old_Z[old_Z != -1])
@@ -214,7 +227,22 @@ def run_hier_model(
                     node_group_cnts, axis=0
                 )  # assigns each node its most common label
                 q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
+                if np.all(group_cnts <= h_min_N):
+                    tqdm.write(
+                        f"No remaining groups larger than minimum size specified in run {run_idx+1} at level {layer} -- run complete"
+                    )
+                    continue
                 suff_large_q_idxs = q_idxs[group_cnts > h_min_N]
+                n_suff_large = len(suff_large_q_idxs)
+                new_Q[run_idx] += n_suff_large * h_Q
+                small_q_idxs = q_idxs[group_cnts <= h_min_N]
+                n_small = (group_cnts <= h_min_N).sum()
+                # mark nodes belonging to small groups as unassigned at this level
+                pred_Z[run_idx, layer, np.isin(old_node_labels, small_q_idxs), :] = -1
+                if ret_trans:
+                    pi_lq = {q_idx: [] for q_idx in suff_large_q_idxs}
+                    hier_pis[run_idx].append(pi_lq)
+
                 for no_q, q in enumerate(tqdm(suff_large_q_idxs, desc="q_l")):
                     logging.info(
                         f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
@@ -238,24 +266,34 @@ def run_hier_model(
 
                     tmp_Z = model.best_Z
                     missing_nodes = tmp_Z == -1
-                    q_shift = np.power(h_Q, layer, dtype=int) + h_Q * no_q
+                    q_shift = h_Q * (tot_Q[run_idx] + no_q)
                     tmp_Z += q_shift  # shift labels to avoid overlap
                     tmp_Z[missing_nodes] = -1
 
                     logging.info(f"Found {len(np.unique(tmp_Z[tmp_Z!=-1]))} groups")
                     pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
+
                     if ret_probs:
                         node_probs[
-                            run_idx, :, :, q_shift : q_shift + model.Q
+                            run_idx,
+                            old_node_labels == q,
+                            :,
+                            q_shift : q_shift + model.Q,
                         ] = model.run_probs[0, ...]
+                    if ret_trans:
+                        pi_lq[q] = model.pi
+                        pis[run_idx] = utils.construct_hier_trans(
+                            hier_pis[run_idx],
+                            pred_Z[run_idx, : layer + 1, ...],
+                            h_min_N,
+                        )
+
                     logging.info(
                         f"Transferred {len(np.unique(pred_Z[run_idx, layer, old_node_labels == q, :][pred_Z[run_idx, layer, old_node_labels == q, :]!=-1]))} groups"
                     )
 
                     # save after each iteration in case of errors
-                    try:
-                        datetime_str
-                    except NameError:
+                    if datetime_str is None:
                         datetime_str = time.strftime(
                             "%d-%m_%H-%M", time.gmtime(time.time())
                         )
@@ -276,6 +314,15 @@ def run_hier_model(
                                 datetime_str,
                                 h_l=h_l,
                             )
+                        if ret_trans:
+                            save_trans(
+                                testset_name,
+                                RESULTS_DIR,
+                                pis,
+                                datetime_str,
+                                h_l=h_l,
+                            )
+                tot_Q[run_idx] = new_Q[run_idx]
         logging.info(f"Run complete for level {layer}, saving...")
         if save_to_file:
             save_emp_Z(
@@ -285,14 +332,34 @@ def run_hier_model(
                 save_node_probs(
                     testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=h_l
                 )
+            if ret_trans:
+                save_trans(
+                    testset_name,
+                    RESULTS_DIR,
+                    pis,
+                    datetime_str,
+                    h_l=h_l,
+                )
     if ret_Z:
         if ret_probs:
-            return pred_Z, node_probs
+            if ret_trans:
+                return pred_Z, node_probs, pis
+            else:
+                return pred_Z, node_probs
         else:
-            return pred_Z
+            if ret_trans:
+                return pred_Z, pis
+            else:
+                return pred_Z
     else:
         if ret_probs:
-            return node_probs
+            if ret_trans:
+                return node_probs, pis
+            else:
+                return node_probs
+        else:
+            if ret_trans:
+                return pis
 
 
 def subset_data(data, N, T, h_Q, h_min_N, old_node_labels, q):
@@ -357,6 +424,14 @@ def save_node_probs(testset_name, RESULTS_DIR, node_probs, datetime_str, h_l=Non
         "wb",
     ) as f:
         pickle.dump(node_probs, f)
+
+
+def save_trans(testset_name, RESULTS_DIR, pi, datetime_str, h_l=None):
+    with open(
+        RESULTS_DIR / f"{testset_name}_trans{'_h' if h_l else ''}_{datetime_str}.pkl",
+        "wb",
+    ) as f:
+        pickle.dump(pi, f)
 
 
 def save_test_results(
@@ -707,20 +782,10 @@ if __name__ == "__main__":
     # print("Experiment_id: {}".format(experiment.experiment_id))
 
     ## Simulate data (for multiple tests)
-    default_test_params = simulation.default_test_params
-    og_test_params = simulation.og_test_params
-    scaling_test_params = simulation.scaling_test_params
-    align_test_params = simulation.align_test_params
     testset_name = args.test
     # choose which set of tests to run
-    if testset_name == "og":
-        test_params = og_test_params
-    elif testset_name == "default":
-        test_params = default_test_params
-    elif testset_name == "scaling":
-        test_params = scaling_test_params
-    elif testset_name == "align":
-        test_params = align_test_params
+    if testset_name in ["default", "og", "scaling", "align"]:
+        test_params = simulation.get_testset_params(testset_name)
     else:
         test_params = None
     # NB n_samps, p_out, T, meta_types, L, meta_dims all fixed

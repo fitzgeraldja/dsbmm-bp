@@ -1,4 +1,4 @@
-from itertools import permutations
+from itertools import chain, combinations_with_replacement, permutations, product
 from typing import Generator
 
 import numpy as np
@@ -592,3 +592,198 @@ def max_overlap_over_perms(true_Z, pred_Z):
         if tmp_ol > max_ol:
             max_ol = tmp_ol
     return max_ol
+
+
+def construct_hier_trans(pis, pred_ZL, h_min_N):
+    """Construct transition matrix given set of pi inferred
+    for each level of a hierarchy, and number of descendant groups
+    at each level
+
+    :param pis: set of transition matrices -- length L list, with each element
+                either a (Q,Q) trans mat (first element), or a dict with keys
+                the group at level above to which corresponding groups belong,
+                and values the (Q,Q) trans mats inferred.
+                Assumed to descend hierarchy (smaller Q to larger Q)
+    :type pis: List[np.ndarray,dict[int,np.ndarray]]
+    :param total_Q: total number of groups present in hierarchy, including those
+                    that terminated at a higher level
+    :type total_Q: int
+    :param pred_ZL: predicted group labels at each level of hierarchy --
+                    np.ndarray shape (L,N,T) of ints
+    :type pred_ZL: np.ndarray
+    :param h_min_N: minimum number of nodes in a group at each level of hierarchy
+    :type h_min_N: int
+    """
+
+    L = len(pis)
+    topdown_hier, small_qs = get_hier(pred_ZL, h_min_N)
+    all_q = sorted(list(set(chain.from_iterable(topdown_hier[-1].values())) | small_qs))
+    all_q_at_l = [set(topdown_hier[0].keys())] + [
+        set(chain.from_iterable(topdown_hier[l].values())) for l in range(L - 1)
+    ]
+    bottomup_hier = []
+    lq_idxs = {q: q_idx for q_idx, q in enumerate(sorted(topdown_hier[0].keys()))}
+    for hier in topdown_hier[::-1]:
+        rev_hier = {}
+        for up_q, down_qs in hier.items():
+            for lq_idx, q in enumerate(sorted(down_qs)):
+                rev_hier[q] = up_q
+                lq_idxs[q] = lq_idx
+        bottomup_hier.append(rev_hier)
+
+    total_Q = len(all_q)
+    n_descs = {q: len(sub_qs) for q, sub_qs in topdown_hier[0].items()}
+    n_descs = {q: (v if v > 0 else 1) for q, v in n_descs.items()}
+    for l in range(1, L - 1):
+        # l_qs = list(topdown_hier[l].keys())
+        n_descs.update({q: len(sub_qs) for q, sub_qs in topdown_hier[l].items()})
+        for l_upper in range(l - 1, -1, -1):
+            for upper_q, l_qs in topdown_hier[l_upper].items():
+                for l_q in l_qs:
+                    n_descs[upper_q] += n_descs.get(l_q, 0)
+        if l == L - 2:  # last level
+            n_descs.update(
+                {q: 1 for q in chain.from_iterable(topdown_hier[l].values())}
+            )
+
+    all_hier_qs = np.unique(pred_ZL[pred_ZL != -1])
+    q_depth = {}
+    for q in enumerate(all_hier_qs):
+        for l, qs in enumerate(all_q_at_l):
+            if q in qs:
+                q_depth[q] = l
+    # for each (q,r) comb, collect (\ell,q^\ell,r^\ell,lq_idx,lr_idx) tuples,
+    # where lq_idx, rq_idx are the idxs of q^\ell, r^\ell resp. in the
+    # inferred model (so from 0 to h_Q-1)
+    anc_pairs = {}
+    for q_idx, r_idx in combinations_with_replacement(range(total_Q), 2):
+        q, r = all_q[q_idx], all_q[r_idx]
+        if q_idx == r_idx:
+            anc_pairs[(q_idx, r_idx)] = (
+                q_depth[q],
+                q,
+                r,
+                lq_idxs[q],
+                lq_idxs[r],
+            )
+        else:
+            if (q_depth[q] == 0) and (q_depth[r] == 0):
+                continue
+            elif (q_depth[q] == 0) and (q_depth[r] != 0):
+                for l in range(L - 1):
+                    r = bottomup_hier[l].get(r, r)
+                anc_pairs[(q_idx, r_idx)] = (
+                    0,
+                    q,
+                    r,
+                    lq_idxs[q],
+                    lq_idxs[r],
+                )
+            elif (q_depth[q] != 0) and (q_depth[r] == 0):
+                for l in range(L - 1):
+                    q = bottomup_hier[l].get(q, q)
+                anc_pairs[(q_idx, r_idx)] = (
+                    0,
+                    q,
+                    r,
+                    lq_idxs[q],
+                    lq_idxs[r],
+                )
+            else:
+                for l in range(L - 1):
+                    u_q, u_r = bottomup_hier[l].get(q, q), bottomup_hier[l].get(r, r)
+                    if u_q == u_r:
+                        anc_pairs[(q_idx, r_idx)] = (
+                            L - 1 - l,
+                            q,
+                            r,
+                            lq_idxs[q],
+                            lq_idxs[r],
+                        )
+                    else:
+                        q, r = u_q, u_r
+
+    pi = np.ones((total_Q, total_Q))
+    for q_idx, r_idx in product(range(total_Q), repeat=2):
+        if (q_idx, r_idx) in anc_pairs.keys():
+            ell, q, r, lq_idx, lr_idx = anc_pairs[(q_idx, r_idx)]
+        elif (r_idx, q_idx) in anc_pairs.keys():
+            ell, r, q, lr_idx, lq_idx = anc_pairs[(r_idx, q_idx)]
+        else:
+            raise ValueError(
+                "No ancestor relationship found for (%d,%d)" % (q_idx, r_idx)
+            )
+        if ell == 0:
+            pi[q_idx, r_idx] = pis[0][lq_idx, lr_idx] / n_descs[r]
+        else:
+            prefac = 1.0
+            # 0 is L-1, so ell is L-1-ell
+            for m in range(ell):
+                u_q = bottomup_hier[L - 1 - (ell - m)][q]
+                if ell - m - 1 == 0:
+                    prefac *= pis[0][lq_idxs[u_q], lq_idxs[u_q]]
+                else:
+                    uu_q = bottomup_hier[L - (ell - m)][u_q]
+                    prefac *= pis[ell - m - 1][uu_q][lq_idxs[u_q], lq_idxs[u_q]]
+            u_q = bottomup_hier[L - 1 - ell][q]
+            pi[q_idx, r_idx] = (
+                prefac * pis[ell][u_q][lq_idxs[q], lq_idxs[r]] / n_descs[r]
+            )
+    return pi
+
+
+def get_hier(pred_ZL, h_min_N):
+    """Given predicted group labels at each level of hierarchy, return
+    hierarchy as list of dicts length L-1, where for each element, keys
+    are labels at that level of hierarchy, value are array containing
+    labels at next level that are contained in that group
+
+    :param pred_ZL: predicted group labels at each level of hierarchy --
+                    np.ndarray shape (L,N,T) of ints
+    :type pred_ZL: np.ndarray
+    """
+    Z_1 = pred_ZL[0, ...]
+    L = pred_ZL.shape[0]
+    h_Q = len(np.unique(Z_1[Z_1 != -1]))
+    # NB use
+    # q_shift = h_Q*(n_suff_large + no_q) + n_small
+    # at each level, and n_small will belong to whatever level they
+    # first appeared, so can proceed recursively
+    l = 0
+    old_Z = pred_ZL[l, ...]
+    qs = np.unique(old_Z[old_Z != -1])
+    node_group_cnts = np.stack([(old_Z == q).sum(axis=1) for q in qs], axis=0)
+    old_node_labels = np.argmax(
+        node_group_cnts, axis=0
+    )  # assigns each node its most common label
+    q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
+    suff_large_q_idxs = q_idxs[group_cnts > h_min_N]
+    small_q_idxs = q_idxs[group_cnts <= h_min_N]
+    small_qs = set(small_q_idxs)
+    # n_suff_large = len(suff_large_q_idxs)
+    # n_small = (group_cnts <= h_min_N).sum()
+
+    topdown_hier = [{q: [] for q in range(h_Q)}]
+    for l in range(1, L):
+        Z_l = pred_ZL[l, ...]
+        # l_qs = np.unique(Z_l[Z_l!=-1])
+        for q in suff_large_q_idxs:
+            sub_Zq = Z_l[old_node_labels == q, :]
+            sub_q = np.unique(sub_Zq[sub_Zq != -1])
+            topdown_hier[l - 1][q] = sub_q
+
+        if l < L - 1:
+            old_Z = pred_ZL[l, ...]
+            qs = np.unique(old_Z[old_Z != -1])
+            node_group_cnts = np.stack([(old_Z == q).sum(axis=1) for q in qs], axis=0)
+            old_node_labels = np.argmax(
+                node_group_cnts, axis=0
+            )  # assigns each node its most common label
+            q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
+            suff_large_q_idxs = q_idxs[group_cnts > h_min_N]
+            # n_suff_large = len(suff_large_q_idxs)
+            small_q_idxs = q_idxs[group_cnts <= h_min_N]
+            small_qs |= set(small_q_idxs)
+            # n_small = (group_cnts <= h_min_N).sum()
+            topdown_hier.append({q: [] for q in suff_large_q_idxs})
+    return topdown_hier, small_qs

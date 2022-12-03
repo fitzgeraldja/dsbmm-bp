@@ -1,4 +1,3 @@
-# type: ignore
 import pickle
 
 import numpy as np
@@ -870,127 +869,139 @@ def toy_tests(
     return samps, param_grid
 
 
-################################################################
-##################   SPECIFY TESTSET PARAMS   ##################
-################################################################
-
-default_test_params = {}
-
-n_samps = 20
-default_test_params["n_samps"] = n_samps
-test_no = [1, 2, 3, 4, 5, 6, 7, 8]
-default_test_params["test_no"] = test_no
-N = [100, 100, 100, 100, 100, 100, 100, 100]
-default_test_params["N"] = N
-Q = [4, 4, 4, 4, 4, 4, 4, 4]
-default_test_params["Q"] = Q
-c_in = [
-    10,
-    10,
-    6,
-    6,
-    10,
-    6,
-    10,
-    6,
-]  # type: ignore
-p_in = [ci / ni for ci, ni in zip(c_in, N)]
-default_test_params["p_in"] = p_in
-c_out = 2
-p_out = [c_out / ni for ni in N]
-default_test_params["p_out"] = p_out
-p_stay = [
-    0.8,
-    0.6,
-    0.8,
-    0.6,
-    0.6,
-    0.8,
-    0.6,
-    0.6,
-]  # type: ignore
-default_test_params["p_stay"] = p_stay
-T = 5
-default_test_params["T"] = T
-meta_types = ["poisson", "indep bernoulli"]
-default_test_params["meta_types"] = meta_types
-L = 4
-default_test_params["L"] = L
-meta_dims = [1, L]  # type: ignore
-default_test_params["meta_dims"] = meta_dims
-pois_params = [
-    np.array(
-        [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
-    ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
-    for Q_i in Q
-]  # type: ignore
-base_bern_params = 0.1 * (np.ones((L, 1, T)))  # type: ignore # +np.random.normal(loc=0,scale=0.1))
-indep_bern_params = [
-    np.concatenate(
-        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
-        axis=1,
-    )
-    for Q_i in Q
-]  # type: ignore
-meta_params = list(zip(pois_params, indep_bern_params))
-default_test_params["meta_params"] = meta_params
-meta_align = [
-    True,
-    True,
-    True,
-    True,
-    False,
-    False,
-    False,
-    False,
-]  # type: ignore
-default_test_params["meta_align"] = meta_align
-
-# OG paper tests
-og_test_params = {}
-og_test_params["test_no"] = []
-og_test_params["n_samps"] = n_samps
-Q = 2
-og_test_params["Q"] = Q
-N = 100  # type: ignore
-og_test_params["N"] = N
-Ts = [5, 10]
-og_test_params["T"] = []  # type: ignore
-beta_11 = np.array([0.2, 0.25, 0.3, 0.4, 0.3])
-beta_12 = np.array([0.1, 0.1, 0.1, 0.1, 0.1])
-beta_22 = np.array([0.15, 0.2, 0.2, 0.2, 0.3])  # type: ignore
-beta_mats = [
-    np.array([[beta_11[i], beta_12[i]], [beta_12[i], beta_22[i]]])
-    for i in range(len(beta_11))
-]  # type: ignore
-og_test_params["beta_mat"] = []  # type: ignore
-
-# pi_low, pi_medium, pi_high from paper
-trans_mats = [gen_trans_mat(p, Q) for p in [0.6, 0.75, 0.9]]
-og_test_params["trans_mat"] = []
-
-meta_types = ["poisson", "indep bernoulli"]
-og_test_params["meta_types"] = meta_types
-L = 4
-og_test_params["L"] = L
-meta_dims = [1, L]
-og_test_params["meta_dims"] = meta_dims
-
-# meta_params_og = []
-og_test_params["sample_meta_params"] = True
-
-for bn, beta_mat in enumerate(beta_mats):
-    for trn, trans_mat in enumerate(trans_mats):
-        for tn, T in enumerate(Ts):
-            testno = 13 + bn * len(trans_mats) * len(Ts) + trn * len(Ts) + tn
-            # print(testno)
-            og_test_params["test_no"].append(testno)
-            og_test_params["T"].append(T)
-            og_test_params["trans_mat"].append(trans_mat)
-            og_test_params["beta_mat"].append(beta_mat)
+def get_testset_params(testset_name):
+    # specify testset params
+    if testset_name == "default":
+        return get_default_test_params()
+    elif testset_name == "og":
+        return get_og_test_params()
+    elif testset_name == "scaling":
+        return get_scaling_test_params()
+    elif testset_name == "align":
+        return get_align_test_params()
 
 
-# scaling tests
+def get_default_test_params():
+    default_test_params = {}
+
+    n_samps = 20
+    default_test_params["n_samps"] = n_samps
+    test_no = [1, 2, 3, 4, 5, 6, 7, 8]
+    default_test_params["test_no"] = test_no
+    N = [100, 100, 100, 100, 100, 100, 100, 100]
+    default_test_params["N"] = N
+    Q = [4, 4, 4, 4, 4, 4, 4, 4]
+    default_test_params["Q"] = Q
+    c_in = [
+        10,
+        10,
+        6,
+        6,
+        10,
+        6,
+        10,
+        6,
+    ]  # type: ignore
+    p_in = [ci / ni for ci, ni in zip(c_in, N)]
+    default_test_params["p_in"] = p_in
+    c_out = 2
+    p_out = [c_out / ni for ni in N]
+    default_test_params["p_out"] = p_out
+    p_stay = [
+        0.8,
+        0.6,
+        0.8,
+        0.6,
+        0.6,
+        0.8,
+        0.6,
+        0.6,
+    ]  # type: ignore
+    default_test_params["p_stay"] = p_stay
+    T = 5
+    default_test_params["T"] = T
+    meta_types = ["poisson", "indep bernoulli"]
+    default_test_params["meta_types"] = meta_types
+    L = 4
+    default_test_params["L"] = L
+    meta_dims = [1, L]  # type: ignore
+    default_test_params["meta_dims"] = meta_dims
+    pois_params = [
+        np.array(
+            [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
+        ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
+        for Q_i in Q
+    ]  # type: ignore
+    base_bern_params = 0.1 * (np.ones((L, 1, T)))  # type: ignore # +np.random.normal(loc=0,scale=0.1))
+    indep_bern_params = [
+        np.concatenate(
+            [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
+            axis=1,
+        )
+        for Q_i in Q
+    ]  # type: ignore
+    meta_params = list(zip(pois_params, indep_bern_params))
+    default_test_params["meta_params"] = meta_params
+    meta_align = [
+        True,
+        True,
+        True,
+        True,
+        False,
+        False,
+        False,
+        False,
+    ]  # type: ignore
+    default_test_params["meta_align"] = meta_align
+    return default_test_params
+
+
+def get_og_test_params():
+    # OG paper tests
+    og_test_params = {}
+    og_test_params["test_no"] = []
+    og_test_params["n_samps"] = n_samps
+    Q = 2
+    og_test_params["Q"] = Q
+    N = 100  # type: ignore
+    og_test_params["N"] = N
+    Ts = [5, 10]
+    og_test_params["T"] = []  # type: ignore
+    beta_11 = np.array([0.2, 0.25, 0.3, 0.4, 0.3])
+    beta_12 = np.array([0.1, 0.1, 0.1, 0.1, 0.1])
+    beta_22 = np.array([0.15, 0.2, 0.2, 0.2, 0.3])  # type: ignore
+    beta_mats = [
+        np.array([[beta_11[i], beta_12[i]], [beta_12[i], beta_22[i]]])
+        for i in range(len(beta_11))
+    ]  # type: ignore
+    og_test_params["beta_mat"] = []  # type: ignore
+
+    # pi_low, pi_medium, pi_high from paper
+    trans_mats = [gen_trans_mat(p, Q) for p in [0.6, 0.75, 0.9]]
+    og_test_params["trans_mat"] = []
+
+    meta_types = ["poisson", "indep bernoulli"]
+    og_test_params["meta_types"] = meta_types
+    L = 4
+    og_test_params["L"] = L
+    meta_dims = [1, L]
+    og_test_params["meta_dims"] = meta_dims
+
+    # meta_params_og = []
+    og_test_params["sample_meta_params"] = True
+
+    for bn, beta_mat in enumerate(beta_mats):
+        for trn, trans_mat in enumerate(trans_mats):
+            for tn, T in enumerate(Ts):
+                testno = 13 + bn * len(trans_mats) * len(Ts) + trn * len(Ts) + tn
+                # print(testno)
+                og_test_params["test_no"].append(testno)
+                og_test_params["T"].append(T)
+                og_test_params["trans_mat"].append(trans_mat)
+                og_test_params["beta_mat"].append(beta_mat)
+    return og_test_params
+
+
 def calc_det_limit(p_stay, c_in, c_out, Q, tol=1e-1):
     c = (c_in + (Q - 1) * c_out) / Q
     lam = (c_in - c_out) / (Q * c)
@@ -1004,104 +1015,111 @@ def calc_det_limit(p_stay, c_in, c_out, Q, tol=1e-1):
     # note that GCC exists in undirected graph iff E[k^2] - 2E[k] > 0, so this is also important
 
 
-scaling_test_params = {}
-n_tests = 20
-n_samps = 3
-scaling_test_params["n_samps"] = n_samps
-test_no = np.arange(400, 400 + n_tests)
-scaling_test_params["test_no"] = test_no
-N = np.floor(np.exp(np.linspace(5, 8, n_tests))).astype(int)
-scaling_test_params["N"] = N
-Q = np.floor(np.log(N)).astype(int)
-scaling_test_params["Q"] = Q
-c_in = 20
-p_in = [c_in / ni for ni in N]
-scaling_test_params["p_in"] = p_in
-c_out = 5
-p_out = [c_out / ni for ni in N]
-scaling_test_params["p_out"] = p_out
-p_stay = 0.8 * np.ones_like(N)
-scaling_test_params["p_stay"] = p_stay
+def get_scaling_test_params():
+    # scaling tests
 
-calc_det_limit(p_stay, c_in, c_out, Q)
+    scaling_test_params = {}
+    n_tests = 20
+    n_samps = 3
+    scaling_test_params["n_samps"] = n_samps
+    test_no = np.arange(400, 400 + n_tests)
+    scaling_test_params["test_no"] = test_no
+    N = np.floor(np.exp(np.linspace(5, 8, n_tests))).astype(int)
+    scaling_test_params["N"] = N
+    Q = np.floor(np.log(N)).astype(int)
+    scaling_test_params["Q"] = Q
+    c_in = 20
+    p_in = [c_in / ni for ni in N]
+    scaling_test_params["p_in"] = p_in
+    c_out = 5
+    p_out = [c_out / ni for ni in N]
+    scaling_test_params["p_out"] = p_out
+    p_stay = 0.8 * np.ones_like(N)
+    scaling_test_params["p_stay"] = p_stay
 
-T = 5
-scaling_test_params["T"] = T
-meta_types = ["poisson", "indep bernoulli"]
-scaling_test_params["meta_types"] = meta_types
-L = 4
-scaling_test_params["L"] = L
-meta_dims = [1, L]
-scaling_test_params["meta_dims"] = meta_dims
-pois_params = [
-    np.array(
-        [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
-    ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
-    for Q_i in Q
-]
-base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
-indep_bern_params = [
-    np.concatenate(
-        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
-        axis=1,
+    calc_det_limit(p_stay, c_in, c_out, Q)
+
+    T = 5
+    scaling_test_params["T"] = T
+    meta_types = ["poisson", "indep bernoulli"]
+    scaling_test_params["meta_types"] = meta_types
+    L = 4
+    scaling_test_params["L"] = L
+    meta_dims = [1, L]
+    scaling_test_params["meta_dims"] = meta_dims
+    pois_params = [
+        np.array(
+            [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
+        ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
+        for Q_i in Q
+    ]
+    base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
+    indep_bern_params = [
+        np.concatenate(
+            [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
+            axis=1,
+        )
+        for Q_i in Q
+    ]
+    meta_params = list(zip(pois_params, indep_bern_params))
+    scaling_test_params["meta_params"] = meta_params
+    meta_align = np.ones_like(N, dtype=bool)
+    scaling_test_params["meta_align"] = meta_align
+    return scaling_test_params
+
+
+def get_align_test_params():
+    # alignment tests
+    align_test_params = {}
+
+    n_samps = 20
+    n_tests = 40
+    align_test_params["n_samps"] = n_samps
+    test_no = np.arange(500, 500 + n_tests)
+    align_test_params["test_no"] = test_no
+    N = 100 * np.ones_like(test_no)
+    align_test_params["N"] = N
+    Q = 4 * np.ones_like(test_no)
+    align_test_params["Q"] = Q
+    c_in = np.concatenate(
+        [40 * np.ones(n_tests // 2), 30 * np.ones(n_tests - n_tests // 2)]
     )
-    for Q_i in Q
-]
-meta_params = list(zip(pois_params, indep_bern_params))
-scaling_test_params["meta_params"] = meta_params
-meta_align = np.ones_like(N, dtype=bool)
-scaling_test_params["meta_align"] = meta_align
-
-# alignment tests
-align_test_params = {}
-
-n_samps = 20
-n_tests = 40
-align_test_params["n_samps"] = n_samps
-test_no = np.arange(500, 500 + n_tests)
-align_test_params["test_no"] = test_no
-N = 100 * np.ones_like(test_no)
-align_test_params["N"] = N
-Q = 4 * np.ones_like(test_no)
-align_test_params["Q"] = Q
-c_in = np.concatenate(
-    [40 * np.ones(n_tests // 2), 30 * np.ones(n_tests - n_tests // 2)]
-)
-p_in = [ci / ni for ci, ni in zip(c_in, N)]
-align_test_params["p_in"] = p_in
-c_out = 10
-p_out = [c_out / ni for ni in N]
-align_test_params["p_out"] = p_out
-p_stay = 0.8 * np.ones_like(test_no)
-p_stay[::2] = 0.6
-align_test_params["p_stay"] = p_stay
-T = 5
-align_test_params["T"] = T
-meta_types = ["poisson", "indep bernoulli"]
-align_test_params["meta_types"] = meta_types
-L = 4
-align_test_params["L"] = L
-meta_dims = [1, L]
-align_test_params["meta_dims"] = meta_dims
-pois_params = [
-    np.array(
-        [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
-    ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
-    for Q_i in Q
-]
-base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
-indep_bern_params = [
-    np.concatenate(
-        [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
-        axis=1,
-    )
-    for Q_i in Q
-]
-meta_params = list(zip(pois_params, indep_bern_params))
-align_test_params["meta_params"] = meta_params
-tmp = np.linspace(0.1, 1.0, n_tests // 4)
-tmp = np.tile(tmp, 2)
-meta_align = np.zeros(n_tests)
-meta_align[::2] = tmp
-meta_align[1::2] = tmp
-align_test_params["meta_align"] = meta_align
+    p_in = [ci / ni for ci, ni in zip(c_in, N)]
+    align_test_params["p_in"] = p_in
+    c_out = 10
+    p_out = [c_out / ni for ni in N]
+    align_test_params["p_out"] = p_out
+    p_stay = 0.8 * np.ones_like(test_no)
+    p_stay[::2] = 0.6
+    align_test_params["p_stay"] = p_stay
+    T = 5
+    align_test_params["T"] = T
+    meta_types = ["poisson", "indep bernoulli"]
+    align_test_params["meta_types"] = meta_types
+    L = 4
+    align_test_params["L"] = L
+    meta_dims = [1, L]
+    align_test_params["meta_dims"] = meta_dims
+    pois_params = [
+        np.array(
+            [[[5 * (q + 1)] for q in range(Q_i)] for t in range(T)]
+        ).T  # + np.random.normal(loc=0.0,scale=0.5,size=(1,Q,T))
+        for Q_i in Q
+    ]
+    base_bern_params = 0.1 * (np.ones((L, 1, T)))  # +np.random.normal(loc=0,scale=0.1))
+    indep_bern_params = [
+        np.concatenate(
+            [base_bern_params * ib_fac for ib_fac in np.linspace(1, 9, Q_i)],
+            axis=1,
+        )
+        for Q_i in Q
+    ]
+    meta_params = list(zip(pois_params, indep_bern_params))
+    align_test_params["meta_params"] = meta_params
+    tmp = np.linspace(0.1, 1.0, n_tests // 4)
+    tmp = np.tile(tmp, 2)
+    meta_align = np.zeros(n_tests)
+    meta_align[::2] = tmp
+    meta_align[1::2] = tmp
+    align_test_params["meta_align"] = meta_align
+    return align_test_params

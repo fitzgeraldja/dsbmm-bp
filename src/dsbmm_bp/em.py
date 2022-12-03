@@ -437,6 +437,10 @@ class EM:
         self.true_Z = true_Z
 
         self.all_best_Zs = np.empty((len(self.trial_Qs), self.N, self.T))
+        if np.all(self.trial_Qs == self.trial_Qs[0]):
+            self.all_pi = np.empty(
+                (len(self.trial_Qs), self.trial_Qs[0], self.trial_Qs[0])
+            )
         self.best_tun_pars = np.ones_like(self.trial_Qs)
         if self.ret_probs:
             try:
@@ -592,6 +596,7 @@ class EM:
                     self.best_val_q = current_energy
                     self.bp.model.set_Z_by_MAP()
                     self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
+                    self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
                     self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
                     if self.ret_probs:
                         self.run_probs[self.q_idx, ...] = self.bp.model.node_marg.cop()

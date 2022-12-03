@@ -23,7 +23,7 @@ repos:
     rev: v0.961
     hooks:
     -   id: mypy # static type checking (from type annot)
-        args: [--ignore-missing-imports]
+        args: [--ignore-missing-imports, --namespace-packages]
 -   repo: https://github.com/pre-commit/mirrors-isort
     rev: v5.10.1
     hooks:
