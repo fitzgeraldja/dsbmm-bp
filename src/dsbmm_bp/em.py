@@ -7,14 +7,14 @@ from scipy import sparse
 from sklearn.cluster import KMeans, MiniBatchKMeans
 from sklearn.metrics import adjusted_rand_score as ari
 
-from . import (
-    bp,
-    bp_sparse,
-    bp_sparse_parallel,
-    dsbmm,
-    dsbmm_sparse,
-    dsbmm_sparse_parallel,
-)
+# from . import (
+#     bp,
+#     bp_sparse,
+#     bp_sparse_parallel,
+#     dsbmm,
+#     dsbmm_sparse,
+#     dsbmm_sparse_parallel,
+# )
 from .np_par_bp_methods import NumpyBP
 from .np_par_dsbmm_methods import NumpyDSBMM
 
@@ -291,85 +291,86 @@ class EM:
     def reset_model(self, tuning_param, set_Z=None, reinit=True):
         retext = "re" if reinit else ""
         if self.use_numba:
-            if self.sparse:
-                if self.parallel:
-                    self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
-                        A=self.A,
-                        X=self.X,
-                        Z=self.init_Z.copy() if set_Z is None else set_Z,
-                        Q=self.Q,
-                        deg_corr=self.deg_corr,
-                        meta_types=self.meta_types,
-                        tuning_param=tuning_param,
-                        verbose=self.verbose,
-                        use_meta=self.use_meta,
-                        auto_tune=self.auto_tune,
-                    )  # X=X,
-                    if self.frozen or self.params_to_set is not None:
-                        try:
-                            assert self.params_to_set is not None
-                        except AssertionError:
-                            raise ValueError(
-                                "If freezing EM then must pass suitable DSBMM parameters."
-                            )
-                        self.set_params(self.params_to_set)
-                    if self.verbose:
-                        print(f"Successfully {retext}instantiated DSBMM...")
-                    self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
-                    if self.verbose:
-                        print(f"Successfully {retext}instantiated BP system...")
-                else:
-                    self.dsbmm = dsbmm_sparse.DSBMMSparse(
-                        A=self.A,
-                        X=self.X,
-                        Z=self.init_Z.copy() if set_Z is None else set_Z,
-                        Q=self.Q,
-                        deg_corr=self.deg_corr,
-                        meta_types=self.meta_types,
-                        tuning_param=tuning_param,
-                        verbose=self.verbose,
-                        use_meta=self.use_meta,
-                        auto_tune=self.auto_tune,
-                    )  # X=X,
-                    if self.frozen or self.params_to_set is not None:
-                        try:
-                            assert self.params_to_set is not None
-                        except AssertionError:
-                            raise ValueError(
-                                "If freezing EM then must pass suitable DSBMM parameters."
-                            )
-                        self.set_params(self.params_to_set)
-                    if self.verbose:
-                        print(f"Successfully {retext}instantiated DSBMM...")
-                    self.bp = bp_sparse.BPSparse(self.dsbmm)
-                    if self.verbose:
-                        print(f"Successfully {retext}instantiated BP system...")
-            else:
-                self.dsbmm = dsbmm.DSBMM(
-                    A=self.A,
-                    X=self.X,
-                    Z=self.init_Z.copy() if set_Z is None else set_Z,
-                    Q=self.Q,
-                    deg_corr=self.deg_corr,
-                    meta_types=self.meta_types,
-                    tuning_param=tuning_param,
-                    verbose=self.verbose,
-                    use_meta=self.use_meta,
-                    auto_tune=self.auto_tune,
-                )  # X=X,
-                if self.frozen or self.params_to_set is not None:
-                    try:
-                        assert self.params_to_set is not None
-                    except AssertionError:
-                        raise ValueError(
-                            "If freezing EM then must pass suitable DSBMM parameters."
-                        )
-                    self.set_params(self.params_to_set)
-                if self.verbose:
-                    print(f"Successfully {retext}instantiated DSBMM...")
-                self.bp = bp.BP(self.dsbmm)
-                if self.verbose:
-                    print(f"Successfully {retext}instantiated BP system...")
+            raise ValueError("Currently pausing numba support")
+            # if self.sparse:
+            #     if self.parallel:
+            #         self.dsbmm = dsbmm_sparse_parallel.DSBMMSparseParallel(
+            #             A=self.A,
+            #             X=self.X,
+            #             Z=self.init_Z.copy() if set_Z is None else set_Z,
+            #             Q=self.Q,
+            #             deg_corr=self.deg_corr,
+            #             meta_types=self.meta_types,
+            #             tuning_param=tuning_param,
+            #             verbose=self.verbose,
+            #             use_meta=self.use_meta,
+            #             auto_tune=self.auto_tune,
+            #         )  # X=X,
+            #         if self.frozen or self.params_to_set is not None:
+            #             try:
+            #                 assert self.params_to_set is not None
+            #             except AssertionError:
+            #                 raise ValueError(
+            #                     "If freezing EM then must pass suitable DSBMM parameters."
+            #                 )
+            #             self.set_params(self.params_to_set)
+            #         if self.verbose:
+            #             print(f"Successfully {retext}instantiated DSBMM...")
+            #         self.bp = bp_sparse_parallel.BPSparseParallel(self.dsbmm)
+            #         if self.verbose:
+            #             print(f"Successfully {retext}instantiated BP system...")
+            #     else:
+            #         self.dsbmm = dsbmm_sparse.DSBMMSparse(
+            #             A=self.A,
+            #             X=self.X,
+            #             Z=self.init_Z.copy() if set_Z is None else set_Z,
+            #             Q=self.Q,
+            #             deg_corr=self.deg_corr,
+            #             meta_types=self.meta_types,
+            #             tuning_param=tuning_param,
+            #             verbose=self.verbose,
+            #             use_meta=self.use_meta,
+            #             auto_tune=self.auto_tune,
+            #         )  # X=X,
+            #         if self.frozen or self.params_to_set is not None:
+            #             try:
+            #                 assert self.params_to_set is not None
+            #             except AssertionError:
+            #                 raise ValueError(
+            #                     "If freezing EM then must pass suitable DSBMM parameters."
+            #                 )
+            #             self.set_params(self.params_to_set)
+            #         if self.verbose:
+            #             print(f"Successfully {retext}instantiated DSBMM...")
+            #         self.bp = bp_sparse.BPSparse(self.dsbmm)
+            #         if self.verbose:
+            #             print(f"Successfully {retext}instantiated BP system...")
+            # else:
+            #     self.dsbmm = dsbmm.DSBMM(
+            #         A=self.A,
+            #         X=self.X,
+            #         Z=self.init_Z.copy() if set_Z is None else set_Z,
+            #         Q=self.Q,
+            #         deg_corr=self.deg_corr,
+            #         meta_types=self.meta_types,
+            #         tuning_param=tuning_param,
+            #         verbose=self.verbose,
+            #         use_meta=self.use_meta,
+            #         auto_tune=self.auto_tune,
+            #     )  # X=X,
+            #     if self.frozen or self.params_to_set is not None:
+            #         try:
+            #             assert self.params_to_set is not None
+            #         except AssertionError:
+            #             raise ValueError(
+            #                 "If freezing EM then must pass suitable DSBMM parameters."
+            #             )
+            #         self.set_params(self.params_to_set)
+            #     if self.verbose:
+            #         print(f"Successfully {retext}instantiated DSBMM...")
+            #     self.bp = bp.BP(self.dsbmm)
+            #     if self.verbose:
+            #         print(f"Successfully {retext}instantiated BP system...")
         else:
             if self.verbose:
                 print(f"Successfully {retext}instantiated DSBMM...")
