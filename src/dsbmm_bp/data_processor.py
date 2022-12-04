@@ -81,13 +81,13 @@ def load_data(data_dir, edge_weight_choice=None, test_conn=False):
             """
         )
     edge_attrs = list(next(iter(nets[0].edges(data=True)))[-1].keys())
-    tqdm.write()
+    tqdm.write("")
     tqdm.write(f"Available edge attributes: {edge_attrs}")
     if edge_weight_choice is not None:
         tqdm.write(f"Choice passed for edge weights: {edge_weight_choice}")
     else:
         tqdm.write("No choice passed for edge weights -- will assume binary edges")
-    tqdm.write()
+    tqdm.write("")
     node_order = list(
         reduce(lambda res, x: set(res) | set(x), [list(net.nodes) for net in nets])  # type: ignore
     )
