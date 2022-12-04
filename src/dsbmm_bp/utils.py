@@ -1,3 +1,4 @@
+from asyncio import ensure_future
 from itertools import chain, combinations_with_replacement, permutations, product
 from typing import Generator
 
@@ -594,20 +595,17 @@ def max_overlap_over_perms(true_Z, pred_Z):
     return max_ol
 
 
-def construct_hier_trans(pis, pred_ZL, h_min_N):
+def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
     """Construct transition matrix given set of pi inferred
     for each level of a hierarchy, and number of descendant groups
     at each level
 
-    :param pis: set of transition matrices -- length L list, with each element
+    :param hier_pis_run: set of transition matrices -- length L list, with each element
                 either a (Q,Q) trans mat (first element), or a dict with keys
                 the group at level above to which corresponding groups belong,
                 and values the (Q,Q) trans mats inferred.
                 Assumed to descend hierarchy (smaller Q to larger Q)
-    :type pis: List[np.ndarray,dict[int,np.ndarray]]
-    :param total_Q: total number of groups present in hierarchy, including those
-                    that terminated at a higher level
-    :type total_Q: int
+    :type hier_pis_run: List[np.ndarray,dict[int,np.ndarray]]
     :param pred_ZL: predicted group labels at each level of hierarchy --
                     np.ndarray shape (L,N,T) of ints
     :type pred_ZL: np.ndarray
@@ -615,9 +613,14 @@ def construct_hier_trans(pis, pred_ZL, h_min_N):
     :type h_min_N: int
     """
 
-    L = len(pis)
+    L = len(hier_pis_run)
     topdown_hier, small_qs = get_hier(pred_ZL, h_min_N)
-    all_q = sorted(list(set(chain.from_iterable(topdown_hier[-1].values())) | small_qs))
+    # print(topdown_hier, small_qs)
+    all_q = np.unique(pred_ZL[-1, ...][pred_ZL[-1, ...] != -1])
+    all_q = np.concatenate([all_q, list(small_qs)])
+    all_q.sort()
+    h_Q = len(topdown_hier[0].keys())
+    # print(topdown_hier)
     all_q_at_l = [set(topdown_hier[0].keys())] + [
         set(chain.from_iterable(topdown_hier[l].values())) for l in range(L - 1)
     ]
@@ -633,25 +636,49 @@ def construct_hier_trans(pis, pred_ZL, h_min_N):
 
     total_Q = len(all_q)
     n_descs = {q: len(sub_qs) for q, sub_qs in topdown_hier[0].items()}
-    n_descs = {q: (v if v > 0 else 1) for q, v in n_descs.items()}
-    for l in range(1, L - 1):
-        # l_qs = list(topdown_hier[l].keys())
-        n_descs.update({q: len(sub_qs) for q, sub_qs in topdown_hier[l].items()})
-        for l_upper in range(l - 1, -1, -1):
-            for upper_q, l_qs in topdown_hier[l_upper].items():
-                for l_q in l_qs:
-                    n_descs[upper_q] += n_descs.get(l_q, 0)
-        if l == L - 2:  # last level
-            n_descs.update(
-                {q: 1 for q in chain.from_iterable(topdown_hier[l].values())}
-            )
+    if L == 2:
+        n_descs.update({q: 1 for q in chain.from_iterable(topdown_hier[0].values())})
+    else:
+        for l in range(1, L - 1):
+            # l_qs = list(topdown_hier[l].keys())
+            n_descs.update({q: len(sub_qs) for q, sub_qs in topdown_hier[l].items()})
+            for l_upper in range(l - 1, -1, -1):
+                for upper_q, l_qs in topdown_hier[l_upper].items():
+                    for l_q in l_qs:
+                        # n_descs should be total number of descs
+                        # at lowest level, i.e. total number of leaf
+                        # nodes branching from q
+                        if l_q in n_descs.keys():
+                            # previously counted as leaf, so now
+                            # need to add children - 1
+                            n_descs[upper_q] += n_descs[l_q] - 1
+
+            if l == L - 2:  # last level
+                n_descs.update(
+                    {q: 1 for q in chain.from_iterable(topdown_hier[l].values())}
+                )
+    n_descs = {q: (float(v) if v > 0 else 1.0) for q, v in n_descs.items()}
+    # add in small groups, who have no descs
+    n_descs.update({q: 1.0 for q in small_qs})
+    # REMOVE:
+    # try:
+    #     assert set(list(n_descs.keys())) == set(all_q)
+    # except AssertionError:
+    #     print(set(all_q) - set(list(n_descs.keys())))
+    #     print(small_qs)
+    #     print(topdown_hier)
+    #     raise ValueError("n_descs keys don't match all_q")
 
     all_hier_qs = np.unique(pred_ZL[pred_ZL != -1])
     q_depth = {}
-    for q in enumerate(all_hier_qs):
+    for q in all_hier_qs:
         for l, qs in enumerate(all_q_at_l):
             if q in qs:
                 q_depth[q] = l
+    # print(q_depth)
+    # print(total_Q)
+    # print(all_hier_qs)
+    # print(all_q_at_l)
     # for each (q,r) comb, collect (\ell,q^\ell,r^\ell,lq_idx,lr_idx) tuples,
     # where lq_idx, rq_idx are the idxs of q^\ell, r^\ell resp. in the
     # inferred model (so from 0 to h_Q-1)
@@ -668,7 +695,13 @@ def construct_hier_trans(pis, pred_ZL, h_min_N):
             )
         else:
             if (q_depth[q] == 0) and (q_depth[r] == 0):
-                continue
+                anc_pairs[(q_idx, r_idx)] = (
+                    0,
+                    q,
+                    r,
+                    lq_idxs[q],
+                    lq_idxs[r],
+                )
             elif (q_depth[q] == 0) and (q_depth[r] != 0):
                 for l in range(L - 1):
                     r = bottomup_hier[l].get(r, r)
@@ -690,8 +723,10 @@ def construct_hier_trans(pis, pred_ZL, h_min_N):
                     lq_idxs[r],
                 )
             else:
+                l_ctr = 0
                 for l in range(L - 1):
-                    u_q, u_r = bottomup_hier[l].get(q, q), bottomup_hier[l].get(r, r)
+                    u_q = bottomup_hier[l].get(q, q)
+                    u_r = bottomup_hier[l].get(r, r)
                     if u_q == u_r:
                         anc_pairs[(q_idx, r_idx)] = (
                             L - 1 - l,
@@ -700,10 +735,46 @@ def construct_hier_trans(pis, pred_ZL, h_min_N):
                             lq_idxs[q],
                             lq_idxs[r],
                         )
+                        break
+                    elif l == L - 2:
+                        # if we're at the last level and still haven't
+                        # found a common ancestor, must have split
+                        # immediately
+                        try:
+                            assert u_q < h_Q
+                            assert u_r < h_Q
+                        except AssertionError:
+                            print(q, r)
+                            print(u_q, u_r)
+                            print(bottomup_hier)
+                            print(l)
+                            if l_ctr > 0:
+                                for l in range(l_ctr):
+                                    print(bottomup_hier[l].keys())
+                                    print(bottomup_hier[l][r])
+                                    print(bottomup_hier[l].get(r, r))
+                                    try:
+                                        print(bottomup_hier[l][r])
+                                    except:
+                                        print(type(r))
+                                        print(
+                                            *[type(k) for k in bottomup_hier[l].keys()]
+                                        )
+                                        raise ValueError("something up with keys")
+                            raise ValueError("Problem w anc pairs")
+                        anc_pairs[(q_idx, r_idx)] = (
+                            0,
+                            u_q,
+                            u_r,
+                            lq_idxs[u_q],
+                            lq_idxs[u_r],
+                        )
                     else:
-                        q, r = u_q, u_r
+                        q = u_q
+                        r = u_r
+                    l_ctr += 1
 
-    pi = np.ones((total_Q, total_Q))
+    pi = np.zeros((total_Q, total_Q))
     for q_idx, r_idx in product(range(total_Q), repeat=2):
         if (q_idx, r_idx) in anc_pairs.keys():
             ell, q, r, lq_idx, lr_idx = anc_pairs[(q_idx, r_idx)]
@@ -714,21 +785,74 @@ def construct_hier_trans(pis, pred_ZL, h_min_N):
                 "No ancestor relationship found for (%d,%d)" % (q_idx, r_idx)
             )
         if ell == 0:
-            pi[q_idx, r_idx] = pis[0][lq_idx, lr_idx] / n_descs[r]
+            pi[q_idx, r_idx] = hier_pis_run[0][lq_idx, lr_idx] / n_descs[r]
         else:
             prefac = 1.0
             # 0 is L-1, so ell is L-1-ell
-            for m in range(ell):
-                u_q = bottomup_hier[L - 1 - (ell - m)][q]
-                if ell - m - 1 == 0:
-                    prefac *= pis[0][lq_idxs[u_q], lq_idxs[u_q]]
-                else:
-                    uu_q = bottomup_hier[L - (ell - m)][u_q]
-                    prefac *= pis[ell - m - 1][uu_q][lq_idxs[u_q], lq_idxs[u_q]]
             u_q = bottomup_hier[L - 1 - ell][q]
-            pi[q_idx, r_idx] = (
-                prefac * pis[ell][u_q][lq_idxs[q], lq_idxs[r]] / n_descs[r]
-            )
+            if ell == 1:
+                prefac *= hier_pis_run[0][lq_idxs[u_q], lq_idxs[u_q]]
+            else:
+                for m in range(ell):
+                    if ell - m - 1 == 0:
+                        prefac *= hier_pis_run[0][lq_idxs[uu_q], lq_idxs[u_q]]
+                    else:
+                        try:
+                            uu_q = bottomup_hier[L - 1 - (ell - m - 1)][u_q]
+                            prefac *= hier_pis_run[ell - m - 1][uu_q][
+                                lq_idxs[u_q], lq_idxs[u_q]
+                            ]
+                            u_q = uu_q
+                        except KeyError:
+                            print(u_q)
+                            print(ell, m)
+                            print(L - 1 - (ell - m))
+                            print(hier_pis_run[ell - m - 1].keys())
+                            print(bottomup_hier)
+                            print(ell - m)
+                            raise ValueError("key problem")
+                        except TypeError:
+                            print(u_q, uu_q)
+                            print(ell, m)
+                            print(L - 1 - (ell - m))
+                            print(bottomup_hier)
+                            print(ell - m)
+                            print(lq_idxs[u_q])
+                            raise ValueError("type problem")
+            u_q = bottomup_hier[L - 1 - ell][q]
+            if prefac > 1.0:
+                print(prefac)
+                raise ValueError("prefac > 1")
+            elif n_descs[r] < 1:
+                print(n_descs[r])
+                raise ValueError("n_descs[r] < 1")
+            try:
+                pi[q_idx, r_idx] = (
+                    prefac * hier_pis_run[ell][u_q][lq_idx, lr_idx]
+                ) / n_descs[r]
+            except KeyError:
+                print(ell, u_q)
+                print(hier_pis_run[ell][u_q])
+                print(lq_idxs[q])
+                print(lq_idxs[r])
+                print(topdown_hier)
+                print(n_descs[r])
+                raise ValueError("Key error")
+            except TypeError:
+                print(q_idx, r_idx)
+                print(L)
+                print(ell)
+                print(len(hier_pis_run))
+                print(u_q)
+                print(hier_pis_run[ell])
+                print(hier_pis_run[ell][u_q])
+                print(lq_idxs[u_q])
+                print(n_descs)
+                raise ValueError("type problem")
+    # print(n_descs)
+    # print(topdown_hier)
+    # print(anc_pairs)
+    # print(all_q)
     return pi
 
 
@@ -758,8 +882,9 @@ def get_hier(pred_ZL, h_min_N):
     )  # assigns each node its most common label
     q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
     suff_large_q_idxs = q_idxs[group_cnts > h_min_N]
+    suff_large_q = qs[suff_large_q_idxs]
     small_q_idxs = q_idxs[group_cnts <= h_min_N]
-    small_qs = set(small_q_idxs)
+    small_qs = set(qs[small_q_idxs])
     # n_suff_large = len(suff_large_q_idxs)
     # n_small = (group_cnts <= h_min_N).sum()
 
@@ -767,9 +892,12 @@ def get_hier(pred_ZL, h_min_N):
     for l in range(1, L):
         Z_l = pred_ZL[l, ...]
         # l_qs = np.unique(Z_l[Z_l!=-1])
-        for q in suff_large_q_idxs:
-            sub_Zq = Z_l[old_node_labels == q, :]
+        # print(suff_large_q)
+        for q_idx in suff_large_q_idxs:
+            q = qs[q_idx]
+            sub_Zq = Z_l[old_node_labels == q_idx, :]
             sub_q = np.unique(sub_Zq[sub_Zq != -1])
+            # print(sub_q)
             topdown_hier[l - 1][q] = sub_q
 
         if l < L - 1:
@@ -781,9 +909,11 @@ def get_hier(pred_ZL, h_min_N):
             )  # assigns each node its most common label
             q_idxs, group_cnts = np.unique(old_node_labels, return_counts=True)
             suff_large_q_idxs = q_idxs[group_cnts > h_min_N]
+            suff_large_q = qs[suff_large_q_idxs]
             # n_suff_large = len(suff_large_q_idxs)
             small_q_idxs = q_idxs[group_cnts <= h_min_N]
-            small_qs |= set(small_q_idxs)
+            small_qs |= set(qs[small_q_idxs])
             # n_small = (group_cnts <= h_min_N).sum()
-            topdown_hier.append({q: [] for q in suff_large_q_idxs})
+            topdown_hier.append({q: [] for q in suff_large_q})
+
     return topdown_hier, small_qs

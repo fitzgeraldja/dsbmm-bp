@@ -7,6 +7,7 @@ import time
 import warnings
 from functools import reduce
 from pathlib import Path
+from typing import Optional
 
 import csr
 import mlflow
@@ -24,14 +25,18 @@ from . import data_processor, em, simulation, utils
 def init_pred_Z(N, T, ret_best_only=False, h_l=None, max_trials=None, n_runs=1):
     if ret_best_only:
         if h_l is None:
-            pred_Z = np.zeros((N, T))
+            pred_Z = np.zeros((N, T), dtype=int)
         else:
-            pred_Z = np.zeros((h_l, N, T))
+            pred_Z = np.zeros((h_l, N, T), dtype=int)
+            # init other layers to -1
+            pred_Z[1:] = -1
     else:
         if h_l is None:
-            pred_Z = np.zeros((max_trials, N, T))
+            pred_Z = np.zeros((max_trials, N, T), dtype=int)
         else:
-            pred_Z = np.zeros((n_runs, h_l, N, T))
+            # init other layers to -1
+            pred_Z = np.zeros((n_runs, h_l, N, T), dtype=int)
+            pred_Z[:, 1:] = -1
     return pred_Z
 
 
@@ -111,12 +116,12 @@ def run_hier_model(
     hierarchy_layers,
     RESULTS_DIR,
     verbose=False,
-    link_choice=None,
+    link_choice: Optional[str] = None,
     h_l=None,
     h_Q=None,
     h_min_N=None,
     ret_best_only=False,
-    tuning_param=1.0,
+    tuning_param: Optional[float] = 1.0,
     learning_rate=0.2,
     n_runs=1,
     patience=3,
@@ -187,7 +192,7 @@ def run_hier_model(
                     if ret_trans:
                         pi = model.pi
             else:
-                tot_Q = np.repeat([model.Q], n_runs)
+                tot_Q = np.repeat([model.Q], n_runs, dtype=int)
                 if h_l is None:
                     pred_Z = model.all_best_Zs
                     if ret_trans:
@@ -233,6 +238,7 @@ def run_hier_model(
                     )
                     continue
                 suff_large_q_idxs = q_idxs[group_cnts > h_min_N]
+                suff_large_q = qs[suff_large_q_idxs]
                 n_suff_large = len(suff_large_q_idxs)
                 new_Q[run_idx] += n_suff_large * h_Q
                 small_q_idxs = q_idxs[group_cnts <= h_min_N]
@@ -240,23 +246,27 @@ def run_hier_model(
                 # mark nodes belonging to small groups as unassigned at this level
                 pred_Z[run_idx, layer, np.isin(old_node_labels, small_q_idxs), :] = -1
                 if ret_trans:
-                    pi_lq = {q_idx: [] for q_idx in suff_large_q_idxs}
+                    pi_lq: dict[int, np.ndarray] = {
+                        q_idx: np.array([]) for q_idx in suff_large_q_idxs
+                    }
                     hier_pis[run_idx].append(pi_lq)
 
-                for no_q, q in enumerate(tqdm(suff_large_q_idxs, desc="q_l")):
+                for no_q, q_idx in enumerate(tqdm(suff_large_q_idxs, desc="q_l")):
                     logging.info(
                         f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
                     )
-                    N = group_cnts[q]
+                    sub_N = group_cnts[q_idx]
                     logging.info(f"\t\t Considering {N} nodes...")
 
-                    sub_data = subset_data(data, N, T, h_Q, h_min_N, old_node_labels, q)
+                    sub_data = subset_data(
+                        data, sub_N, T, h_Q, h_min_N, old_node_labels, q_idx
+                    )
 
                     if np.all([A_t.sum() == 0 for A_t in sub_data["A"]]):
                         logging.info("No edges in subgraph, skipping...")
                         tqdm.write("No edges in subgraph, skipping...")
-                        tmp_Z = -1 * np.ones(N, T)
-                        pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
+                        tmp_Z = -1 * np.ones(sub_N, T)
+                        pred_Z[run_idx, layer, old_node_labels == q_idx, :] = tmp_Z
                         continue
 
                     model = em.EM(sub_data, **model_settings)
@@ -266,21 +276,22 @@ def run_hier_model(
 
                     tmp_Z = model.best_Z
                     missing_nodes = tmp_Z == -1
-                    q_shift = h_Q * (tot_Q[run_idx] + no_q)
+                    q_shift = tot_Q[run_idx] + h_Q * no_q
                     tmp_Z += q_shift  # shift labels to avoid overlap
                     tmp_Z[missing_nodes] = -1
 
                     logging.info(f"Found {len(np.unique(tmp_Z[tmp_Z!=-1]))} groups")
-                    pred_Z[run_idx, layer, old_node_labels == q, :] = tmp_Z
+                    pred_Z[run_idx, layer, old_node_labels == q_idx, :] = tmp_Z
 
                     if ret_probs:
                         node_probs[
                             run_idx,
-                            old_node_labels == q,
+                            old_node_labels == q_idx,
                             :,
                             q_shift : q_shift + model.Q,
                         ] = model.run_probs[0, ...]
                     if ret_trans:
+                        q = qs[q_idx]
                         pi_lq[q] = model.pi
                         pis[run_idx] = utils.construct_hier_trans(
                             hier_pis[run_idx],
