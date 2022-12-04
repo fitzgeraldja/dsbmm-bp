@@ -7,7 +7,8 @@ from numba import float64, int32, int64, typeof
 from numba.experimental import jitclass
 from numba.typed import List
 from numba.types import Array, ListType, bool_, unicode_type
-from utils import nb_ib_lkl, nb_poisson_lkl_int
+
+from .utils import nb_ib_lkl, nb_poisson_lkl_int
 
 # from numba import float32
 # from scipy import sparse

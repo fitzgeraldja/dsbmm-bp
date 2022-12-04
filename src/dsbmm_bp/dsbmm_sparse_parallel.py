@@ -1,12 +1,13 @@
 import csr
-import numba_dsbmm_methods as parmeth
 import numpy as np
 import yaml  # type: ignore
-from dsbmm_base import DSBMMTemplate
 from numba import float64, int32, int64, set_num_threads, typeof
 from numba.experimental import jitclass
 from numba.typed import List
 from numba.types import Array, ListType, bool_, unicode_type
+
+from . import numba_dsbmm_methods as parmeth
+from .dsbmm_base import DSBMMTemplate
 
 # from numba import float32
 

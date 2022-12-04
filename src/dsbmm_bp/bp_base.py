@@ -4,7 +4,7 @@
 # NB numba classes DO NOT support inheritance, so can only apply to wrappers - full separate
 # code needed for numba classes
 
-from dsbmm_base import DSBMMTemplate
+from .dsbmm_base import DSBMMTemplate
 
 
 class BPTemplate:

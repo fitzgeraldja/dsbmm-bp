@@ -10,14 +10,13 @@ import csr
 import em
 import mlflow
 import numpy as np
-import simulation
-import utils
 from mlflow import log_artifacts, log_metric, log_param
 from numba.typed import List
 from scipy import sparse
 from tqdm import tqdm
 
-from dsbmm_bp.utils import max_overlap_over_perms
+from . import simulation, utils
+from .utils import max_overlap_over_perms
 
 parser = argparse.ArgumentParser(
     description="Apply model to data simulated from toy model."

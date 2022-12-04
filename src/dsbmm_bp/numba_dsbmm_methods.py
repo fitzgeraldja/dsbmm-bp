@@ -3,7 +3,8 @@
 import numpy as np
 import yaml  # type: ignore
 from numba import njit, prange
-from utils import nb_ib_lkl, nb_poisson_lkl_int
+
+from .utils import nb_ib_lkl, nb_poisson_lkl_int
 
 with open("config.yaml") as f:
     config = yaml.load(f, Loader=yaml.FullLoader)

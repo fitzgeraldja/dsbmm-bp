@@ -45,11 +45,12 @@ import csr
 import numba_bp_methods as parmeth
 import numpy as np
 import yaml
-from dsbmm_sparse_parallel import DSBMMSparseParallel, DSBMMSparseParallelBase
 from numba import bool_, float64, int32, int64, typeof
 from numba.experimental import jitclass
 from numba.typed import List
 from numba.types import Array, ListType
+
+from .dsbmm_sparse_parallel import DSBMMSparseParallel, DSBMMSparseParallelBase
 
 # from numba import float32
 

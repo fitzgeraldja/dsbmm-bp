@@ -3,11 +3,12 @@
 # TODO: think about how could allow batching.
 import numpy as np
 import yaml
-from dsbmm import DSBMM, DSBMMBase
 from numba import bool_, float64, int32, int64, typeof
 from numba.experimental import jitclass
 from numba.typed import List
 from numba.types import Array, ListType
+
+from .dsbmm import DSBMM, DSBMMBase
 
 # from numba import float32
 

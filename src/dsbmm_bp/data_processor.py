@@ -6,11 +6,11 @@ import csr
 import networkx as nx
 import numpy as np
 import pandas as pd
-
-# local pkg imports
-import utils
 from scipy import sparse
 from tqdm import tqdm
+
+# local pkg imports
+from . import utils
 
 
 def load_data(data_dir, edge_weight_choice=None, test_conn=False):
