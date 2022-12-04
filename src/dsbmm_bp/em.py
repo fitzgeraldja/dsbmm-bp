@@ -28,14 +28,19 @@ from tqdm import tqdm
 
 # plt.ion()
 
+try:
+    with open("config.yaml") as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
 
-with open("config.yaml") as f:
-    config = yaml.load(f, Loader=yaml.FullLoader)
-
-MAX_MSG_ITER = config["max_msg_iter"]
-MSG_CONV_TOL = config["msg_conv_tol"]
-MAX_ITER = config["max_iter"]
-CONV_TOL = config["conv_tol"]
+    MAX_MSG_ITER = config["max_msg_iter"]
+    MSG_CONV_TOL = config["msg_conv_tol"]
+    MAX_ITER = config["max_iter"]
+    CONV_TOL = config["conv_tol"]
+except FileNotFoundError:
+    MAX_ITER = 100  # max num EM iterations
+    MAX_MSG_ITER = 30  # max num BP iterations each EM cycle
+    MSG_CONV_TOL = 1.0e-5  # conv tol for differences between messages after BP update
+    CONV_TOL = 1.0e-5  # total difference tol for params after EM run
 
 
 class EM:
@@ -432,8 +437,8 @@ class EM:
 
     def fit(
         self,
-        conv_tol=CONV_TOL,
-        msg_conv_tol=MSG_CONV_TOL,
+        conv_tol=1e-5,
+        msg_conv_tol=1e-5,
         true_Z=None,
         learning_rate=0.2,
     ):
