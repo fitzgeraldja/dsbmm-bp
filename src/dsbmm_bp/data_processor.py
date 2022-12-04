@@ -1,5 +1,6 @@
 import pickle
 import warnings
+from functools import reduce
 from pathlib import Path
 
 import csr
