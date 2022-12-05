@@ -128,9 +128,10 @@ def save_to_pif_form(
     A, X, out_dir, meta_names, region_col_id="region", age_col_id="career_age"
 ):
     """
-    Take temporal adjacency, A, in list of sparse matrices form,
-    and temporal metadata, X, in dense array form, and save
-    in out_dir converted to the form expected for PIF:
+    Take temporal adjacency, A, up until final time period
+    in list of sparse matrices form, and temporal metadata,
+    X, in dense array form, and save in out_dir converted
+    to the form expected for PIF:
 
     edgelist file
     - npz format, file named 'citation_links.npz', and array named 'edge_list'
@@ -169,11 +170,13 @@ def save_to_pif_form(
     """
     out_dir = Path(out_dir)
 
-    # convert edges to right form
+    # convert edges to right form, but w care as nans are
+    # counted as nonzero
+    tmp_A = [(A_t != 0) & (~np.isnan(A_t)) for A_t in A]
     edgelist = np.concatenate(
         [
             np.stack([*A_t.nonzero(), t * np.ones(A_t.nnz)]).T
-            for t, A_t in enumerate(A[:-1])
+            for t, A_t in enumerate(tmp_A[:-1])
         ]
     )
     # save edgelist
@@ -184,11 +187,13 @@ def save_to_pif_form(
     region_idx = meta_names.index(region_col_id)
     age_meta = X[age_idx]  # should be in shape (N,T,1)
     region_meta = X[region_idx]  # should be one-hot in shape (N,T,num_regions)
+    nz_age = (age_meta != 0) & (~np.isnan(age_meta))
+    nz_region = (region_meta != 0) & (~np.isnan(region_meta))
     # pair authors and timestep
     author_age_data = np.stack(
-        [*age_meta[..., 0].nonzero(), age_meta[age_meta.nonzero()]]
-    ).T
-    author_region_data = np.stack(region_meta.nonzero()).T
+        [*nz_age[..., 0].nonzero(), age_meta[nz_age.nonzero()]], axis=1
+    )
+    author_region_data = np.stack(nz_region.nonzero(), axis=1)
     # convert to dfs and join
     age_df = pd.DataFrame(
         author_age_data, columns=["auid_idx", "windowed_year", "career_age"]
