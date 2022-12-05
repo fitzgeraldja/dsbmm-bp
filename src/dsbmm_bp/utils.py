@@ -853,7 +853,7 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
     # print(topdown_hier)
     # print(anc_pairs)
     # print(all_q)
-    return pi
+    return pi, all_q
 
 
 def get_hier(pred_ZL, h_min_N):

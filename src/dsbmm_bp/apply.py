@@ -194,6 +194,7 @@ def run_hier_model(
                         pi_1 = model.all_pi
                         pis = [*pi_1]
                         hier_pis = [[pi] for pi in pis]
+                        all_q_at_L = [np.arange(model.Q) for _ in hier_pis]
 
             else:
                 tot_Q = np.repeat([model.Q], n_runs, dtype=int)
@@ -209,6 +210,7 @@ def run_hier_model(
                         pi_1 = model.all_pi
                         pis = [*pi_1]
                         hier_pis = [[pi] for pi in pis]
+                        all_q_at_L = [np.arange(model.Q) for _ in hier_pis]
             if ret_best_only:
                 tqdm.write(f"Best tuning param: {model.best_tun_param}")
             else:
@@ -294,6 +296,9 @@ def run_hier_model(
                             node_probs = np.pad(
                                 node_probs, ((0, 0), (0, 0), (0, 0), (0, Q_diff))
                             )
+                        # NB this will get node probs at every
+                        # level of hierarchy, not just the final
+                        # (like used for hier trans)
                         node_probs[
                             run_idx,
                             old_node_labels == q_idx,
@@ -303,7 +308,7 @@ def run_hier_model(
                     if ret_trans:
                         q = qs[q_idx]
                         pi_lq[q] = model.pi
-                        pis[run_idx] = utils.construct_hier_trans(
+                        pis[run_idx], all_q_at_L[run_idx] = utils.construct_hier_trans(
                             hier_pis[run_idx],
                             pred_Z[run_idx, : layer + 1, ...],
                             h_min_N,
@@ -364,6 +369,19 @@ def run_hier_model(
     if ret_Z:
         if ret_probs:
             if ret_trans:
+                # assume only want probs for groups at last layer
+                # if using trans, but as all_q_at_L could vary
+                # between runs will return a list instead of an
+                # array
+                node_probs = [
+                    run_probs[:, :, run_q]
+                    for run_probs, run_q in zip(node_probs, all_q_at_L)
+                ]
+                if np.all(
+                    [len(run_q) == len(all_q_at_L[0]) for run_q in all_q_at_L[1:]]
+                ):
+                    # dims match so can stack and return as array after all
+                    node_probs = np.stack(node_probs, axis=0)
                 return pred_Z, node_probs, pis
             else:
                 return pred_Z, node_probs
@@ -375,6 +393,16 @@ def run_hier_model(
     else:
         if ret_probs:
             if ret_trans:
+                # again take only probs for groups at last layer
+                node_probs = [
+                    run_probs[:, :, run_q]
+                    for run_probs, run_q in zip(node_probs, all_q_at_L)
+                ]
+                if np.all(
+                    [len(run_q) == len(all_q_at_L[0]) for run_q in all_q_at_L[1:]]
+                ):
+                    # dims match so can stack and return as array after all
+                    node_probs = np.stack(node_probs, axis=0)
                 return node_probs, pis
             else:
                 return node_probs
