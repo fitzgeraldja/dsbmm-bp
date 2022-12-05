@@ -452,7 +452,7 @@ class EM:
             self.all_pi = np.empty(
                 (len(self.trial_Qs), self.trial_Qs[0], self.trial_Qs[0])
             )
-        self.best_tun_pars = np.ones_like(self.trial_Qs)
+        self.best_tun_pars = np.ones_like(self.trial_Qs, dtype=float)
         if self.ret_probs:
             try:
                 assert np.all(self.trial_Qs == self.trial_Qs[0])
@@ -602,8 +602,13 @@ class EM:
                         self.bp.model.set_Z_by_MAP()
                         self.best_Z = self.bp.model.Z.copy()
                         self.pi = self.dsbmm._pi.copy()
-                        self.best_tun_param = self.dsbmm.tuning_param
-                        self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
+                        tmp_tun_param = self.dsbmm.tuning_param
+                        if tmp_tun_param > 1.0e4:
+                            tmp_tun_param = 1.0e4
+                        elif tmp_tun_param < 1.0e-4:
+                            tmp_tun_param = 1.0e-4
+                        self.best_tun_param = tmp_tun_param
+                        self.best_tun_pars[self.q_idx] = tmp_tun_param
                         self.max_energy_Z = self.bp.model.Z.copy()
                     elif current_energy < self.best_val_q:
                         # new best for q
@@ -612,7 +617,13 @@ class EM:
                         self.bp.model.set_Z_by_MAP()
                         self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
                         self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
-                        self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
+                        tmp_tun_param = self.dsbmm.tuning_param
+                        if tmp_tun_param > 1.0e4:
+                            tmp_tun_param = 1.0e4
+                        elif tmp_tun_param < 1.0e-4:
+                            tmp_tun_param = 1.0e-4
+                        self.best_tun_param = tmp_tun_param
+                        self.best_tun_pars[self.q_idx] = tmp_tun_param
                         if self.ret_probs:
                             self.run_probs[
                                 self.q_idx, ...
