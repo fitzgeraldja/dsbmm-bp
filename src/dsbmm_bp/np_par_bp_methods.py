@@ -1300,7 +1300,7 @@ class NumpyBP:
         back_term = self.backward_temp_msg_term()
         log_back_term = np.log(
             back_term,
-            where=self._pres_trans[:, :, np.newaxis],
+            where=self._pres_trans[:, :, np.newaxis] & (back_term > 0),
             out=np.zeros_like(back_term),
         )
         # make sure not sending info from t+1 to nodes that aren't present at t
@@ -1349,7 +1349,7 @@ class NumpyBP:
         forward_term = self.forward_temp_msg_term()
         log_forward_term = np.log(
             forward_term,
-            where=self._pres_trans[:, :, np.newaxis],
+            where=self._pres_trans[:, :, np.newaxis] & (forward_term > 0),
             # out=2 * np.log(TOL) * np.ones_like(forward_term),
             out=np.zeros_like(forward_term),
         )
@@ -1552,7 +1552,7 @@ class NumpyBP:
         back_term = self.backward_temp_msg_term()
         log_back_term = np.log(
             back_term,
-            where=self._pres_trans[:, :, np.newaxis],
+            where=self._pres_trans[:, :, np.newaxis] & (back_term > 0),
             out=np.zeros_like(back_term),
         )
         # log_back_term[~self._pres_trans, :] = 0.0
@@ -1561,7 +1561,7 @@ class NumpyBP:
         forward_term = self.forward_temp_msg_term()
         log_forward_term = np.log(
             forward_term,
-            where=self._pres_trans[:, :, np.newaxis],
+            where=self._pres_trans[:, :, np.newaxis] & (forward_term > 0),
             out=np.zeros_like(forward_term),
         )
         # use alpha where i not present at t-1, if i present at t
