@@ -172,7 +172,7 @@ def save_to_pif_form(
 
     # convert edges to right form, but w care as nans are
     # counted as nonzero, and can't use np.isnan on sparse mat
-    tmp_A = [(A_t != 0) & (utils.sparse_isnan(A_t, take_not=True)) for A_t in A]
+    tmp_A = [(A_t != 0) * (utils.sparse_isnan(A_t, take_not=True)) for A_t in A]
     edgelist = np.concatenate(
         [
             np.stack([*A_t.nonzero(), t * np.ones(A_t.nnz)]).T
