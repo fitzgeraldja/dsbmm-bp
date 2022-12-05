@@ -608,7 +608,7 @@ class EM:
                     self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
                     self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
                     if self.ret_probs:
-                        self.run_probs[self.q_idx, ...] = self.bp.model.node_marg.cop()
+                        self.run_probs[self.q_idx, ...] = self.bp.model.node_marg.copy()
                     if self.best_val_q < self.best_val:
                         self.best_val = self.best_val_q
                         self.best_Z = self.bp.model.Z.copy()
