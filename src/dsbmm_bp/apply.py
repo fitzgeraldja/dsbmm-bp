@@ -41,6 +41,7 @@ def init_pred_Z(N, T, ret_best_only=False, h_l=None, max_trials=None, n_runs=1):
 
 
 def init_trial_Qs(
+    N: int,
     min_Q=None,
     max_Q=None,
     max_trials=None,
@@ -1203,6 +1204,7 @@ if __name__ == "__main__":
         # = 4 if h_Q > N_l / 4
         # args.h_min_N, default=20, min. nodes for split
         trial_Qs = init_trial_Qs(
+            N,
             min_Q=args.min_Q,
             max_Q=args.max_Q,
             max_trials=args.max_trials,
