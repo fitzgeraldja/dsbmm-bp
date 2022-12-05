@@ -5,6 +5,7 @@ import numpy as np
 from csr import CSR
 from numba import bool_, int32, njit, prange
 from numba.typed import List
+from scipy import sparse
 
 
 @njit(parallel=True, cache=True)
@@ -916,3 +917,14 @@ def get_hier(pred_ZL, h_min_N):
             topdown_hier.append({q: [] for q in suff_large_q})
 
     return topdown_hier, small_qs
+
+
+def sparse_isnan(A: sparse.csr_array):
+    """Return boolean array of same shape as A indicating whether each
+    element is nan or not
+
+    :param A: sparse array with nan values
+    :type A: sparse.csr_array
+    """
+    indptr, indices, data = A.indptr, A.indices, A.data
+    return sparse.csr_array((np.isnan(data), indices, indptr), shape=A.shape)
