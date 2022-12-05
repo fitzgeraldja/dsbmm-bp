@@ -181,7 +181,7 @@ def run_hier_model(
             model = em.EM(data, **model_settings)
             fit_model_allow_interrupt(learning_rate, model)
             if ret_best_only:
-                tot_Q = model.Q
+                tot_Q = model.Q * np.ones((1,), dtype=int)
                 if h_l is None:
                     pred_Z = model.best_Z
                     if ret_trans:
