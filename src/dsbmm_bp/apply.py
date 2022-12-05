@@ -369,16 +369,23 @@ def run_hier_model(
                 run_probs[:, :, run_q]
                 for run_probs, run_q in zip(node_probs, all_q_at_L)
             ]
-            if np.all([len(run_q) == len(all_q_at_L[0]) for run_q in all_q_at_L[1:]]):
-                # dims match so can stack and return as array after all
+            if pred_Z.shape[0] == 1:
+                # only single run, can return as 3D array
+                node_probs = node_probs[0]
+            elif np.all([len(run_q) == len(all_q_at_L[0]) for run_q in all_q_at_L[1:]]):
+                # dims match so can stack and return as 4D array after all
                 node_probs = np.stack(node_probs, axis=0)
             res.append(node_probs)
 
         else:
             res.append(node_probs)
     if ret_trans:
+        if pred_Z.shape[0] == 1:
+            pis = pis[0]
         res.append(pis)
     if ret_block_probs:
+        if pred_Z.shape[0] == 1:
+            block_probs = block_probs[0]
         res.append(block_probs)
     if len(res) == 1:
         return res[0]

@@ -2,7 +2,8 @@ import warnings
 
 import numpy as np
 import yaml  # type: ignore
-from numba import njit
+from numba import float64, njit
+from numba.typing import Dict
 from scipy import sparse
 from scipy.special import gammaln
 from tqdm import tqdm
@@ -1197,6 +1198,10 @@ class NumpyBP:
         #         ]
         #     )
         # TODO: consider replacing this calc with numba implementation else likely bottleneck
+        # @njit
+        # def calc_log_spat_msg(
+        #     log_spatial_field_terms: float64[:,:], nz_idxs: Dict[]
+        # )
         log_spatial_msg = np.stack(
             [
                 np.array(
