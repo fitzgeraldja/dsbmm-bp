@@ -1266,14 +1266,16 @@ class NumpyBP:
                 #         elif tuning_fac > 1e3:
                 #             tuning_fac = 1e3
                 if self.auto_tune:
-                    tqdm.write(
-                        f"Automatically changing tuning parameter to {tuning_fac:.3g}."
-                    )
+                    if self.verbose:
+                        tqdm.write(
+                            f"Automatically changing tuning parameter to {tuning_fac:.3g}."
+                        )
                     self.model.tuning_param = tuning_fac
                 else:
                     tqdm.write(
-                        f"Tuning parameter might be better replaced by something around {tuning_fac:.3g}."
+                        f"NB tuning parameter might be better replaced by something around {tuning_fac:.3g}."
                     )
+                    self.tun_par_heuristic = False
         if self.use_meta:
             log_spatial_msg += self.log_meta_prob
         # if small_deg:
