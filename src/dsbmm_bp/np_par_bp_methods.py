@@ -1184,6 +1184,8 @@ class NumpyBP:
             assert np.all(spatial_field_terms <= 0)
             tqdm.write("All spatial field terms <= 0, can't continue")
             self.msg_diff = 0.0
+            self.model.diff = 0.0
+            self.model.frozen = True
             return None
         # just leave as doing via logs, should be fine and probably faster
         # large_degs = degs[:,:,0] > LARGE_DEG_THR
