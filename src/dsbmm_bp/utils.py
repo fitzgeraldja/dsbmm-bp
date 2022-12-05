@@ -827,7 +827,7 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
                             print(lq_idxs[u_q])
                             raise ValueError("type problem")
             u_q = bottomup_hier[L - 1 - ell][q]
-            if prefac > 1.0:
+            if np.any(prefac > 1.0):
                 print(prefac)
                 raise ValueError("prefac > 1")
             elif n_descs[r] < 1:
