@@ -184,13 +184,17 @@ def run_hier_model(
                 tot_Q = model.Q
                 if h_l is None:
                     pred_Z = model.best_Z
-                    pi = model.pi
+                    if ret_trans:
+                        pi = model.pi
                 else:
                     pred_Z[layer, :, :] = model.best_Z
                     if ret_probs:
                         node_probs[:, :, : model.Q] = model.run_probs[0, ...]
                     if ret_trans:
-                        pi = model.pi
+                        pi_1 = model.all_pi
+                        pis = [*pi_1]
+                        hier_pis = [[pi] for pi in pis]
+
             else:
                 tot_Q = np.repeat([model.Q], n_runs, dtype=int)
                 if h_l is None:
