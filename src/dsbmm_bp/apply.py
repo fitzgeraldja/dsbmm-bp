@@ -289,6 +289,11 @@ def run_hier_model(
                     pred_Z[run_idx, layer, old_node_labels == q_idx, :] = tmp_Z
 
                     if ret_probs:
+                        if q_shift + model.Q > node_probs.shape[-1]:
+                            Q_diff = q_shift + model.Q - node_probs.shape[-1]
+                            node_probs = np.pad(
+                                node_probs, ((0, 0), (0, 0), (0, 0), (0, Q_diff))
+                            )
                         node_probs[
                             run_idx,
                             old_node_labels == q_idx,
