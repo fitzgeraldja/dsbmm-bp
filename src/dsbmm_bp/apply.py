@@ -223,8 +223,9 @@ def run_hier_model(
                 )
         else:
             if len(pred_Z.shape) == 3:
-                # only one run
+                # only one run, just expand so can use same code
                 pred_Z = np.expand_dims(pred_Z, 0)
+                node_probs = np.expand_dims(node_probs, 0)
             new_Q = tot_Q.copy()
             for run_idx in range(pred_Z.shape[0]):
                 old_Z = pred_Z[run_idx, layer - 1, :, :]
