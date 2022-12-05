@@ -528,7 +528,10 @@ class EM:
 
     def do_run(self, conv_tol, msg_conv_tol, learning_rate):
         self.poor_iter_ctr = 0  # ctr for iters without reduction in free energy
-        for n_iter in tqdm(range(self.max_iter), desc="EM iter", leave=False):
+        diff = 1.0
+        for n_iter in tqdm(
+            range(self.max_iter), desc=f"EM iter, diff {diff:.3g}", leave=False
+        ):
             if self.verbose:
                 tqdm.write(f"\n##### At iteration {n_iter+1} #####")
                 self.xdata.append(n_iter)
@@ -586,6 +589,8 @@ class EM:
             else:
                 diff = 1.0
             if self.true_Z is None:
+                # TODO: should change to only compute free energy
+                # every few iters to speed up
                 current_energy = self.bp.compute_free_energy()
                 if self.best_val_q == 0.0:
                     self.max_energy = current_energy
