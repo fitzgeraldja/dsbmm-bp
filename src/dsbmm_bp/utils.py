@@ -617,7 +617,7 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
     topdown_hier, small_qs = get_hier(pred_ZL, h_min_N)
     # print(topdown_hier, small_qs)
     all_q = np.unique(pred_ZL[-1, ...][pred_ZL[-1, ...] != -1])
-    all_q = np.concatenate([all_q, list(small_qs)])
+    all_q = np.concatenate([all_q, list(small_qs)]).astype(int)
     all_q.sort()
     h_Q = len(topdown_hier[0].keys())
     # print(topdown_hier)
