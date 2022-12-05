@@ -598,12 +598,14 @@ def max_overlap_over_perms(true_Z, pred_Z):
 def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
     """Construct transition matrix given set of pi inferred
     for each level of a hierarchy, and number of descendant groups
-    at each level
+    at each level. NB same process + code can be used to construct
+    block probs, only difference is 'hier_pis_run' will now
+    actually be hier_block_probs_run, and be (Q,Q,T) instead of (Q,Q)
 
     :param hier_pis_run: set of transition matrices -- length L list, with each element
-                either a (Q,Q) trans mat (first element), or a dict with keys
-                the group at level above to which corresponding groups belong,
-                and values the (Q,Q) trans mats inferred.
+                either a (Q,Q(,T)) trans (block prob) mat (first element), or a dict with
+                keys the group at level above to which corresponding groups belong,
+                and values the (Q,Q(,T)) trans (block prob) mats inferred.
                 Assumed to descend hierarchy (smaller Q to larger Q)
     :type hier_pis_run: List[np.ndarray,dict[int,np.ndarray]]
     :param pred_ZL: predicted group labels at each level of hierarchy --
@@ -774,7 +776,12 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
                         r = u_r
                     l_ctr += 1
 
-    pi = np.zeros((total_Q, total_Q))
+    if len(list(hier_pis_run[0].values())[0].shape) > 2:
+        # actually passed block probs
+        T = list(hier_pis_run[0].values())[0].shape[-1]
+        pi = np.zeros((total_Q, total_Q, T))
+    else:
+        pi = np.zeros((total_Q, total_Q))
     for q_idx, r_idx in product(range(total_Q), repeat=2):
         if (q_idx, r_idx) in anc_pairs.keys():
             ell, q, r, lq_idx, lr_idx = anc_pairs[(q_idx, r_idx)]
@@ -931,3 +938,62 @@ def sparse_isnan(A: sparse.csr_array, take_not=False):
         return sparse.csr_array((~np.isnan(data), indices, indptr), shape=A.shape)
     else:
         return sparse.csr_array((np.isnan(data), indices, indptr), shape=A.shape)
+
+
+def init_pred_Z(N, T, ret_best_only=False, h_l=None, max_trials=None, n_runs=1):
+    if ret_best_only:
+        if h_l is None:
+            pred_Z = np.zeros((N, T), dtype=int)
+        else:
+            pred_Z = np.zeros((h_l, N, T), dtype=int)
+            # init other layers to -1
+            pred_Z[1:] = -1
+    else:
+        if h_l is None:
+            pred_Z = np.zeros((max_trials, N, T), dtype=int)
+        else:
+            # init other layers to -1
+            pred_Z = np.zeros((n_runs, h_l, N, T), dtype=int)
+            pred_Z[:, 1:] = -1
+    return pred_Z
+
+
+def init_trial_Qs(
+    N: int,
+    min_Q=None,
+    max_Q=None,
+    max_trials=None,
+    h_l=None,
+    num_groups=None,
+    h_Q=None,
+    h_min_N=None,
+    n_runs=1,
+):
+    if min_Q is not None or max_Q is not None or max_trials is not None:
+        try:
+            assert h_l is None
+        except AssertionError:
+            raise NotImplementedError(
+                "Hierarchical search over range of Q at each level currently not supported"
+            )
+        try:
+            assert min_Q is not None
+            assert max_Q is not None
+            assert max_trials is not None
+        except AssertionError:
+            raise ValueError(
+                "If specifying search for Q, must specify all of --min_Q, --max_Q, and --max_trials"
+            )
+        trial_Qs = np.linspace(min_Q, max_Q, max_trials, dtype=int)
+    else:
+        if h_l is None:
+            trial_Qs = [num_groups]
+        else:
+            trial_Qs = [h_Q if h_Q < N / h_min_N else N // h_min_N] * n_runs
+            try:
+                assert trial_Qs[0] > 0
+            except AssertionError:
+                raise ValueError(
+                    "Minimum number of nodes to consider at each level of hierarchy must be less than total number of nodes."
+                )
+    return trial_Qs

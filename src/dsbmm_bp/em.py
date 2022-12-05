@@ -452,6 +452,9 @@ class EM:
             self.all_pi = np.empty(
                 (len(self.trial_Qs), self.trial_Qs[0], self.trial_Qs[0])
             )
+            self.all_bps = np.empty(
+                (len(self.trial_Qs), self.trial_Qs[0], self.trial_Qs[0], self.T)
+            )
         self.best_tun_pars = np.ones_like(self.trial_Qs, dtype=float)
         if self.ret_probs:
             try:
@@ -520,6 +523,7 @@ class EM:
             if self.best_Z is None:
                 self.best_Z = self.bp.model.Z.copy()
                 self.pi = self.dsbmm._pi.copy()
+                self.block_prob = self.bp.block_edge_prob.copy()
             try:
                 self.reinit(tuning_param=self.best_tun_param, set_Z=self.best_Z)
             except Exception:  # AttributeError:
@@ -600,6 +604,7 @@ class EM:
                         self.bp.model.set_Z_by_MAP()
                         self.best_Z = self.bp.model.Z.copy()
                         self.pi = self.dsbmm._pi.copy()
+                        self.block_prob = self.bp.block_edge_prob.copy()
                         tmp_tun_param = self.dsbmm.tuning_param
                         if tmp_tun_param > 1.0e4:
                             tmp_tun_param = 1.0e4
@@ -615,6 +620,7 @@ class EM:
                         self.bp.model.set_Z_by_MAP()
                         self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
                         self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
+                        self.all_bps[self.q_idx, ...] = self.bp.block_edge_prob.copy()
                         tmp_tun_param = self.dsbmm.tuning_param
                         if tmp_tun_param > 1.0e4:
                             tmp_tun_param = 1.0e4
@@ -630,6 +636,7 @@ class EM:
                             self.best_val = self.best_val_q
                             self.best_Z = self.bp.model.Z.copy()
                             self.pi = self.dsbmm._pi.copy()
+                            self.block_prob = self.bp.block_edge_prob.copy()
                             self.best_tun_param = self.dsbmm.tuning_param
 
                     else:
@@ -650,6 +657,7 @@ class EM:
                     self.best_val = current_score.mean()
                     self.best_Z = self.bp.model.Z.copy()
                     self.pi = self.dsbmm._pi.copy()
+                    self.block_prob = self.bp.block_edge_prob.copy()
             if self.verbose:
                 self.bp.model.set_Z_by_MAP()
                 if self.true_Z is not None:

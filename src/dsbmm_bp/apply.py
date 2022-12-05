@@ -22,68 +22,9 @@ from tqdm import tqdm
 from . import data_processor, em, simulation, utils
 
 
-def init_pred_Z(N, T, ret_best_only=False, h_l=None, max_trials=None, n_runs=1):
-    if ret_best_only:
-        if h_l is None:
-            pred_Z = np.zeros((N, T), dtype=int)
-        else:
-            pred_Z = np.zeros((h_l, N, T), dtype=int)
-            # init other layers to -1
-            pred_Z[1:] = -1
-    else:
-        if h_l is None:
-            pred_Z = np.zeros((max_trials, N, T), dtype=int)
-        else:
-            # init other layers to -1
-            pred_Z = np.zeros((n_runs, h_l, N, T), dtype=int)
-            pred_Z[:, 1:] = -1
-    return pred_Z
-
-
-def init_trial_Qs(
-    N: int,
-    min_Q=None,
-    max_Q=None,
-    max_trials=None,
-    h_l=None,
-    num_groups=None,
-    h_Q=None,
-    h_min_N=None,
-    n_runs=1,
-):
-    if min_Q is not None or max_Q is not None or max_trials is not None:
-        try:
-            assert h_l is None
-        except AssertionError:
-            raise NotImplementedError(
-                "Hierarchical search over range of Q at each level currently not supported"
-            )
-        try:
-            assert min_Q is not None
-            assert max_Q is not None
-            assert max_trials is not None
-        except AssertionError:
-            raise ValueError(
-                "If specifying search for Q, must specify all of --min_Q, --max_Q, and --max_trials"
-            )
-        trial_Qs = np.linspace(min_Q, max_Q, max_trials, dtype=int)
-    else:
-        if h_l is None:
-            trial_Qs = [num_groups]
-        else:
-            trial_Qs = [h_Q if h_Q < N / h_min_N else N // h_min_N] * n_runs
-            try:
-                assert trial_Qs[0] > 0
-            except AssertionError:
-                raise ValueError(
-                    "Minimum number of nodes to consider at each level of hierarchy must be less than total number of nodes."
-                )
-    return trial_Qs
-
-
 def prepare_for_run(
     data,
-    DATA_DIR,
+    DATA_DIR: Path,
     trial_Qs,
     h_l=None,
 ):
@@ -140,6 +81,7 @@ def run_hier_model(
     ret_Z=False,
     ret_probs=False,
     ret_trans=False,
+    ret_block_probs=False,
     save_to_file=True,
     datetime_str=None,
 ):
@@ -185,7 +127,9 @@ def run_hier_model(
                 if h_l is None:
                     pred_Z = model.best_Z
                     if ret_trans:
-                        pi = model.pi
+                        pis = model.pi
+                    if ret_block_probs:
+                        block_probs = model.all_bps
                 else:
                     pred_Z[layer, :, :] = model.best_Z
                     if ret_probs:
@@ -195,13 +139,20 @@ def run_hier_model(
                         pis = [*pi_1]
                         hier_pis = [[pi] for pi in pis]
                         all_q_at_L = [np.arange(model.Q) for _ in hier_pis]
+                    if ret_block_probs:
+                        bp_1 = model.all_bps
+                        block_probs = [*bp_1]
+                        hier_bps = [[bp] for bp in block_probs]
+                        block_probs = [[] for _ in hier_bps]
 
             else:
                 tot_Q = np.repeat([model.Q], n_runs, dtype=int)
                 if h_l is None:
                     pred_Z = model.all_best_Zs
                     if ret_trans:
-                        pi = model.all_pi
+                        pis = model.all_pi
+                    if ret_block_probs:
+                        block_probs = model.all_bps
                 else:
                     pred_Z[:, layer, :, :] = model.all_best_Zs
                     if ret_probs:
@@ -211,6 +162,11 @@ def run_hier_model(
                         pis = [*pi_1]
                         hier_pis = [[pi] for pi in pis]
                         all_q_at_L = [np.arange(model.Q) for _ in hier_pis]
+                    if ret_block_probs:
+                        bp_1 = model.all_bps
+                        block_probs = [*bp_1]
+                        hier_bps = [[bp] for bp in block_probs]
+                        block_probs = [[] for _ in hier_bps]
             if ret_best_only:
                 tqdm.write(f"Best tuning param: {model.best_tun_param}")
             else:
@@ -257,6 +213,11 @@ def run_hier_model(
                         q_idx: np.array([]) for q_idx in suff_large_q_idxs
                     }
                     hier_pis[run_idx].append(pi_lq)
+                if ret_block_probs:
+                    bp_lq: dict[int, np.ndarray] = {
+                        q_idx: np.array([]) for q_idx in suff_large_q_idxs
+                    }
+                    hier_bps[run_idx].append(bp_lq)
 
                 for no_q, q_idx in enumerate(tqdm(suff_large_q_idxs, desc="q_l")):
                     logging.info(
@@ -305,17 +266,30 @@ def run_hier_model(
                             :,
                             q_shift : q_shift + model.Q,
                         ] = model.run_probs[0, ...]
+                    q = qs[q_idx]
                     if ret_trans:
-                        q = qs[q_idx]
                         pi_lq[q] = model.pi
-                        pis[run_idx], all_q_at_L[run_idx] = utils.construct_hier_trans(
+                        (
+                            pis[run_idx],
+                            all_q_at_L[run_idx],
+                        ) = utils.construct_hier_trans(
                             hier_pis[run_idx],
+                            pred_Z[run_idx, : layer + 1, ...],
+                            h_min_N,
+                        )
+                    if ret_block_probs:
+                        bp_lq[q] = model.block_prob
+                        (
+                            block_probs[run_idx],
+                            all_q_at_L[run_idx],
+                        ) = utils.construct_hier_trans(
+                            hier_bps[run_idx],
                             pred_Z[run_idx, : layer + 1, ...],
                             h_min_N,
                         )
 
                     logging.info(
-                        f"Transferred {len(np.unique(pred_Z[run_idx, layer, old_node_labels == q, :][pred_Z[run_idx, layer, old_node_labels == q, :]!=-1]))} groups"
+                        f"Transferred {len(np.unique(pred_Z[run_idx, layer, old_node_labels == q_idx, :][pred_Z[run_idx, layer, old_node_labels == q_idx, :]!=-1]))} groups"
                     )
 
                     # save after each iteration in case of errors
@@ -348,6 +322,14 @@ def run_hier_model(
                                 datetime_str,
                                 h_l=h_l,
                             )
+                        if ret_block_probs:
+                            save_block_probs(
+                                testset_name,
+                                RESULTS_DIR,
+                                block_probs,
+                                datetime_str,
+                                h_l=h_l,
+                            )
                 tot_Q[run_idx] = new_Q[run_idx]
         logging.info(f"Run complete for level {layer}, saving...")
         if save_to_file:
@@ -366,49 +348,42 @@ def run_hier_model(
                     datetime_str,
                     h_l=h_l,
                 )
+            if ret_block_probs:
+                save_block_probs(
+                    testset_name,
+                    RESULTS_DIR,
+                    block_probs,
+                    datetime_str,
+                    h_l=h_l,
+                )
+    res = []
     if ret_Z:
-        if ret_probs:
-            if ret_trans:
-                # assume only want probs for groups at last layer
-                # if using trans, but as all_q_at_L could vary
-                # between runs will return a list instead of an
-                # array
-                node_probs = [
-                    run_probs[:, :, run_q]
-                    for run_probs, run_q in zip(node_probs, all_q_at_L)
-                ]
-                if np.all(
-                    [len(run_q) == len(all_q_at_L[0]) for run_q in all_q_at_L[1:]]
-                ):
-                    # dims match so can stack and return as array after all
-                    node_probs = np.stack(node_probs, axis=0)
-                return pred_Z, node_probs, pis
-            else:
-                return pred_Z, node_probs
+        res.append(pred_Z)
+    if ret_probs:
+        if ret_trans or ret_block_probs:
+            # assume only want probs for groups at last layer
+            # if using trans / block_probs, but as all_q_at_L
+            # could vary between runs will return a list instead
+            # of an array, unless happen to be able to stack
+            node_probs = [
+                run_probs[:, :, run_q]
+                for run_probs, run_q in zip(node_probs, all_q_at_L)
+            ]
+            if np.all([len(run_q) == len(all_q_at_L[0]) for run_q in all_q_at_L[1:]]):
+                # dims match so can stack and return as array after all
+                node_probs = np.stack(node_probs, axis=0)
+            res.append(node_probs)
+
         else:
-            if ret_trans:
-                return pred_Z, pis
-            else:
-                return pred_Z
+            res.append(node_probs)
+    if ret_trans:
+        res.append(pis)
+    if ret_block_probs:
+        res.append(block_probs)
+    if len(res) == 1:
+        return res[0]
     else:
-        if ret_probs:
-            if ret_trans:
-                # again take only probs for groups at last layer
-                node_probs = [
-                    run_probs[:, :, run_q]
-                    for run_probs, run_q in zip(node_probs, all_q_at_L)
-                ]
-                if np.all(
-                    [len(run_q) == len(all_q_at_L[0]) for run_q in all_q_at_L[1:]]
-                ):
-                    # dims match so can stack and return as array after all
-                    node_probs = np.stack(node_probs, axis=0)
-                return node_probs, pis
-            else:
-                return node_probs
-        else:
-            if ret_trans:
-                return pis
+        return tuple(res)
 
 
 def subset_data(data, N, T, h_Q, h_min_N, old_node_labels, q):
@@ -483,6 +458,15 @@ def save_trans(testset_name, RESULTS_DIR, pi, datetime_str, h_l=None):
         pickle.dump(pi, f)
 
 
+def save_block_probs(testset_name, RESULTS_DIR, block_prob, datetime_str, h_l=None):
+    with open(
+        RESULTS_DIR
+        / f"{testset_name}_block_probs{'_h' if h_l else ''}_{datetime_str}.pkl",
+        "wb",
+    ) as f:
+        pickle.dump(block_prob, f)
+
+
 def save_test_results(
     testset_name,
     test_aris,
@@ -525,6 +509,45 @@ def save_test_results(
         "wb",
     ) as f:
         pickle.dump(init_times, f)
+
+
+def prep_Z_and_Qs(
+    N,
+    T,
+    n_runs=1,
+    ret_best_only=False,
+    h_l=None,
+    h_Q=None,
+    h_min_N=None,
+    max_trials=None,
+    min_Q=None,
+    max_Q=None,
+    num_groups=None,
+):
+    pred_Z = utils.init_pred_Z(
+        N,
+        T,
+        ret_best_only=ret_best_only,
+        h_l=h_l,
+        max_trials=max_trials,
+        n_runs=n_runs,
+    )
+    # args.h_l, default=None, max. no. layers in hier
+    # args.h_Q, default=8, max. no. groups at hier layer,
+    # = 4 if h_Q > N_l / 4
+    # args.h_min_N, default=20, min. nodes for split
+    trial_Qs = utils.init_trial_Qs(
+        N,
+        min_Q=min_Q,
+        max_Q=max_Q,
+        max_trials=max_trials,
+        h_l=h_l,
+        num_groups=num_groups,
+        h_Q=h_Q,
+        h_min_N=h_min_N,
+        n_runs=n_runs,
+    )
+    return pred_Z, trial_Qs
 
 
 def show_true_vs_effective_params(
@@ -1228,29 +1251,7 @@ if __name__ == "__main__":
         # empirical data block
         T = len(data["A"])
         N = data["A"][0].shape[0]
-        pred_Z = init_pred_Z(
-            N,
-            T,
-            ret_best_only=args.ret_best_only,
-            h_l=args.h_l,
-            max_trials=args.max_trials,
-            n_runs=args.n_runs,
-        )
-        # args.h_l, default=None, max. no. layers in hier
-        # args.h_Q, default=8, max. no. groups at hier layer,
-        # = 4 if h_Q > N_l / 4
-        # args.h_min_N, default=20, min. nodes for split
-        trial_Qs = init_trial_Qs(
-            N,
-            min_Q=args.min_Q,
-            max_Q=args.max_Q,
-            max_trials=args.max_trials,
-            h_l=args.h_l,
-            num_groups=args.num_groups,
-            h_Q=args.h_Q,
-            h_min_N=args.h_min_N,
-            n_runs=args.n_runs,
-        )
+        pred_Z, trial_Qs = prep_Z_and_Qs(data, args)
         if (
             not (
                 args.min_Q is not None
