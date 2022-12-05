@@ -237,7 +237,7 @@ def extract_meta(nets, meta_names, meta_dims, node_order):
     return X
 
 
-def clean_meta(meta_names, meta_types, meta_dims, X):
+def clean_meta(meta_names, meta_types, meta_dims, X, max_cats=20):
     for s, meta_type in enumerate(meta_types):
         # remove null dimensions
         null_dims = np.nansum(X[s], axis=(0, 1)) == 0
@@ -251,10 +251,12 @@ def clean_meta(meta_names, meta_types, meta_dims, X):
         L = X[s].shape[-1]
         missing_meta = np.isnan(X[s])
         if meta_type == "indep bernoulli":
-            # restrict to a maximum of 10 dims 'present' for each node, else in high cardinality case likely equally weighting important and noisy meta
-            if L > 10:
+            # restrict to a maximum of max_cats dims 'present' for
+            # each node, else in high cardinality case likely
+            # equally weighting important and noisy meta
+            if L > max_cats:
                 tmpx = np.zeros_like(X[s])
-                k = 10
+                k = max_cats
                 topkidxs = np.argsort(
                     X[s], axis=-1
                 )  # will place nans at end, but should be OK as should only have either whole row nan or nothing
@@ -262,6 +264,14 @@ def clean_meta(meta_names, meta_types, meta_dims, X):
                 tmpx[X[s] == 0] = 0
                 tmpx[missing_meta] = np.nan
                 X[s] = tmpx
+                # now remove any new null dims
+                null_dims = np.nansum(X[s], axis=(0, 1)) == 0
+                if np.count_nonzero(null_dims) > 0:
+                    warnings.warn(
+                        f"After restricting {meta_names[s]} to top {max_cats} for each node, following empty dimensions were found for metadata {meta_names[s]}: {np.flatnonzero(null_dims)}. Removing these dimensions."
+                    )
+                    X[s] = X[s][:, :, ~null_dims]
+                    meta_dims[s] -= np.count_nonzero(null_dims)
             else:
                 X[s] = (X[s] > 0) * 1.0
                 X[s][missing_meta] = np.nan
