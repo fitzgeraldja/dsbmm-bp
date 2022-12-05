@@ -89,7 +89,7 @@ def prepare_for_run(
 ):
     data["Q"] = trial_Qs[0]
 
-    tqdm.write("*" * 15, "Running empirical data", "*" * 15)
+    tqdm.write(f"{'*' * 15} Running empirical data {'*' * 15}")
     ## Initialise
     file_handler = logging.FileHandler(filename="./empirical_dsbmm.log")
     stdout_handler = logging.StreamHandler(stream=sys.stdout)
