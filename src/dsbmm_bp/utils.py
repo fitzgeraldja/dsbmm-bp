@@ -928,6 +928,6 @@ def sparse_isnan(A: sparse.csr_array, take_not=False):
     """
     indptr, indices, data = A.indptr, A.indices, A.data
     if take_not:
-        sparse.csr_array((~np.isnan(data), indices, indptr), shape=A.shape)
+        return sparse.csr_array((~np.isnan(data), indices, indptr), shape=A.shape)
     else:
         return sparse.csr_array((np.isnan(data), indices, indptr), shape=A.shape)
