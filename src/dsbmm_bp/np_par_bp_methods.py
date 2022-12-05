@@ -1633,8 +1633,13 @@ class NumpyBP:
                 unnorm_twopoint_e_marg[
                     self.E_idxs[t] : self.E_idxs[t + 1]
                 ] *= self.block_edge_prob[np.newaxis, :, :, t]
+        twopoint_spat_norms = np.nansum(unnorm_twopoint_e_marg, axis=(-2, -1))
         f_spatlink = (
-            np.log(unnorm_twopoint_e_marg.sum(axis=(-2, -1))).sum()
+            np.log(
+                twopoint_spat_norms,
+                where=twopoint_spat_norms > 0.0,
+                out=np.zeros_like(twopoint_spat_norms),
+            ).sum()
             / self.model._tot_N_pres
         )
         unnorm_twopoint_t_marg = np.einsum(
