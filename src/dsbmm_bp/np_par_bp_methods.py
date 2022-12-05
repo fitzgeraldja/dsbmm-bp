@@ -1172,12 +1172,19 @@ class NumpyBP:
         # handles missing nodes correctly (?)
         # get spatial
         spatial_field_terms = self.spatial_field_terms()
-        log_spatial_field_terms = np.log(
-            spatial_field_terms,
-            where=spatial_field_terms > 0,
-            out=np.ones_like(spatial_field_terms)
-            * np.log(spatial_field_terms[spatial_field_terms > 0].min()),
-        )
+
+        try:
+            log_spatial_field_terms = np.log(
+                spatial_field_terms,
+                where=spatial_field_terms > 0,
+                out=np.ones_like(spatial_field_terms)
+                * np.log(spatial_field_terms[spatial_field_terms > 0].min()),
+            )
+        except ValueError:
+            assert np.all(spatial_field_terms <= 0)
+            tqdm.write("All spatial field terms <= 0, can't continue")
+            self.msg_diff = 0.0
+            return None
         # just leave as doing via logs, should be fine and probably faster
         # large_degs = degs[:,:,0] > LARGE_DEG_THR
 
@@ -1497,12 +1504,19 @@ class NumpyBP:
 
         # get spatial
         spatial_field_terms = self.spatial_field_terms()
-        log_spatial_field_terms = np.log(
-            spatial_field_terms,
-            where=spatial_field_terms > 0,
-            out=np.ones_like(spatial_field_terms)
-            * np.log(spatial_field_terms[spatial_field_terms > 0].min()),
-        )
+        try:
+            log_spatial_field_terms = np.log(
+                spatial_field_terms,
+                where=spatial_field_terms > 0,
+                out=np.ones_like(spatial_field_terms)
+                * np.log(spatial_field_terms[spatial_field_terms > 0].min()),
+            )
+        except ValueError:
+            assert np.all(spatial_field_terms <= 0.0)
+            tqdm.write(
+                "All spatial field terms <= 0.0, can't compute free energy (returning np.inf)"
+            )
+            return np.inf
 
         log_spatial_msg = np.stack(
             [
