@@ -67,7 +67,7 @@ class EM:
         planted_p=0.6,
         auto_tune=False,
         ret_probs=False,
-        fe_freq=5,  # calc free energy every fe_freq EM iterations
+        fe_freq=3,  # calc free energy every fe_freq EM iterations
     ):
         self.verbose = verbose
         self.parallel = try_parallel
