@@ -1274,6 +1274,14 @@ class NumpyBP:
                 #             tuning_fac = 1e-3
                 #         elif tuning_fac > 1e3:
                 #             tuning_fac = 1e3
+                # threshold tuning param, otherwise if too large in
+                # particular can cause numerical issues (everything
+                # forced to zero)
+                if tuning_fac > 5.0e1:
+                    tuning_fac = 5.0e1
+                elif tuning_fac < 1.0e-4:
+                    # less of a problem, but still want to avoid
+                    tuning_fac = 1.0e-4
                 if self.auto_tune:
                     if self.verbose:
                         tqdm.write(
