@@ -67,6 +67,7 @@ class EM:
         planted_p=0.6,
         auto_tune=False,
         ret_probs=False,
+        fe_freq=5,  # calc free energy every fe_freq EM iterations
     ):
         self.verbose = verbose
         self.parallel = try_parallel
@@ -85,6 +86,7 @@ class EM:
         self.params_to_set = None
         self.non_informative_init = non_informative_init
         self.planted_p = planted_p
+        self.fe_freq = fe_freq
         if type(tuning_param) == float:
             self.tuning_params = [tuning_param]
         else:
@@ -589,48 +591,49 @@ class EM:
             else:
                 diff = 1.0
             if self.true_Z is None:
-                # TODO: should change to only compute free energy
-                # every few iters to speed up
-                current_energy = self.bp.compute_free_energy()
-                if self.best_val_q == 0.0:
-                    self.max_energy = current_energy
-                    # first iter, first run
-                    self.best_val_q = current_energy
-                    self.best_val = current_energy
-                    self.poor_iter_ctr = 0
-                    self.bp.model.set_Z_by_MAP()
-                    self.best_Z = self.bp.model.Z.copy()
-                    self.pi = self.dsbmm._pi.copy()
-                    self.best_tun_param = self.dsbmm.tuning_param
-                    self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
-                    self.max_energy_Z = self.bp.model.Z.copy()
-                elif current_energy < self.best_val_q:
-                    # new best for q
-                    self.poor_iter_ctr = 0
-                    self.best_val_q = current_energy
-                    self.bp.model.set_Z_by_MAP()
-                    self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
-                    self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
-                    self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
-                    if self.ret_probs:
-                        self.run_probs[self.q_idx, ...] = self.bp.model.node_marg.copy()
-                    if self.best_val_q < self.best_val:
-                        self.best_val = self.best_val_q
+                if n_iter % self.fe_freq == 0:
+                    current_energy = self.bp.compute_free_energy()
+                    if self.best_val_q == 0.0:
+                        self.max_energy = current_energy
+                        # first iter, first run
+                        self.best_val_q = current_energy
+                        self.best_val = current_energy
+                        self.poor_iter_ctr = 0
+                        self.bp.model.set_Z_by_MAP()
                         self.best_Z = self.bp.model.Z.copy()
                         self.pi = self.dsbmm._pi.copy()
                         self.best_tun_param = self.dsbmm.tuning_param
-
-                else:
-                    self.poor_iter_ctr += 1
-                    if self.poor_iter_ctr >= self.patience:
-                        tqdm.write(
-                            f"~~~~~~ OUT OF PATIENCE, STOPPING EARLY in run {self.run_idx+1} ~~~~~~"
-                        )
+                        self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
+                        self.max_energy_Z = self.bp.model.Z.copy()
+                    elif current_energy < self.best_val_q:
+                        # new best for q
                         self.poor_iter_ctr = 0
-                        break
-                if current_energy > self.max_energy:
-                    self.max_energy = current_energy
-                    self.max_energy_Z = self.bp.model.Z
+                        self.best_val_q = current_energy
+                        self.bp.model.set_Z_by_MAP()
+                        self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
+                        self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
+                        self.best_tun_pars[self.q_idx] = self.dsbmm.tuning_param
+                        if self.ret_probs:
+                            self.run_probs[
+                                self.q_idx, ...
+                            ] = self.bp.model.node_marg.copy()
+                        if self.best_val_q < self.best_val:
+                            self.best_val = self.best_val_q
+                            self.best_Z = self.bp.model.Z.copy()
+                            self.pi = self.dsbmm._pi.copy()
+                            self.best_tun_param = self.dsbmm.tuning_param
+
+                    else:
+                        self.poor_iter_ctr += 1
+                        if self.poor_iter_ctr >= self.patience:
+                            tqdm.write(
+                                f"~~~~~~ OUT OF PATIENCE, STOPPING EARLY in run {self.run_idx+1} ~~~~~~"
+                            )
+                            self.poor_iter_ctr = 0
+                            break
+                    if current_energy > self.max_energy:
+                        self.max_energy = current_energy
+                        self.max_energy_Z = self.bp.model.Z
             else:
                 self.bp.model.set_Z_by_MAP()
                 current_score = self.ari_score(self.true_Z)
