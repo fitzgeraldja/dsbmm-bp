@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 import yaml  # type: ignore
 from numba import float64, njit
-from numba.typing import Dict
+from numba.typed import Dict
 from scipy import sparse
 from scipy.special import gammaln
 from tqdm import tqdm
