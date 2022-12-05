@@ -161,7 +161,6 @@ def run_hier_model(
         non_informative_init=not partial_informative_dsbmm_init,
         planted_p=planted_p,
         auto_tune=auto_tune,
-        ret_Z=ret_Z,
         ret_probs=ret_probs,
     )
     if ret_probs:
