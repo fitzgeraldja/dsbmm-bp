@@ -776,9 +776,9 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
                         r = u_r
                     l_ctr += 1
 
-    if len(list(hier_pis_run[0].values())[0].shape) > 2:
+    if len(hier_pis_run[0].shape) > 2:
         # actually passed block probs
-        T = list(hier_pis_run[0].values())[0].shape[-1]
+        T = hier_pis_run[0].shape[-1]
         pi = np.zeros((total_Q, total_Q, T))
     else:
         pi = np.zeros((total_Q, total_Q))
