@@ -919,7 +919,7 @@ def get_hier(pred_ZL, h_min_N):
     return topdown_hier, small_qs
 
 
-def sparse_isnan(A: sparse.csr_array):
+def sparse_isnan(A: sparse.csr_array, take_not=False):
     """Return boolean array of same shape as A indicating whether each
     element is nan or not
 
@@ -927,4 +927,7 @@ def sparse_isnan(A: sparse.csr_array):
     :type A: sparse.csr_array
     """
     indptr, indices, data = A.indptr, A.indices, A.data
-    return sparse.csr_array((np.isnan(data), indices, indptr), shape=A.shape)
+    if take_not:
+        sparse.csr_array((~np.isnan(data), indices, indptr), shape=A.shape)
+    else:
+        return sparse.csr_array((np.isnan(data), indices, indptr), shape=A.shape)
