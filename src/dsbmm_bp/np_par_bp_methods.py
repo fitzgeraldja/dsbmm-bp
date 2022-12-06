@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 import yaml  # type: ignore
-from numba import bool_, float64, int64, njit
+from numba import bool_, float64, int64, njit, typeof
 from numba.typed import Dict
 from numba.types import DictType
 from scipy import sparse
@@ -27,8 +27,8 @@ except FileNotFoundError:
     RANDOM_ONLINE_UPDATE_MSG = False
     PLANTED_P = 0.8
 
-Nz_idxs_type = DictType(int, int64[:])
-Nz_is_type = DictType(int, DictType(int, int64[:]))
+Nz_idxs_type = DictType(int64, int64[:])
+Nz_is_type = DictType(int64, DictType(int64, int64[:]))
 
 
 @njit
