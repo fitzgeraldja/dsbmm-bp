@@ -28,7 +28,7 @@ except FileNotFoundError:
     PLANTED_P = 0.8
 
 Nz_idxs_type = DictType(int64, int64[:])
-Nz_is_type = DictType(int64, DictType(int64, int64[:]))
+Nz_is_type = DictType(int64, DictType(int64, int64))
 
 
 @njit
@@ -802,11 +802,11 @@ class NumpyBP:
             d[k] = v
         self.nz_idxs = d
 
-        dalt = Dict.empty(key_type=int64, value_type=Nz_idxs_type)
-        for k, v in self.nz_is.items():
-            dalt[k] = Dict.empty(key_type=int64, value_type=int64[:])
-            for k2, v2 in v.items():
-                dalt[k][k2] = v2
+        dalt = Dict.empty(key_type=int64, value_type=DictType(int64, int64))
+        for t, v in self.nz_is.items():
+            dalt[t] = Dict.empty(key_type=int64, value_type=int64)
+            for i, v2 in v.items():
+                dalt[t][i] = v2
         self.nz_is = dalt
 
         self._edge_vals = {}
