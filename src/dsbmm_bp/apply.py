@@ -168,13 +168,13 @@ def run_hier_model(
                         hier_bps = [[bp] for bp in block_probs]
                         block_probs = [[] for _ in hier_bps]
             if ret_best_only:
-                tqdm.write(f"Best tuning param: {model.best_tun_param}")
+                tqdm.write(f"Best tuning param: {model.best_tun_param:.3g}")
             else:
                 tqdm.write(f"Best tuning params for each Q:")
                 tqdm.write(
                     "\n".join(
                         [
-                            f"Q = {q}:  {tunpar}"
+                            f"Q = {q}:  {tunpar:.3g}"
                             for q, tunpar in zip(trial_Qs, model.best_tun_pars)
                         ]
                     )
