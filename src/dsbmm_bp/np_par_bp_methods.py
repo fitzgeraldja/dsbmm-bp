@@ -803,7 +803,7 @@ class NumpyBP:
         self.nz_idxs = d
 
         dalt = Dict.empty(key_type=int64, value_type=Nz_idxs_type)
-        for k, v in nz_is.items():
+        for k, v in self.nz_is.items():
             dalt[k] = Dict.empty(key_type=int64, value_type=int64[:])
             for k2, v2 in v.items():
                 dalt[k][k2] = v2
