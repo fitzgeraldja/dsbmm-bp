@@ -56,6 +56,25 @@ def calc_log_spat_msg(
     return log_spat_msg
 
 
+def get_inv_idxs(
+    t: int,
+    just_is: int64[:],
+    just_js: int64[:],
+    nz_idxs: Nz_idxs_type,  # type: ignore
+    nz_is: Nz_is_type,  # type: ignore
+) -> int64[:]:
+    inv_idxs = np.zeros_like(just_is)
+    for idx, (i, j) in enumerate(zip(just_is, just_js)):
+        inv_idxs[idx] = (
+            nz_idxs[t][nz_is[t][j]]  # type: ignore
+            # only using these to index within each timestep, so don't need to place within full _psi_e
+            + np.flatnonzero(
+                just_js[nz_idxs[t][nz_is[t][j]] : nz_idxs[t][nz_is[t][j] + 1]] == i  # type: ignore
+            )[0]
+        )
+    return inv_idxs
+
+
 class NumpyBP:
     def __init__(self, dsbmm: NumpyDSBMM):
         self.model = dsbmm
@@ -754,23 +773,26 @@ class NumpyBP:
             just_js = np.mod(j_idxs[:: self.Q], self.N).astype(int)
             self.flat_j_idxs[t] = just_js
             try:
-                self.all_inv_idxs[t] = np.array(
-                    [
-                        self.nz_idxs[t][self.nz_is[t][j]]
-                        # only using these to index within each timestep, so don't need to place within full _psi_e
-                        + np.flatnonzero(
-                            just_js[
-                                self.nz_idxs[t][self.nz_is[t][j]] : self.nz_idxs[t][
-                                    self.nz_is[t][j] + 1
-                                ]
-                            ]
-                            == i
-                        )[0]
-                        # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
-                        for i, j in zip(just_is, just_js)
-                    ],
-                    dtype=int,
-                ).squeeze()
+                self.all_inv_idxs[t] = get_inv_idxs(
+                    t, just_is, just_js, self.nz_idxs, self.nz_is
+                )
+                # np.array(
+                #     [
+                #         self.nz_idxs[t][self.nz_is[t][j]]
+                #         # only using these to index within each timestep, so don't need to place within full _psi_e
+                #         + np.flatnonzero(
+                #             just_js[
+                #                 self.nz_idxs[t][self.nz_is[t][j]] : self.nz_idxs[t][
+                #                     self.nz_is[t][j] + 1
+                #                 ]
+                #             ]
+                #             == i
+                #         )[0]
+                #         # then need to find where it is specifically i sending to j - take 0 for only data rather than array, as should have no multi-edges so only one such idx
+                #         for i, j in zip(just_is, just_js)
+                #     ],
+                #     dtype=int,
+                # ).squeeze()
                 if len(self.all_inv_idxs[t].shape) == 0:
                     # need to handle case of single edge separately
                     self.all_inv_idxs[t] = np.expand_dims(self.all_inv_idxs[t], 0)
