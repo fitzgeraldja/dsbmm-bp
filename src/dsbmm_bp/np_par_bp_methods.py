@@ -2,8 +2,9 @@ import warnings
 
 import numpy as np
 import yaml  # type: ignore
-from numba import float64, njit
+from numba import bool_, float64, int64, njit
 from numba.typed import Dict
+from numba.types import DictType
 from scipy import sparse
 from scipy.special import gammaln
 from tqdm import tqdm
@@ -25,6 +26,34 @@ except FileNotFoundError:
     LARGE_DEG_THR = 20
     RANDOM_ONLINE_UPDATE_MSG = False
     PLANTED_P = 0.8
+
+Nz_idxs_type = DictType(int, int64[:])
+Nz_is_type = DictType(int, DictType(int, int64[:]))
+
+
+@njit
+def calc_log_spat_msg(
+    log_spat_field_terms: float64[:, :],
+    nz_idxs: Nz_idxs_type,  # type: ignore
+    nz_is: Nz_is_type,  # type: ignore
+    E_idxs: int64[:],
+    pres_nodes: bool_[:, :],
+    N: int,
+    T: int,
+    Q: int,
+):
+    log_spat_msg = np.zeros((N, T, Q))
+    for t in range(T):
+        for i in range(N):
+            if pres_nodes[i, t]:
+                for q in range(Q):
+                    log_spat_msg[i, t, q] = log_spat_field_terms[
+                        E_idxs[t]
+                        + nz_idxs[t][nz_is[t][i]] : E_idxs[t]  # type: ignore
+                        + nz_idxs[t][nz_is[t][i] + 1],  # type: ignore
+                        q,
+                    ].sum()
+    return log_spat_msg
 
 
 class NumpyBP:
@@ -767,6 +796,19 @@ class NumpyBP:
                         raise RuntimeError(
                             "Problem w idxs, likely integer overflow error that should have been caught..."
                         )
+        # now try using numba version of nz_idxs, nz_is
+        d = Dict.empty(key_type=int64, value_type=int64[:])
+        for k, v in self.nz_idxs.items():
+            d[k] = v
+        self.nz_idxs = d
+
+        dalt = Dict.empty(key_type=int64, value_type=Nz_idxs_type)
+        for k, v in nz_is.items():
+            dalt[k] = Dict.empty(key_type=int64, value_type=int64[:])
+            for k2, v2 in v.items():
+                dalt[k][k2] = v2
+        self.nz_is = dalt
+
         self._edge_vals = {}
         for t in range(self.T):
             just_is = self.flat_i_idxs[t]
@@ -1197,35 +1239,41 @@ class NumpyBP:
         #             for i,t in zip(*large_degs.nonzero())
         #         ]
         #     )
-        # TODO: consider replacing this calc with numba implementation else likely bottleneck
-        # @njit
-        # def calc_log_spat_msg(
-        #     log_spatial_field_terms: float64[:,:], nz_idxs: Dict[]
-        # )
-        log_spatial_msg = np.stack(
-            [
-                np.array(
-                    [
-                        np.sum(
-                            log_spatial_field_terms[
-                                self.E_idxs[t]
-                                + self.nz_idxs[t][self.nz_is[t][i]] : self.E_idxs[t]
-                                + self.nz_idxs[t][self.nz_is[t][i] + 1],
-                                :,
-                            ],
-                            axis=0,
-                        )
-                        if self._pres_nodes[i, t]
-                        else np.zeros(
-                            self.Q
-                        )  # need zeros rather than nan / empty else will be included in einsums
-                        for i in range(self.N)
-                    ]
-                )
-                for t in range(self.T)
-            ],
-            axis=1,
+
+        log_spatial_msg = calc_log_spat_msg(
+            log_spatial_field_terms,
+            self.nz_idxs,
+            self.nz_is,
+            self.E_idxs,
+            self._pres_nodes,
+            self.N,
+            self.T,
+            self.Q,
         )
+        # np.stack(
+        #     [
+        #         np.array(
+        #             [
+        #                 np.sum(
+        #                     log_spatial_field_terms[
+        #                         self.E_idxs[t]
+        #                         + self.nz_idxs[t][self.nz_is[t][i]] : self.E_idxs[t]
+        #                         + self.nz_idxs[t][self.nz_is[t][i] + 1],
+        #                         :,
+        #                     ],
+        #                     axis=0,
+        #                 )
+        #                 if self._pres_nodes[i, t]
+        #                 else np.zeros(
+        #                     self.Q
+        #                 )  # need zeros rather than nan / empty else will be included in einsums
+        #                 for i in range(self.N)
+        #             ]
+        #         )
+        #         for t in range(self.T)
+        #     ],
+        #     axis=1,
+        # )
         if self.deg_corr:
             if not self.directed:
                 log_spatial_msg -= np.einsum(
@@ -1533,30 +1581,40 @@ class NumpyBP:
             )
             return np.inf
 
-        log_spatial_msg = np.stack(
-            [
-                np.array(
-                    [
-                        np.sum(
-                            log_spatial_field_terms[
-                                self.E_idxs[t]
-                                + self.nz_idxs[t][self.nz_is[t][i]] : self.E_idxs[t]
-                                + self.nz_idxs[t][self.nz_is[t][i] + 1],
-                                :,
-                            ],
-                            axis=0,
-                        )
-                        if self._pres_nodes[i, t]
-                        else np.zeros(
-                            self.Q
-                        )  # need zeros rather than nan / empty else will be included in einsums
-                        for i in range(self.N)
-                    ]
-                )
-                for t in range(self.T)
-            ],
-            axis=1,
+        log_spatial_msg = calc_log_spat_msg(
+            log_spatial_field_terms,
+            self.nz_idxs,
+            self.nz_is,
+            self.E_idxs,
+            self._pres_nodes,
+            self.N,
+            self.T,
+            self.Q,
         )
+        # np.stack(
+        #     [
+        #         np.array(
+        #             [
+        #                 np.sum(
+        #                     log_spatial_field_terms[
+        #                         self.E_idxs[t]
+        #                         + self.nz_idxs[t][self.nz_is[t][i]] : self.E_idxs[t]
+        #                         + self.nz_idxs[t][self.nz_is[t][i] + 1],
+        #                         :,
+        #                     ],
+        #                     axis=0,
+        #                 )
+        #                 if self._pres_nodes[i, t]
+        #                 else np.zeros(
+        #                     self.Q
+        #                 )  # need zeros rather than nan / empty else will be included in einsums
+        #                 for i in range(self.N)
+        #             ]
+        #         )
+        #         for t in range(self.T)
+        #     ],
+        #     axis=1,
+        # )
 
         if self.deg_corr:
             if not self.directed:
