@@ -1258,7 +1258,19 @@ if __name__ == "__main__":
         # empirical data block
         T = len(data["A"])
         N = data["A"][0].shape[0]
-        pred_Z, trial_Qs = prep_Z_and_Qs(data, args)
+        pred_Z, trial_Qs = prep_Z_and_Qs(
+            N,
+            T,
+            n_runs=args.n_runs,
+            ret_best_only=args.ret_best_only,
+            h_l=args.h_l,
+            h_Q=args.h_Q,
+            h_min_N=args.h_min_N,
+            max_trials=args.max_trials,
+            min_Q=args.min_Q,
+            max_Q=args.max_Q,
+            num_groups=args.num_groups,
+        )
         if (
             not (
                 args.min_Q is not None
