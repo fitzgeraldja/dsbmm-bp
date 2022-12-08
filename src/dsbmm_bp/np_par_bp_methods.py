@@ -9,7 +9,7 @@ from scipy import sparse
 from scipy.special import gammaln
 from tqdm import tqdm
 
-from .np_par_dsbmm_methods import NumpyDSBMM
+from dsbmm_bp.np_par_dsbmm_methods import NumpyDSBMM
 
 try:
     with open("config.yaml") as f:

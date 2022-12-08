@@ -15,8 +15,8 @@ from sklearn.metrics import adjusted_rand_score as ari
 #     dsbmm_sparse,
 #     dsbmm_sparse_parallel,
 # )
-from .np_par_bp_methods import NumpyBP
-from .np_par_dsbmm_methods import NumpyDSBMM
+from dsbmm_bp.np_par_bp_methods import NumpyBP
+from dsbmm_bp.np_par_dsbmm_methods import NumpyDSBMM
 
 # from utils import nb_ari_local  # , nb_nmi_local
 

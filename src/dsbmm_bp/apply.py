@@ -19,7 +19,7 @@ from scipy import sparse
 from tqdm import tqdm
 
 # local package imports
-from . import data_processor, em, simulation, utils
+from dsbmm_bp import data_processor, em, simulation, utils
 
 
 def prepare_for_run(

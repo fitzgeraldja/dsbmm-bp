@@ -11,7 +11,7 @@ from scipy import sparse
 from tqdm import tqdm
 
 # local pkg imports
-from . import utils
+from dsbmm_bp import utils
 
 
 def load_data(data_dir, edge_weight_choice=None, test_conn=False):

@@ -15,8 +15,8 @@ from numba.typed import List
 from scipy import sparse
 from tqdm import tqdm
 
-from . import simulation, utils
-from .utils import max_overlap_over_perms
+from dsbmm_bp import simulation, utils
+from dsbmm_bp.utils import max_overlap_over_perms
 
 parser = argparse.ArgumentParser(
     description="Apply model to data simulated from toy model."
