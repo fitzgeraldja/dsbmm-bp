@@ -987,9 +987,11 @@ def init_trial_Qs(
         trial_Qs = np.linspace(min_Q, max_Q, max_trials, dtype=int)
     else:
         if h_l is None:
-            trial_Qs = [num_groups]
+            trial_Qs = np.array([num_groups], dtype=int)
         else:
-            trial_Qs = [h_Q if h_Q < N / h_min_N else N // h_min_N] * n_runs
+            trial_Qs = np.array(
+                [h_Q if h_Q < N / h_min_N else N // h_min_N] * n_runs, dtype=int
+            )
             try:
                 assert trial_Qs[0] > 0
             except AssertionError:
