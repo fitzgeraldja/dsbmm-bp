@@ -147,7 +147,7 @@ def run_hier_model(
                         block_probs = [[] for _ in hier_bps]
 
             else:
-                tot_Q = np.repeat([model.Q], n_runs, dtype=int)
+                tot_Q = np.repeat([model.Q], n_runs).astype(int)
                 if h_l is None:
                     pred_Z = model.all_best_Zs
                     if ret_trans:
