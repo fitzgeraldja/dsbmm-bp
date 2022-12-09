@@ -68,6 +68,7 @@ class EM:
         auto_tune=False,
         ret_probs=False,
         fe_freq=3,  # calc free energy every fe_freq EM iterations
+        hier=False,
     ):
         self.verbose = verbose
         self.parallel = try_parallel
@@ -87,6 +88,7 @@ class EM:
         self.non_informative_init = non_informative_init
         self.planted_p = planted_p
         self.fe_freq = fe_freq
+        self.hier = hier
         if type(tuning_param) == float:
             self.tuning_params = [tuning_param]
         else:
@@ -455,6 +457,10 @@ class EM:
             self.all_bps = np.empty(
                 (len(self.trial_Qs), self.trial_Qs[0], self.trial_Qs[0], self.T)
             )
+        else:
+            if self.hier:
+                tqdm.write(f"trial_Qs: {self.trial_Qs}")
+                raise ValueError("Shouldn't be using hierarchies if Qs not same")
         self.best_tun_pars = np.ones_like(self.trial_Qs, dtype=float)
         if self.ret_probs:
             try:
@@ -619,6 +625,7 @@ class EM:
                         self.best_val_q = current_energy
                         self.bp.model.set_Z_by_MAP()
                         self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
+
                         self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
                         self.all_bps[self.q_idx, ...] = self.bp.block_edge_prob.copy()
                         tmp_tun_param = self.dsbmm.tuning_param

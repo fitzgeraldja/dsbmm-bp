@@ -104,6 +104,7 @@ def run_hier_model(
         planted_p=planted_p,
         auto_tune=auto_tune,
         ret_probs=ret_probs,
+        hier=True,
     )
     if ret_probs:
         if h_l is not None:
@@ -407,7 +408,7 @@ def subset_data(data, N, T, h_Q, h_min_N, old_node_labels, q):
     return sub_data
 
 
-def fit_model_allow_interrupt(learning_rate, model):
+def fit_model_allow_interrupt(learning_rate: float, model: em.EM):
     try:
         ## Fit to given data
         model.fit(learning_rate=learning_rate)
