@@ -626,8 +626,11 @@ class EM:
                         self.bp.model.set_Z_by_MAP()
                         self.all_best_Zs[self.q_idx, :, :] = self.bp.model.Z.copy()
 
-                        self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
-                        self.all_bps[self.q_idx, ...] = self.bp.block_edge_prob.copy()
+                        if self.hier:
+                            self.all_pi[self.q_idx, ...] = self.dsbmm._pi.copy()
+                            self.all_bps[
+                                self.q_idx, ...
+                            ] = self.bp.block_edge_prob.copy()
                         tmp_tun_param = self.dsbmm.tuning_param
                         if tmp_tun_param > 1.0e4:
                             tmp_tun_param = 1.0e4
