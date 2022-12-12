@@ -123,8 +123,8 @@ def run_hier_model(
         if layer == 0:
             model = em.EM(data, **model_settings)
             fit_model_allow_interrupt(learning_rate, model)
+            tot_Q = np.repeat([model.Q], n_runs).astype(int)
             if ret_best_only:
-                tot_Q = model.Q * np.ones((1,), dtype=int)
                 if h_l is None:
                     pred_Z = model.best_Z
                     if ret_trans:
@@ -147,7 +147,6 @@ def run_hier_model(
                         block_probs = [[] for _ in hier_bps]
 
             else:
-                tot_Q = np.repeat([model.Q], n_runs).astype(int)
                 if h_l is None:
                     pred_Z = model.all_best_Zs
                     if ret_trans:
