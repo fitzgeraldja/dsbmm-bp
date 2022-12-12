@@ -125,13 +125,20 @@ def load_data(data_dir, edge_weight_choice=None, test_conn=False):
 
 
 def save_to_pif_form(
-    A, X, out_dir, meta_names, region_col_id="region", age_col_id="career_age"
+    A,
+    X,
+    out_dir,
+    meta_names,
+    region_col_id="region",
+    age_col_id="career_age",
+    tpc_col_id="tpc_clust_id_cnt_vec",
+    synth=True,
 ):
     """
     Take temporal adjacency, A, up until final time period
     in list of sparse matrices form, and temporal metadata,
     X, in dense array form, and save in out_dir converted
-    to the form expected for PIF:
+    to the form expected for PIF, both synth and real data:
 
     edgelist file
     - npz format, file named 'citation_links.npz', and array named 'edge_list'
@@ -144,9 +151,15 @@ def save_to_pif_form(
     - columns are 'auid_idx', 'windowed_year', 'region', 'career_age'
     - no duplicate (auid,windowed_year) combinations
 
+    au_pubs file
+    - pickled pandas df, named 'au_pubs.pkl'
+    - columns are 'auid_idx', 'windowed_year', 'tpc_idx'
+    - no duplicate (auid,windowed_year,tpc_idx) combinations
+
     There should be one more timestep in the au_profs file than the edgelist file,
     and up to the final timestep they should either match, or it is assumed that
-    they can be paired according to their rank.
+    they can be paired according to their rank. Here just output all edges,
+    as can remove later if necessary.
 
     :param A: temporal adjacency matrices, in length T list of sparse mats
               shape (N,N) form
@@ -166,6 +179,10 @@ def save_to_pif_form(
                           (taken directly as 'career_age' in the thesis)
                           defaults to 'career_age'
     :type age_col_id: str, optional
+    :param tpc_col_id: Name for metadata chosen to be relabelled 'tpc_idx'
+    :type tpc_col_id: str, optional
+    :param synth: Whether data is synthetic or real, defaults to True
+    :type synth: bool, optional
 
     """
     out_dir = Path(out_dir)
@@ -176,39 +193,55 @@ def save_to_pif_form(
     edgelist = np.concatenate(
         [
             np.stack([*A_t.nonzero(), t * np.ones(A_t.nnz)]).T
-            for t, A_t in enumerate(tmp_A[:-1])
+            for t, A_t in enumerate(tmp_A)
         ]
     )
     # save edgelist
     np.savez(out_dir / "citation_links.npz", edge_list=edgelist)
 
     # convert meta to right form
-    age_idx = meta_names.index(age_col_id)
-    region_idx = meta_names.index(region_col_id)
-    age_meta = X[age_idx]  # should be in shape (N,T,1)
-    region_meta = X[region_idx]  # should be one-hot in shape (N,T,num_regions)
-    nz_age = (age_meta != 0) & (~np.isnan(age_meta))
-    nz_region = (region_meta != 0) & (~np.isnan(region_meta))
+    if synth:
+        age_idx = meta_names.index(age_col_id)
+        region_idx = meta_names.index(region_col_id)
+        age_meta = X[age_idx]  # should be in shape (N,T,1)
+        region_meta = X[region_idx]  # should be one-hot in shape (N,T,num_regions)
+        nz_age = (age_meta != 0) & (~np.isnan(age_meta))
+        nz_region = (region_meta != 0) & (~np.isnan(region_meta))
+    else:
+        tpc_idx = meta_names.index(tpc_col_id)
+        tpc_meta = X[tpc_idx]  # should be multi-hot in shape (N,T,num_tpcs)
+        nz_tpcs = (tpc_meta != 0) & (~np.isnan(tpc_meta))
     # pair authors and timestep
-    author_age_data = np.stack(
-        [*nz_age[..., 0].nonzero(), age_meta[nz_age.nonzero()]], axis=1
-    )
-    author_region_data = np.stack(nz_region.nonzero(), axis=1)
-    # convert to dfs and join
-    age_df = pd.DataFrame(
-        author_age_data, columns=["auid_idx", "windowed_year", "career_age"]
-    )
-    region_df = pd.DataFrame(
-        author_region_data, columns=["auid_idx", "windowed_year", "region"]
-    )
-    au_profs_df = age_df.join(
-        region_df.set_index(["auid_idx", "windowed_year"]),
-        on=["auid_idx", "windowed_year"],
-        how="outer",
-    )
-    # save author profiles
-    with open(out_dir / "au_profs.pkl", "wb") as f:
-        pickle.dump(au_profs_df, f)
+    if synth:
+        author_age_data = np.stack(
+            [*nz_age[..., 0].nonzero(), age_meta[nz_age.nonzero()]], axis=1
+        )
+        author_region_data = np.stack(nz_region.nonzero(), axis=1)
+    else:
+        author_tpc_data = np.stack(nz_tpcs.nonzero(), axis=1)
+    # convert to dfs then save
+    if synth:
+        age_df = pd.DataFrame(
+            author_age_data, columns=["auid_idx", "windowed_year", "career_age"]
+        )
+        region_df = pd.DataFrame(
+            author_region_data, columns=["auid_idx", "windowed_year", "region"]
+        )
+        au_profs_df = age_df.join(
+            region_df.set_index(["auid_idx", "windowed_year"]),
+            on=["auid_idx", "windowed_year"],
+            how="outer",
+        )
+        # save author profiles
+        with open(out_dir / "au_profs.pkl", "wb") as f:
+            pickle.dump(au_profs_df, f)
+    else:
+        tpc_df = pd.DataFrame(
+            author_tpc_data, columns=["auid_idx", "windowed_year", "tpc_idx"]
+        )
+        # save author publications
+        with open(out_dir / "au_pubs.pkl", "wb") as f:
+            pickle.dump(tpc_df, f)
 
 
 def extract_meta(nets, meta_names, meta_dims, node_order):
