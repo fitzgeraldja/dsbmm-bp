@@ -123,7 +123,7 @@ def run_hier_model(
         if layer == 0:
             model = em.EM(data, **model_settings)
             fit_model_allow_interrupt(learning_rate, model)
-            tot_Q = np.repeat([model.Q], n_runs).astype(int)
+            tot_Q = np.repeat([model.Q], pred_Z.shape[0]).astype(int)
             if ret_best_only:
                 if h_l is None:
                     pred_Z = model.best_Z
