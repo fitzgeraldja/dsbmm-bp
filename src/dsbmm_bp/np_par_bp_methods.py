@@ -88,7 +88,8 @@ class NumpyBP:
         self.frozen = self.model.frozen
         self.auto_tune = self.model.auto_tune
         self.A = self.model.A
-        self.X = self.model.X
+        if self.use_meta:
+            self.X = self.model.X
         self.Z = self.model.Z
         self._pres_nodes = self.model._pres_nodes
         self._pres_trans = self.model._pres_trans
