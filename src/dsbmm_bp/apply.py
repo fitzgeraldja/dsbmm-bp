@@ -223,7 +223,7 @@ def run_hier_model(
                     logging.info(
                         f"\t At group {no_q+1}/{len(suff_large_q_idxs)} in level {layer}:"
                     )
-                    sub_N = group_cnts[q_idx]
+                    sub_N = group_cnts[no_q]
                     logging.info(f"\t\t Considering {sub_N} nodes...")
 
                     sub_data = subset_data(
