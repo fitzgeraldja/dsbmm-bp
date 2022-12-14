@@ -6,6 +6,7 @@ from csr import CSR
 from numba import bool_, int32, njit, prange
 from numba.typed import List
 from scipy import sparse
+from tqdm import tqdm
 
 
 @njit(parallel=True, cache=True)
