@@ -675,8 +675,20 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
     q_depth = {}
     for q in all_hier_qs:
         for l, qs in enumerate(all_q_at_l):
+            qs = np.array(list(qs), dtype=int)
             if q in qs:
                 q_depth[q] = l
+    for q in all_q:
+        if q not in q_depth.keys():
+            # assume some edge effect, so set depth to max
+            tqdm.write(
+                f"Warning: {q} appears not to be in any group at any level: choosing arbitrary vals where necessary"
+            )
+            q_depth[q] = L - 1
+        if q not in lq_idxs.keys():
+            lq_idxs[q] = 0
+        if q not in n_descs.keys():
+            n_descs[q] = 1.0
     # print(q_depth)
     # print(total_Q)
     # print(all_hier_qs)
