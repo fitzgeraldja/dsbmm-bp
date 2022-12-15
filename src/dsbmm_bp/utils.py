@@ -596,12 +596,16 @@ def max_overlap_over_perms(true_Z, pred_Z):
     return max_ol
 
 
-def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N, h_Q):
+def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N, h_Q, bprobs=False):
     """Construct transition matrix given set of pi inferred
     for each level of a hierarchy, and number of descendant groups
-    at each level. NB same process + code can be used to construct
-    block probs, only difference is 'hier_pis_run' will now
-    actually be hier_block_probs_run, and be (Q,Q,T) instead of (Q,Q)
+    at each level.
+
+    NB same process + code can be used to construct
+    block probs using bprobs = True, key differences
+    are is 'hier_pis_run' will now actually be
+    hier_block_probs_run, and be (Q,Q,T) instead of (Q,Q),
+    and will just use the lowest level block probs inferred
 
     :param hier_pis_run: set of transition matrices -- length L list, with each element
                 either a (Q,Q(,T)) trans (block prob) mat (first element), or a dict with
@@ -616,6 +620,8 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N, h_Q):
     :type h_min_N: int
     :param h_Q: number of groups aimed to be inferred at each level of hierarchy
     :type h_Q: int
+    :param bprobs: whether to construct block probs instead of trans, defaults to False
+    :type bprobs: bool, optional
     """
 
     L = len(hier_pis_run)
@@ -807,7 +813,10 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N, h_Q):
                 "No ancestor relationship found for (%d,%d)" % (q_idx, r_idx)
             )
         if ell == 0:
-            pi[q_idx, r_idx] = hier_pis_run[0][lq_idx, lr_idx] / n_descs[r]
+            if bprobs:
+                pi[q_idx, r_idx] = hier_pis_run[0][lq_idx, lr_idx]
+            else:
+                pi[q_idx, r_idx] = hier_pis_run[0][lq_idx, lr_idx] / n_descs[r]
         else:
             prefac = 1.0
             # 0 is L-1, so ell is L-1-ell
@@ -849,9 +858,12 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N, h_Q):
                 print(n_descs[r])
                 raise ValueError("n_descs[r] < 1")
             try:
-                pi[q_idx, r_idx] = (
-                    prefac * hier_pis_run[ell][u_q][lq_idx, lr_idx]
-                ) / n_descs[r]
+                if bprobs:
+                    pi[q_idx, r_idx] = hier_pis_run[ell][u_q][lq_idx, lr_idx]
+                else:
+                    pi[q_idx, r_idx] = (
+                        prefac * hier_pis_run[ell][u_q][lq_idx, lr_idx]
+                    ) / n_descs[r]
             except KeyError:
                 print(ell, u_q)
                 print(hier_pis_run[ell][u_q])

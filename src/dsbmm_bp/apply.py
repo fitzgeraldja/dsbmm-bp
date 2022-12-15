@@ -288,6 +288,7 @@ def run_hier_model(
                             pred_Z[run_idx, : layer + 1, ...],
                             h_min_N,
                             h_Q,
+                            bprobs=True,
                         )
 
                     logging.info(
