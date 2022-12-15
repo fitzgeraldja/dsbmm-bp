@@ -596,7 +596,7 @@ def max_overlap_over_perms(true_Z, pred_Z):
     return max_ol
 
 
-def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
+def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N, h_Q):
     """Construct transition matrix given set of pi inferred
     for each level of a hierarchy, and number of descendant groups
     at each level. NB same process + code can be used to construct
@@ -614,15 +614,17 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
     :type pred_ZL: np.ndarray
     :param h_min_N: minimum number of nodes in a group at each level of hierarchy
     :type h_min_N: int
+    :param h_Q: number of groups aimed to be inferred at each level of hierarchy
+    :type h_Q: int
     """
 
     L = len(hier_pis_run)
-    topdown_hier, small_qs = get_hier(pred_ZL, h_min_N)
+    topdown_hier, small_qs = get_hier(pred_ZL, h_min_N, h_Q)
     # print(topdown_hier, small_qs)
     all_q = np.unique(pred_ZL[-1, ...][pred_ZL[-1, ...] != -1])
     all_q = np.concatenate([all_q, list(small_qs)]).astype(int)
     all_q.sort()
-    h_Q = len(topdown_hier[0].keys())
+    # h_Q = len(topdown_hier[0].keys())
     # print(topdown_hier)
     all_q_at_l = [set(topdown_hier[0].keys())] + [
         set(chain.from_iterable(topdown_hier[l].values())) for l in range(L - 1)
@@ -876,7 +878,7 @@ def construct_hier_trans(hier_pis_run, pred_ZL, h_min_N):
     return pi, all_q
 
 
-def get_hier(pred_ZL, h_min_N):
+def get_hier(pred_ZL, h_min_N, h_Q):
     """Given predicted group labels at each level of hierarchy, return
     hierarchy as list of dicts length L-1, where for each element, keys
     are labels at that level of hierarchy, value are array containing
@@ -888,7 +890,7 @@ def get_hier(pred_ZL, h_min_N):
     """
     Z_1 = pred_ZL[0, ...]
     L = pred_ZL.shape[0]
-    h_Q = len(np.unique(Z_1[Z_1 != -1]))
+    # h_Q = len(np.unique(Z_1[Z_1 != -1]))
     # NB use
     # q_shift = h_Q*(n_suff_large + no_q) + n_small
     # at each level, and n_small will belong to whatever level they

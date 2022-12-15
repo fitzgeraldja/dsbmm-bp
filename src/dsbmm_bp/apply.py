@@ -276,6 +276,7 @@ def run_hier_model(
                             hier_pis[run_idx],
                             pred_Z[run_idx, : layer + 1, ...],
                             h_min_N,
+                            h_Q,
                         )
                     if ret_block_probs:
                         bp_lq[q] = model.block_prob
@@ -286,6 +287,7 @@ def run_hier_model(
                             hier_bps[run_idx],
                             pred_Z[run_idx, : layer + 1, ...],
                             h_min_N,
+                            h_Q,
                         )
 
                     logging.info(
