@@ -90,7 +90,7 @@ def load_data(data_dir, edge_weight_choice=None, test_conn=False):
         tqdm.write("No choice passed for edge weights -- will assume binary edges")
     tqdm.write("")
     try:
-        with open(datadir / "node_order.pkl", "rb") as f:
+        with open(data_dir / "node_order.pkl", "rb") as f:
             node_order = pickle.load(f)
         alt_order = list(
             reduce(lambda res, x: set(res) | set(x), [list(net.nodes) for net in nets])  # type: ignore
@@ -103,7 +103,7 @@ def load_data(data_dir, edge_weight_choice=None, test_conn=False):
         node_order = list(
             reduce(lambda res, x: set(res) | set(x), [list(net.nodes) for net in nets])  # type: ignore
         )
-        with open(datadir / "node_order.pkl", "wb") as f:
+        with open(data_dir / "node_order.pkl", "wb") as f:
             pickle.dump(node_order, f)
     # add in missing nodes at each timestep so matrices not changing size - won't drastically increase memory reqs as using sparse
     # mats
